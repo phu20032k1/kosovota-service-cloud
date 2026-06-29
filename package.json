@@ -1,0 +1,63 @@
+{
+  "name": "kosovota-service-cloud",
+  "version": "3.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "db:generate": "prisma generate --schema prisma/schema.prisma",
+    "db:push": "prisma db push --schema prisma/schema.prisma",
+    "db:baseline": "prisma migrate resolve --applied 20260624000000_postgresql_baseline --schema prisma/schema.prisma",
+    "db:migrate": "prisma migrate deploy --schema prisma/schema.prisma",
+    "db:seed": "prisma db seed",
+    "db:studio": "prisma studio",
+    "setup": "npm run db:generate && npm run db:push",
+    "verify": "npm run db:generate && npm run typecheck && npm run lint && npm run build",
+    "test:db": "tsx scripts/test-database.ts",
+    "test:r2": "tsx scripts/test-r2.ts",
+    "notifications:process": "tsx scripts/process-notifications.ts",
+    "check:production": "node scripts/check-production-env.mjs",
+    "db:generate:local": "prisma generate --schema prisma/schema.prisma",
+    "db:migrate:local": "prisma db push --schema prisma/schema.prisma",
+    "db:generate:prod": "prisma generate --schema prisma/schema.prisma",
+    "db:push:prod": "prisma db push --schema prisma/schema.prisma",
+    "test:map": "tsx scripts/test-map.ts",
+    "test:sms": "tsx scripts/test-notification.ts SMS",
+    "test:zalo": "tsx scripts/test-notification.ts ZALO",
+    "vercel-build": "prisma generate && next build"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
+  },
+  "dependencies": {
+    "@prisma/client": "6.9.0",
+    "dotenv": "17.2.3",
+    "html5-qrcode": "^2.3.8",
+    "leaflet": "^1.9.4",
+    "next": "^16.2.9",
+    "prisma": "6.9.0",
+    "qrcode": "^1.5.4",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "react-leaflet": "^5.0.0",
+    "read-excel-file": "^9.2.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "4.1.8",
+    "@types/node": "22.15.29",
+    "@types/qrcode": "^1.5.6",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "eslint": "^9.39.4",
+    "eslint-config-next": "^16.2.9",
+    "tailwindcss": "4.1.8",
+    "tsx": "^4.22.4",
+    "typescript": "5.8.3"
+  },
+  "overrides": {
+    "postcss": "8.5.15"
+  }
+}

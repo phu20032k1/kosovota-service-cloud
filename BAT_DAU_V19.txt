@@ -1,0 +1,11 @@
+KOSOVOTA V19 - BAT DAU O DAY
+
+1. Mo file HUONG_DAN_QR_MAP_SMS_ZALO_V19.md
+2. Chay:
+   npm install
+   npx prisma generate
+   npm run dev
+3. Test QR: http://localhost:3000/scan
+4. Dang nhap Admin -> Tich hop
+5. Lam theo thu tu: QR -> MapTiler -> eSMS -> Zalo
+6. AI va Deploy de cuoi theo yeu cau.

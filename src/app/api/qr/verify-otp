@@ -1,0 +1,16 @@
+export async function POST(req: Request) {
+  const { phone, otp } = await req.json();
+
+  // tạm check giả lập
+  if (otp !== "123456") {
+    return Response.json({
+      success: false,
+      message: "OTP sai",
+    });
+  }
+
+  return Response.json({
+    success: true,
+    message: "Xác thực thành công",
+  });
+}

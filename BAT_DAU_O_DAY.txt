@@ -1,0 +1,31 @@
+KOSOVOTA - BẮT ĐẦU Ở ĐÂY
+=========================
+
+Cậu đã có Neon và Cloudflare R2. Làm đúng 4 bước sau:
+
+1. Giải nén dự án và mở thư mục có package.json bằng VS Code.
+2. Mở .env và điền duy nhất phần còn thiếu:
+   R2_PUBLIC_BASE_URL="https://..."
+   Đây là Public Development URL hoặc custom domain của bucket R2.
+3. Nhấp chuột phải CHAY_LOCAL_WINDOWS.ps1 -> Run with PowerShell.
+4. Khi website chạy, mở:
+   http://localhost:3000/login
+   http://localhost:3000/api/health
+
+Sau khi đăng nhập:
+- Super Admin: tạo ADMIN, CSKH, DEALER, KTV tại /super-admin.
+- Admin: mở mục Tài khoản để tạo CSKH, DEALER, KTV.
+- Đại lý: mở mục Đội ngũ để tạo KTV.
+
+Lệnh kiểm tra riêng:
+- npm run test:db      Kiểm tra Neon.
+- npm run test:r2      Upload ảnh 1 pixel để kiểm tra R2.
+- npm run lint         Kiểm tra code.
+- npm run typecheck    Kiểm tra TypeScript.
+- npm run build        Kiểm tra build production.
+
+QUAN TRỌNG:
+- Không gửi file .env cho người khác.
+- Khi chạy thật phải xóa OTP_FIXED_CODE, đặt OTP_DEBUG=false.
+- Chưa có R2_PUBLIC_BASE_URL thì STORAGE_PROVIDER phải để local, nếu không upload sẽ lỗi.
+- Migrations SQLite cũ đã được chuyển vào prisma/migrations-sqlite-legacy.

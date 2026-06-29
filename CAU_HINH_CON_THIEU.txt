@@ -1,0 +1,36 @@
+KẾT QUẢ KIỂM TRA FILE .env
+==========================
+
+Đã có:
+- DATABASE_URL Neon PostgreSQL
+- R2_ACCOUNT_ID
+- R2_ACCESS_KEY_ID
+- R2_SECRET_ACCESS_KEY
+- R2_BUCKET
+- SESSION_SECRET
+- OTP_SECRET
+- CRON_SECRET
+- NEXT_PUBLIC_APP_URL local
+
+Còn thiếu:
+- R2_PUBLIC_BASE_URL
+
+Vì thiếu URL công khai của bucket, bản sửa giữ STORAGE_PROVIDER="local" để website không bị lỗi upload.
+
+Cách lấy:
+Cloudflare Dashboard -> R2 -> chọn bucket -> Settings -> Public access
+-> bật Public Development URL hoặc gắn Custom Domain
+-> sao chép URL https://... vào:
+
+R2_PUBLIC_BASE_URL="https://..."
+STORAGE_PROVIDER="r2"
+
+Sau đó chạy:
+npm run test:r2
+
+V19 - QR / MAP / SMS / ZALO
+- QR không cần API. Mở http://localhost:3000/scan để test camera.
+- Map mặc định OSM không cần tài khoản. Muốn đổi địa chỉ thành tọa độ thì điền MapTiler hoặc Google key.
+- SMS cần ESMS_API_KEY, ESMS_SECRET_KEY, ESMS_BRANDNAME.
+- Zalo cần OA + ZBS Account + Zalo App + Access Token + Template ID.
+- Hướng dẫn đầy đủ: HUONG_DAN_QR_MAP_SMS_ZALO_V19.md

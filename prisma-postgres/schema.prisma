@@ -1,0 +1,501 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String   @id @default(cuid())
+  phone         String   @unique
+  password      String
+  name          String
+  role          String // SUPER_ADMIN, ADMIN, CSKH, DEALER, KTV
+  dealerCode    String?
+  provinceScope String?
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @default(now()) @updatedAt
+
+  managedCustomers Customer[] @relation("CustomerOwner")
+  assignedTickets  SupportTicket[] @relation("TicketAssignee")
+  assignedServiceOrders ServiceOrder[] @relation("TechnicianOrders")
+
+  @@index([role, active])
+  @@index([dealerCode])
+}
+
+model Customer {
+  id        String    @id @default(cuid())
+  name      String
+  phone     String    @unique
+  address   String?
+
+  notifyChannels String?
+  callFrom       String?
+  callTo         String?
+  segment        String?   @default("STANDARD")
+  tags           String?
+  satisfaction   Int?
+  birthday       DateTime?
+  lastContactAt  DateTime?
+  nextContactAt  DateTime?
+  ownerId        String?
+  owner          User?     @relation("CustomerOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+
+  machines   Machine[]
+  activities CustomerActivity[]
+  tickets    SupportTicket[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @default(now()) @updatedAt
+}
+
+model Dealer {
+  id              String         @id @default(cuid())
+  dealerCode      String         @unique
+  name            String
+  phone           String
+  province        String?
+  address         String?
+  lat             Float?
+  lng             Float?
+  services        String?
+  technicianCount Int?
+
+  representativeName String?
+  registrationType   String?
+  companyName        String?
+  birthDate          DateTime?
+  locationType       String?
+  serviceArea        String?
+  taxCode            String?
+  citizenId          String?
+  bankAccount        String?
+  accountHolder      String?
+  bankName           String?
+  portraitPhoto      String?
+  storePhoto         String?
+  warehousePhoto     String?
+  videoName          String?
+  rating             Float?   @default(5)
+
+  status        String         @default("PENDING")
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @default(now()) @updatedAt
+  serviceOrders ServiceOrder[]
+  warehouse     Warehouse?
+  paymentBatches PaymentBatch[]
+  supportTickets SupportTicket[]
+
+  @@index([status, province])
+  @@index([phone])
+}
+
+model Machine {
+  id              String    @id
+  model           String
+  serial          String?   @unique
+  provinceCode    String?
+  status          String    @default("NEW")
+  manufactureDate DateTime?
+  installDate     DateTime?
+
+  customerId String?
+  customer   Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  lat           Float?
+  lng           Float?
+  buildingPhoto String?
+  machinePhoto  String?
+  sharedPhones  String?
+
+  activations          Activation[]
+  serviceOrders        ServiceOrder[]
+  serviceReports       ServiceReport[]
+  maintenanceSchedules MaintenanceSchedule[]
+  sosTickets           SosTicket[]
+  supportTickets       SupportTicket[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+
+  @@index([customerId])
+  @@index([status])
+  @@index([provinceCode])
+}
+
+model Activation {
+  id        String  @id @default(cuid())
+  machineId String
+  machine   Machine @relation(fields: [machineId], references: [id], onDelete: Cascade)
+
+  step           Int
+  installerName  String?
+  installerPhone String?
+  dealerCode     String?
+  ownerName      String?
+  ownerPhone     String?
+  note           String?
+
+  bankAccount String?
+  bankOwner   String?
+  bankName    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+
+  @@unique([machineId, step])
+  @@index([machineId])
+  @@index([dealerCode])
+}
+
+model ServiceOrder {
+  id        String  @id @default(cuid())
+  orderCode String  @unique
+  machineId String
+  machine   Machine @relation(fields: [machineId], references: [id])
+
+  dealerId String?
+  dealer   Dealer? @relation(fields: [dealerId], references: [id])
+
+  technicianId String?
+  technician   User? @relation("TechnicianOrders", fields: [technicianId], references: [id], onDelete: SetNull)
+
+  maintenanceScheduleId String?              @unique
+  maintenanceSchedule   MaintenanceSchedule? @relation(fields: [maintenanceScheduleId], references: [id], onDelete: SetNull)
+
+  customerName  String
+  customerPhone String
+  address       String?
+  serviceType   String
+  status        String    @default("NEW")
+
+  rejectReason String?
+  rejectedAt   DateTime?
+
+  dueDate       DateTime?
+  serviceFee    Int?
+  paymentStatus String    @default("PENDING")
+  createdAt     DateTime  @default(now())
+  updatedAt DateTime  @default(now()) @updatedAt
+
+  reports ServiceReport[]
+  stockMovements StockMovement[]
+  paymentLine PaymentLine?
+
+  @@index([machineId])
+  @@index([dealerId])
+  @@index([technicianId])
+  @@index([status, dueDate])
+}
+
+model ServiceReport {
+  id String @id @default(cuid())
+
+  machineId String
+  machine   Machine @relation(fields: [machineId], references: [id])
+
+  orderId String?
+  order   ServiceOrder? @relation(fields: [orderId], references: [id])
+
+  dealerCode   String?
+  serviceType  String
+  products     String?
+  oldCorePhoto String?
+  newCorePhoto String?
+  finalPhoto   String?
+  signature    String?
+  note         String?
+  createdAt    DateTime @default(now())
+
+  @@index([machineId])
+  @@index([orderId])
+}
+
+model MaintenanceSchedule {
+  id        String  @id @default(cuid())
+  machineId String
+  machine   Machine @relation(fields: [machineId], references: [id], onDelete: Cascade)
+
+  title   String
+  dueDate DateTime
+  status  String   @default("PENDING")
+
+  serviceOrder ServiceOrder?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+
+  @@index([machineId])
+  @@index([dueDate, status])
+}
+
+model Notification {
+  id                String    @id @default(cuid())
+  phone             String
+  channel           String // ZALO, SMS, EMAIL
+  kind              String?   // OTP, SERVICE_ORDER, MAINTENANCE, GENERAL
+  content           String
+  payload           String?   // JSON metadata/template params
+  status            String    @default("PENDING")
+  attempts          Int       @default(0)
+  maxAttempts       Int       @default(5)
+  providerMessageId String?
+  error             String?
+  sentAt            DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @default(now()) @updatedAt
+
+  @@index([phone, status])
+  @@index([status, createdAt])
+}
+
+model AdminLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  action    String
+  target    String?
+  detail    String?
+  ipAddress String?
+  userAgent String?
+  requestId String?
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+}
+
+model SosTicket {
+  id            String   @id @default(cuid())
+  machineId     String
+  customerName  String
+  customerPhone String
+  address       String?
+  note          String?
+  status        String   @default("NEW")
+  priority      String   @default("HIGH")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  machine Machine @relation(fields: [machineId], references: [id])
+
+  @@index([status, priority, createdAt])
+}
+
+model OtpCode {
+  id         String    @id @default(cuid())
+  phone      String
+  purpose    String
+  codeHash   String
+  attempts   Int       @default(0)
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([phone, purpose, createdAt])
+  @@index([expiresAt])
+}
+
+model IdSequence {
+  key       String   @id
+  value     Int      @default(0)
+  updatedAt DateTime @updatedAt
+}
+
+model SalesLead {
+  id          String   @id @default(cuid())
+  productSlug String?
+  fullName    String
+  phone       String
+  province    String?
+  note        String?
+  status      String   @default("NEW")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @default(now()) @updatedAt
+
+  @@index([status, createdAt])
+  @@index([phone])
+}
+
+
+model InventoryItem {
+  id          String   @id @default(cuid())
+  sku         String   @unique
+  name        String
+  category    String
+  unit        String   @default("cái")
+  minStock    Int      @default(0)
+  costPrice   Int      @default(0)
+  salePrice   Int      @default(0)
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @default(now()) @updatedAt
+
+  balances  StockBalance[]
+  movements StockMovement[]
+
+  @@index([category, active])
+}
+
+model Warehouse {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  name      String
+  type      String   @default("CENTRAL")
+  dealerId  String?  @unique
+  dealer    Dealer?  @relation(fields: [dealerId], references: [id], onDelete: SetNull)
+  province  String?
+  address   String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+
+  balances         StockBalance[]
+  outgoingMovements StockMovement[] @relation("MovementFromWarehouse")
+  incomingMovements StockMovement[] @relation("MovementToWarehouse")
+
+  @@index([type, active])
+}
+
+model StockBalance {
+  id          String   @id @default(cuid())
+  warehouseId String
+  warehouse   Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  itemId      String
+  item        InventoryItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  quantity    Int      @default(0)
+  reserved    Int      @default(0)
+  updatedAt   DateTime @default(now()) @updatedAt
+
+  @@unique([warehouseId, itemId])
+  @@index([itemId, quantity])
+}
+
+model StockMovement {
+  id              String   @id @default(cuid())
+  movementCode    String   @unique
+  type            String
+  itemId          String
+  item            InventoryItem @relation(fields: [itemId], references: [id])
+  fromWarehouseId String?
+  fromWarehouse   Warehouse? @relation("MovementFromWarehouse", fields: [fromWarehouseId], references: [id], onDelete: SetNull)
+  toWarehouseId   String?
+  toWarehouse     Warehouse? @relation("MovementToWarehouse", fields: [toWarehouseId], references: [id], onDelete: SetNull)
+  serviceOrderId  String?
+  serviceOrder    ServiceOrder? @relation(fields: [serviceOrderId], references: [id], onDelete: SetNull)
+  quantity        Int
+  unitCost        Int      @default(0)
+  note            String?
+  createdById     String?
+  createdAt       DateTime @default(now())
+
+  @@index([itemId, createdAt])
+  @@index([serviceOrderId])
+  @@index([fromWarehouseId, createdAt])
+  @@index([toWarehouseId, createdAt])
+}
+
+model PaymentBatch {
+  id            String   @id @default(cuid())
+  batchCode     String   @unique
+  dealerId      String
+  dealer        Dealer   @relation(fields: [dealerId], references: [id])
+  periodStart   DateTime
+  periodEnd     DateTime
+  status        String   @default("DRAFT")
+  grossAmount   Int      @default(0)
+  deductions    Int      @default(0)
+  netAmount     Int      @default(0)
+  bankReference String?
+  note          String?
+  approvedAt    DateTime?
+  paidAt        DateTime?
+  createdById   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @default(now()) @updatedAt
+
+  lines PaymentLine[]
+
+  @@index([dealerId, status])
+  @@index([periodStart, periodEnd])
+}
+
+model PaymentLine {
+  id             String   @id @default(cuid())
+  batchId        String
+  batch          PaymentBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  serviceOrderId String   @unique
+  serviceOrder   ServiceOrder @relation(fields: [serviceOrderId], references: [id])
+  serviceAmount  Int      @default(0)
+  materialAmount Int      @default(0)
+  bonusAmount    Int      @default(0)
+  deductionAmount Int     @default(0)
+  totalAmount    Int      @default(0)
+  createdAt      DateTime @default(now())
+
+  @@index([batchId])
+}
+
+model SupportTicket {
+  id            String   @id @default(cuid())
+  ticketCode    String   @unique
+  type          String   @default("WARRANTY")
+  source        String   @default("STAFF")
+  subject       String
+  description   String?
+  status        String   @default("NEW")
+  priority      String   @default("NORMAL")
+  customerId    String?
+  customer      Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  machineId     String?
+  machine       Machine? @relation(fields: [machineId], references: [id], onDelete: SetNull)
+  dealerId      String?
+  dealer        Dealer? @relation(fields: [dealerId], references: [id], onDelete: SetNull)
+  assigneeId    String?
+  assignee      User? @relation("TicketAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  contactName   String
+  contactPhone  String
+  dueAt         DateTime?
+  resolvedAt    DateTime?
+  satisfaction  Int?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @default(now()) @updatedAt
+
+  messages TicketMessage[]
+
+  @@index([status, priority, createdAt])
+  @@index([customerId])
+  @@index([machineId])
+  @@index([dealerId])
+  @@index([assigneeId, status])
+}
+
+model TicketMessage {
+  id         String   @id @default(cuid())
+  ticketId   String
+  ticket     SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  authorId   String?
+  authorName String
+  message    String
+  attachment String?
+  isInternal Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  @@index([ticketId, createdAt])
+}
+
+model CustomerActivity {
+  id         String   @id @default(cuid())
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  type       String
+  summary    String
+  detail     String?
+  userId     String?
+  occurredAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+
+  @@index([customerId, occurredAt])
+  @@index([type, occurredAt])
+}
