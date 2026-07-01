@@ -87,17 +87,37 @@ function integerFromText(text: string) {
 }
 
 function machineInfo(row: Record<string, unknown>) {
-  const spec = value(row, "Tên máy", "Ten may", "Thông tin máy", "Thong tin may");
-  const serial = value(row, "Seri cần in", "Seri", "Số Seri", "Serial") || specValue(spec, "Số seri máy");
-  const model = value(row, "Model", "Dòng máy", "Mã số") || specValue(spec, "Mã số") || serial.split(".").slice(0, 2).join(".");
-  const machineName = specValue(spec, "Tên máy") || value(row, "Tên sản phẩm", "Tên thiết bị") || model;
+  const rawSpec = value(row, "Tên máy", "Ten may", "Thông tin máy", "Thong tin may");
+  const serial = value(row, "Seri cần in", "Seri", "Số Seri", "Serial") || specValue(rawSpec, "Số seri máy");
+  const model = value(row, "Model", "Dòng máy", "Mã số") || specValue(rawSpec, "Mã số") || serial.split(".").slice(0, 2).join(".");
+  const machineName = specValue(rawSpec, "Tên máy") || value(row, "Tên máy", "Ten may", "Tên sản phẩm", "Tên thiết bị") || model;
   const capacity = value(row, "Công suất", "Dung tích", "Dung tích chứa")
-    || specValue(spec, "Công suất")
-    || specValue(spec, "Dung tích chứa")
-    || specValue(spec, "Dung tích");
-  const warrantyText = value(row, "Bảo hành", "Thời gian bảo hành") || specValue(spec, "Bảo hành");
+    || specValue(rawSpec, "Công suất")
+    || specValue(rawSpec, "Dung tích chứa")
+    || specValue(rawSpec, "Dung tích");
+  const warrantyText = value(row, "Bảo hành", "Thời gian bảo hành") || specValue(rawSpec, "Bảo hành");
   const warrantyMonths = integerFromText(warrantyText);
-  const manufactureDate = parseManufactureDate(row, spec);
+  const manufactureDate = parseManufactureDate(row, rawSpec);
+  const lines = new Map<string, string>();
+  String(rawSpec || "").split(/\r?\n/).forEach((line) => {
+    const [label, ...rest] = line.split(":");
+    const text = rest.join(":").trim();
+    if (label.trim() && text) lines.set(label.trim(), text);
+  });
+  const extraLabels = [
+    "Tên máy", "Mã số", "Công suất", "Số seri máy", "Công nghệ", "Công suất bơm",
+    "Điện áp & tần số", "Áp suất làm việc", "Kích thước", "Trọng lượng",
+    "Chất lượng nước thành phẩm", "Bảo hành", "Năm sản xuất",
+  ];
+  extraLabels.forEach((label) => {
+    const explicit = value(row, label);
+    if (explicit && !lines.has(label)) lines.set(label, explicit);
+  });
+  if (serial && !lines.has("Số seri máy")) lines.set("Số seri máy", serial);
+  if (model && !lines.has("Mã số")) lines.set("Mã số", model);
+  if (capacity && !lines.has("Công suất")) lines.set("Công suất", capacity);
+  if (warrantyText && !lines.has("Bảo hành")) lines.set("Bảo hành", warrantyText);
+  const spec = Array.from(lines.entries()).map(([label, text]) => `${label}: ${text}`).join("\n") || rawSpec;
   return {
     spec,
     serial: serial.toUpperCase(),

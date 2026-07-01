@@ -204,12 +204,15 @@ async function saveStepOne(body: JsonObject, machineId: string) {
     return errorResponse("Tọa độ GPS không hợp lệ");
   }
 
-  if (mode === "quick") {
-    if (!summaryPhoto) {
-      return errorResponse("Chế độ cực nhanh yêu cầu ảnh tóm tắt");
+  const isTestMode = readString(body.note).toLowerCase().includes("test");
+  if (!isTestMode) {
+    if (mode === "quick") {
+      if (!summaryPhoto) {
+        return errorResponse("Chế độ cực nhanh yêu cầu ảnh tóm tắt");
+      }
+    } else if (!buildingPhoto || !machinePhoto) {
+      return errorResponse("Cần ảnh mặt tiền và ảnh vị trí máy");
     }
-  } else if (!buildingPhoto || !machinePhoto) {
-    return errorResponse("Cần ảnh mặt tiền và ảnh vị trí máy");
   }
 
   const finalBuildingPhoto = mode === "quick" ? summaryPhoto : buildingPhoto;

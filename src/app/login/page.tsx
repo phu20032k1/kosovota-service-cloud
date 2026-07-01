@@ -47,11 +47,21 @@ function LoginPageContent() {
   }, [error]);
 
   useEffect(() => {
+    let cancelled = false;
     fetch("/api/auth/me", { cache: "no-store" })
       .then(async (response) => ({ response, result: await response.json() }))
-      .then(({ response, result }) => { if (response.ok && result.success) setCurrentUser(result.user); })
+      .then(({ response, result }) => {
+        if (cancelled) return;
+        if (response.ok && result.success) {
+          const user = result.user as CurrentUser;
+          setCurrentUser(user);
+          router.replace(homeForRole(user.role));
+          router.refresh();
+        }
+      })
       .catch(() => undefined);
-  }, []);
+    return () => { cancelled = true; };
+  }, [router]);
 
   async function logoutCurrent() {
     await fetch("/api/auth/logout", { method: "POST" });

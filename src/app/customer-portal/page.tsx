@@ -1,11 +1,11 @@
 "use client";
 
-import Link from "next/link";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { PortalHeader } from "@/components/ui/PortalHeader";
 import { Brand } from "@/components/ui/Brand";
 import { Icon } from "@/components/ui/Icon";
 import { Notice } from "@/components/ui/Notice";
+import { SmartBackButton } from "@/components/ui/SmartBackButton";
 
 type Schedule = { id: string; title: string; dueDate: string; status: string };
 type Report = {
@@ -271,7 +271,7 @@ export default function CustomerPortalPage() {
               <button type="button" onClick={() => setAuthStep("phone")} className="w-full text-sm font-bold text-slate-500">Đổi số điện thoại</button>
             </form>
           )}
-          <Link href="/" className="mt-6 block text-center text-sm font-bold text-slate-500 hover:text-emerald-700">← Về trang sản phẩm</Link>
+          <div className="mt-6 text-center"><SmartBackButton className="text-sm font-bold text-slate-500 hover:text-emerald-700" fallbackHref="/login" /></div>
         </section>
       </main>
     );

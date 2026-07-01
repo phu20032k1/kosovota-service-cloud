@@ -1,11 +1,11 @@
 "use client";
 
-import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Brand } from "@/components/ui/Brand";
 import { Icon } from "@/components/ui/Icon";
 import { Notice } from "@/components/ui/Notice";
+import { SmartBackButton } from "@/components/ui/SmartBackButton";
 import { extractMachineIdFromQr } from "@/lib/qr";
 
 type ScannerInstance = { clear: () => Promise<void> };
@@ -34,7 +34,7 @@ export default function ScanQrPage() {
   setMessage(`Đã nhận mã ${machineId}. Đang kích hoạt...`);
 
   try {
-    await fetch("/api/machine/activate", {
+    await fetch("/api/machines/activate", {
       method: "POST",
       body: JSON.stringify({
         machineId,
@@ -94,7 +94,7 @@ export default function ScanQrPage() {
       <header className="surface-card p-6 sm:p-8">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div><Brand size="lg"/><p className="eyebrow mt-6">Quét thiết bị</p><h1 className="mt-2 text-3xl font-black">Quét QR KOSOVOTA</h1><p className="mt-3 max-w-xl text-sm leading-7 text-slate-600">Camera chỉ hoạt động trên <strong>localhost</strong> hoặc website có <strong>HTTPS</strong>. Hãy bấm Cho phép khi trình duyệt hỏi quyền camera.</p></div>
-          <Link href="/" className="btn-secondary"><Icon name="home" size={18}/> Trang chủ</Link>
+          <SmartBackButton className="btn-secondary" />
         </div>
       </header>
 

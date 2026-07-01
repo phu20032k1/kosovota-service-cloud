@@ -5,9 +5,9 @@ import {
   FormEvent,
   useState,
 } from "react";
-import Link from "next/link";
 import { Brand } from "@/components/ui/Brand";
 import { Icon } from "@/components/ui/Icon";
+import { SmartBackButton } from "@/components/ui/SmartBackButton";
 
 type RegistrationType = "dealer" | "collaborator";
 
@@ -338,12 +338,10 @@ async function handleSubmit(
             1–2 ngày để kích hoạt.
           </p>
 
-          <Link
-            href="/"
-            className="mt-7 block rounded-xl bg-green-600 px-5 py-4 font-bold text-white hover:bg-green-700"
-          >
-            VỀ TRANG SẢN PHẨM
-          </Link>
+          <SmartBackButton
+            label="Quay lại"
+            className="mt-7 w-full justify-center rounded-xl bg-green-600 px-5 py-4 font-bold text-white hover:bg-green-700"
+          />
         </section>
       </main>
     );
@@ -807,12 +805,9 @@ async function handleSubmit(
           ĐĂNG KÝ
         </button>
 
-        <Link
-          href="/"
-          className="block text-center text-sm font-semibold text-slate-500 underline"
-        >
-          Về trang sản phẩm
-        </Link>
+        <div className="text-center">
+          <SmartBackButton className="text-sm font-semibold text-slate-500 underline" />
+        </div>
       </form>
     </main>
   );

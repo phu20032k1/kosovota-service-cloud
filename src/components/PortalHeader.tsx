@@ -1,7 +1,7 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { SmartBackButton } from "@/components/ui/SmartBackButton";
 import { useState } from "react";
 
 export function PortalHeader({
@@ -36,7 +36,7 @@ export function PortalHeader({
           {subtitle && <p className="mt-0.5 truncate text-xs text-slate-500 sm:text-sm">{subtitle}</p>}
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <Link href="/" className="hidden rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50 sm:inline-flex">Trang chủ</Link>
+          <SmartBackButton className="hidden rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50 sm:inline-flex" fallbackHref="/login" />
           <button
             type="button"
             onClick={logout}

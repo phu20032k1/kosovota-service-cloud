@@ -145,6 +145,7 @@ export default function AgentPortalPage() {
   return (
     <main className="min-h-screen bg-slate-100">
       <PortalHeader title="Cổng thông tin đại lý" subtitle={dealer ? `${dealer.dealerCode} · ${dealer.name}` : "Tài khoản chưa liên kết hồ sơ đại lý"} homeHref="/agent-portal" homeLabel="Lệnh dịch vụ" onLogout={() => fetch("/api/auth/logout", { method: "POST" }).then(() => location.assign("/login"))}>
+        <Link href="/scan" className="btn-primary px-4 py-2 font-bold text-white"><Icon name="qr" size={16}/>Quét QR / Kích hoạt máy</Link>
         <Link href="/agent-portal/team" className="btn-secondary"><Icon name="users" size={16}/>Đội KTV</Link>
         <Link href="/agent-portal/inventory" className="btn-secondary"><Icon name="package" size={16}/>Kho vật tư</Link>
         <Link href="/agent-portal/payments" className="btn-secondary"><Icon name="wallet" size={16}/>Đối soát</Link>
@@ -152,6 +153,16 @@ export default function AgentPortalPage() {
 
       <div className="mx-auto max-w-7xl space-y-6 p-4 sm:p-6">
         {message && <Notice kind="success">{message}</Notice>}
+        <section className="surface-card border-2 border-emerald-100 bg-emerald-50/60 p-5">
+          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div>
+              <p className="text-xs font-black uppercase tracking-[0.18em] text-emerald-700">Nhập dữ liệu máy mới</p>
+              <h2 className="mt-1 text-xl font-black text-slate-950">Quét QR để kích hoạt máy mới</h2>
+              <p className="mt-1 text-sm leading-6 text-slate-600">Dùng khi đại lý nhập thông tin khách hàng, địa chỉ, GPS, ảnh lắp đặt và hoàn tất kích hoạt máy.</p>
+            </div>
+            <Link href="/scan" className="btn-primary shrink-0 px-5 py-3 font-black text-white"><Icon name="qr" size={18}/>Quét QR / Nhập mã máy</Link>
+          </div>
+        </section>
         <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <MetricCard label="Lệnh mới" value={stats.assigned} icon="bell" tone="amber" />
           <MetricCard label="Đang xử lý" value={stats.processing} icon="wrench" tone="blue" />

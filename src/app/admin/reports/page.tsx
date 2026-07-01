@@ -3,13 +3,15 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import ImportMachinesButton from "@/components/ImportMachinesButton";
+import ImportDealersButton from "@/components/ImportDealersButton";
 import { OperationsHeader } from "@/components/ui/OperationsHeader";
 import { MetricCard } from "@/components/ui/MetricCard";
 import { Icon } from "@/components/ui/Icon";
 import { Notice } from "@/components/ui/Notice";
+import { downloadXlsx } from "@/lib/client-xlsx";
 
-type Machine = { id: string; model: string; name?: string | null; capacity?: string | null; warrantyMonths?: number | null; serial?: string | null; provinceCode?: string | null; status: string; installDate?: string | null; customer?: { name: string; phone: string; address?: string | null } | null; maintenanceSchedules: { dueDate: string; status: string; title: string }[] };
-type Dealer = { dealerCode: string; name: string; representativeName?: string | null; phone: string; province?: string | null; services?: string | null; status: string; createdAt: string };
+type Machine = { id: string; model: string; name?: string | null; capacity?: string | null; specification?: string | null; warrantyMonths?: number | null; serial?: string | null; provinceCode?: string | null; status: string; manufactureDate?: string | null; installDate?: string | null; lat?: number | null; lng?: number | null; buildingPhoto?: string | null; machinePhoto?: string | null; customer?: { name: string; phone: string; address?: string | null } | null; maintenanceSchedules: { dueDate: string; status: string; title: string }[] };
+type Dealer = { dealerCode: string; name: string; representativeName?: string | null; phone: string; province?: string | null; address?: string | null; lat?: number | null; lng?: number | null; services?: string | null; status: string; technicianCount?: number | null; serviceArea?: string | null; taxCode?: string | null; citizenId?: string | null; bankAccount?: string | null; accountHolder?: string | null; bankName?: string | null; createdAt: string };
 type Order = { id: string; orderCode: string; serviceType: string; status: string; dueDate?: string | null; serviceFee?: number | null; paymentStatus?: string; customerName: string; customerPhone: string; dealer?: { dealerCode: string; name: string } | null; machine: { id: string } };
 type Sos = { id: string; machineId: string; customerName: string; customerPhone: string; status: string; priority: string; createdAt: string };
 type Lead = { id: string; fullName: string; phone: string; productSlug?: string | null; province?: string | null; note?: string | null; status: string; createdAt: string };
@@ -17,12 +19,19 @@ type ReportData = { machines: Machine[]; dealers: Dealer[]; orders: Order[]; rep
 
 function date(value?: string | null) { return value ? new Date(value).toLocaleDateString("vi-VN") : "—"; }
 function nextSchedule(machine: Machine) { return machine.maintenanceSchedules.find((item) => !["COMPLETED", "DISABLED", "SELF_SERVICE"].includes(item.status)); }
-function csvCell(value: unknown) { return `"${String(value ?? "").replaceAll('"', '""')}"`; }
-function downloadCsv(filename: string, headers: string[], rows: unknown[][]) {
-  const content = `\uFEFF${[headers, ...rows].map((row) => row.map(csvCell).join(",")).join("\n")}`;
-  const url = URL.createObjectURL(new Blob([content], { type: "text/csv;charset=utf-8" }));
-  const anchor = document.createElement("a"); anchor.href = url; anchor.download = filename; anchor.click(); URL.revokeObjectURL(url);
+function isActivatedMachine(machine: Machine) {
+  return Boolean(machine.customer?.phone || machine.installDate || machine.status === "ACTIVE" || machine.status === "ACTIVATED" || machine.status === "INSTALLED");
 }
+function machineKindLabel(machine: Machine) {
+  return isActivatedMachine(machine) ? "Máy cũ / đã kích hoạt" : "Máy mới / chưa kích hoạt";
+}
+function machineKindClass(machine: Machine) {
+  return isActivatedMachine(machine) ? "bg-blue-50 text-blue-700" : "bg-emerald-50 text-emerald-700";
+}
+function downloadTemplate(filename: string, headers: string[], sample: unknown[][]) {
+  downloadXlsx(filename, "Mẫu nhập dữ liệu", headers, sample);
+}
+
 
 export default function AdminReportsPage() {
   const [data, setData] = useState<ReportData | null>(null);
@@ -46,10 +55,10 @@ export default function AdminReportsPage() {
 
   const machines = useMemo(() => (data?.machines || []).filter((machine) => {
     const text = `${machine.id} ${machine.serial || ""} ${machine.model} ${machine.name || ""} ${machine.customer?.name || ""} ${machine.customer?.phone || ""}`.toLowerCase();
-    return (!province || machine.provinceCode === province) && (!machineStatus || machine.status === machineStatus) && (!search || text.includes(search.toLowerCase()));
+    return (!province || machine.provinceCode === province) && (!machineStatus || (machineStatus === "NEW_ONLY" ? !isActivatedMachine(machine) : machineStatus === "OLD_ONLY" ? isActivatedMachine(machine) : machine.status === machineStatus)) && (!search || text.includes(search.toLowerCase()));
   }), [data, province, machineStatus, search]);
   const provinces = [...new Set((data?.machines || []).map((machine) => machine.provinceCode).filter(Boolean))] as string[];
-  const statuses = [...new Set((data?.machines || []).map((machine) => machine.status))];
+  const statuses = ["NEW_ONLY", "OLD_ONLY", ...new Set((data?.machines || []).map((machine) => machine.status))];
   const pendingDealers = (data?.dealers || []).filter((dealer) => dealer.status === "PENDING");
   const activeSos = (data?.sosTickets || []).filter((ticket) => !["COMPLETED", "CANCELLED"].includes(ticket.status));
   const completedOrders = (data?.orders || []).filter((order) => order.status === "COMPLETED");
@@ -75,9 +84,81 @@ export default function AdminReportsPage() {
         <MetricCard label="Doanh thu dịch vụ" value={new Intl.NumberFormat("vi-VN").format(revenue) + "đ"} icon="wallet" tone="emerald" />
       </section>
 
-      <section className="grid gap-6 lg:grid-cols-3"><div className="lg:col-span-2 rounded-2xl bg-white p-5 shadow-sm"><h2 className="text-lg font-black">Xuất dữ liệu vận hành</h2><div className="mt-4 flex flex-wrap gap-3"><button type="button" onClick={() => downloadCsv("kosovota-machines.csv", ["ID máy", "Tên máy", "Model", "Công suất/Dung tích", "Bảo hành (tháng)", "Seri", "Khách hàng", "SĐT", "Địa chỉ", "Tỉnh", "Trạng thái", "Ngày lắp", "Chăm sóc tiếp theo"], (data?.machines || []).map((m) => [m.id, m.name, m.model, m.capacity, m.warrantyMonths, m.serial, m.customer?.name, m.customer?.phone, m.customer?.address, m.provinceCode, m.status, date(m.installDate), nextSchedule(m)?.title + " - " + date(nextSchedule(m)?.dueDate)]))} className="rounded-xl bg-emerald-600 px-4 py-3 font-bold text-white">Xuất danh sách máy</button><button type="button" onClick={() => downloadCsv("kosovota-dealers.csv", ["Mã", "Tên", "Đại diện", "SĐT", "Tỉnh", "Dịch vụ", "Trạng thái"], (data?.dealers || []).map((d) => [d.dealerCode, d.name, d.representativeName, d.phone, d.province, d.services, d.status]))} className="rounded-xl bg-blue-600 px-4 py-3 font-bold text-white">Xuất đại lý</button><button type="button" onClick={() => downloadCsv("kosovota-service-orders.csv", ["Mã lệnh", "Máy", "Khách hàng", "SĐT", "Dịch vụ", "Đại lý", "Hạn", "Trạng thái", "Phí"], (data?.orders || []).map((o) => [o.orderCode, o.machine.id, o.customerName, o.customerPhone, o.serviceType, o.dealer?.dealerCode, date(o.dueDate), o.status, o.serviceFee]))} className="rounded-xl bg-amber-600 px-4 py-3 font-bold text-white">Xuất lịch sử chăm sóc</button></div></div><ImportMachinesButton onComplete={load} /></section>
+      <section className="grid gap-6 lg:grid-cols-3">
+        <div className="lg:col-span-3 rounded-2xl bg-white p-5 shadow-sm">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-black">Xuất / nhập dữ liệu vận hành</h2>
+              <p className="mt-1 text-sm text-slate-500">Dùng Excel .xlsx thật để nhập/xuất.</p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button type="button" onClick={() => downloadTemplate("kosovota-mau-may.xlsx", ["ID máy", "Seri cần in", "Tên máy", "Model", "Công suất", "Bảo hành", "Năm sản xuất", "Tên khách hàng", "SĐT khách hàng", "Địa chỉ", "Tỉnh", "Vĩ độ", "Kinh độ", "Ngày lắp", "Trạng thái"], [["HT.0100.0626014", "HT.0100.0626014", "Tên máy: Máy lọc nước tinh khiết siêu sạch\nMã số: HT100-RU\nCông suất: 100L/H\nBảo hành: 12 tháng\nNăm sản xuất: 2026", "HT100-RU", "100L/H", "12 tháng", "2026", "Nguyễn Văn A", "0912345678", "Số 1 Hà Nội", "HN", "21.0278", "105.8342", "30/06/2026", "NEW"]])} className="rounded-xl border border-emerald-200 px-4 py-3 font-bold text-emerald-700">Tải mẫu máy</button>
+              <button type="button" onClick={() => downloadTemplate("kosovota-mau-dai-ly.xlsx", ["Mã đại lý", "Tên đại lý", "Đại diện", "SĐT", "Tỉnh", "Địa chỉ", "Dịch vụ", "Trạng thái", "Số KTV", "Khu vực phụ trách", "Mã số thuế", "CCCD", "Số tài khoản", "Chủ tài khoản", "Ngân hàng", "Vĩ độ", "Kinh độ"], [["HN-DL-26-0001", "Đại lý Hà Nội 01", "Nguyễn Văn B", "0987654321", "Hà Nội", "Số 2 Hà Nội", "Lắp đặt, bảo trì", "APPROVED", "3", "Hà Nội", "0100000000", "001xxxxxxxx", "123456789", "NGUYEN VAN B", "VCB", "21.0278", "105.8342"]])} className="rounded-xl border border-blue-200 px-4 py-3 font-bold text-blue-700">Tải mẫu đại lý</button>
+            </div>
+          </div>
+          <div className="mt-4 flex flex-wrap gap-3">
+            <button type="button" onClick={() => downloadXlsx("kosovota-machines.xlsx", "Danh sách máy", ["ID máy", "Seri cần in", "Tên máy", "Model", "Công suất", "Bảo hành", "Năm sản xuất", "Tên khách hàng", "SĐT khách hàng", "Địa chỉ", "Tỉnh", "Vĩ độ", "Kinh độ", "Ngày lắp", "Trạng thái", "Thông tin máy", "Ảnh mặt tiền", "Ảnh máy", "Chăm sóc tiếp theo"], (data?.machines || []).map((m) => [m.id, m.serial, m.name, m.model, m.capacity, m.warrantyMonths ? `${m.warrantyMonths} tháng` : "", m.manufactureDate ? new Date(m.manufactureDate).getFullYear() : "", m.customer?.name, m.customer?.phone, m.customer?.address, m.provinceCode, m.lat, m.lng, date(m.installDate), m.status, m.specification, m.buildingPhoto, m.machinePhoto, nextSchedule(m)?.title + " - " + date(nextSchedule(m)?.dueDate)]))} className="rounded-xl bg-emerald-600 px-4 py-3 font-bold text-white">Xuất Excel máy</button>
+            <button type="button" onClick={() => downloadXlsx("kosovota-dealers.xlsx", "Danh sách đại lý", ["Mã đại lý", "Tên đại lý", "Đại diện", "SĐT", "Tỉnh", "Địa chỉ", "Dịch vụ", "Trạng thái", "Số KTV", "Khu vực phụ trách", "Mã số thuế", "CCCD", "Số tài khoản", "Chủ tài khoản", "Ngân hàng", "Vĩ độ", "Kinh độ"], (data?.dealers || []).map((d) => [d.dealerCode, d.name, d.representativeName, d.phone, d.province, d.address, d.services, d.status, d.technicianCount, d.serviceArea, d.taxCode, d.citizenId, d.bankAccount, d.accountHolder, d.bankName, d.lat, d.lng]))} className="rounded-xl bg-blue-600 px-4 py-3 font-bold text-white">Xuất Excel đại lý</button>
+            <button type="button" onClick={() => downloadXlsx("kosovota-service-orders.xlsx", "Lịch sử chăm sóc", ["Mã lệnh", "Máy", "Khách hàng", "SĐT", "Dịch vụ", "Đại lý", "Hạn", "Trạng thái", "Phí"], (data?.orders || []).map((o) => [o.orderCode, o.machine.id, o.customerName, o.customerPhone, o.serviceType, o.dealer?.dealerCode, date(o.dueDate), o.status, o.serviceFee]))} className="rounded-xl bg-amber-600 px-4 py-3 font-bold text-white">Xuất Excel chăm sóc</button>
+          </div>
+        </div>
+        <ImportMachinesButton onComplete={load} />
+        <ImportDealersButton onComplete={load} />
+      </section>
 
-      <section className="surface-card"><div className="border-b p-5"><div className="flex flex-wrap items-end justify-between gap-3"><div><h2 className="text-xl font-black">Danh sách máy</h2><p className="text-sm text-slate-500">Lọc theo tỉnh, trạng thái, tên, số điện thoại hoặc ID máy.</p></div><div className="flex flex-wrap gap-2"><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Tìm máy/khách hàng" className="rounded-xl border px-3 py-2" /><select value={province} onChange={(e) => setProvince(e.target.value)} className="rounded-xl border px-3 py-2"><option value="">Tất cả tỉnh</option>{provinces.map((item) => <option key={item}>{item}</option>)}</select><select value={machineStatus} onChange={(e) => setMachineStatus(e.target.value)} className="rounded-xl border px-3 py-2"><option value="">Tất cả trạng thái</option>{statuses.map((item) => <option key={item}>{item}</option>)}</select></div></div></div><div className="overflow-x-auto"><table className="min-w-full text-sm"><thead className="text-left"><tr>{["ID/Seri", "Tên máy", "Model", "Công suất", "Khách hàng", "SĐT", "Tỉnh", "Trạng thái", "Ngày lắp", "Chăm sóc tiếp theo"].map((h) => <th key={h} className="p-3">{h}</th>)}</tr></thead><tbody>{machines.map((machine) => { const next = nextSchedule(machine); return <tr key={machine.id} className="border-b"><td className="p-3 font-black"><Link href={`/qr/${machine.id}`} className="text-blue-700">{machine.id}</Link></td><td className="p-3"><strong>{machine.name || "Thiết bị KOSOVOTA"}</strong></td><td className="p-3">{machine.model}</td><td className="p-3">{machine.capacity || "—"}</td><td className="p-3">{machine.customer?.name || "—"}</td><td className="p-3">{machine.customer?.phone || "—"}</td><td className="p-3">{machine.provinceCode || "—"}</td><td className="p-3 font-bold">{machine.status}</td><td className="p-3">{date(machine.installDate)}</td><td className="p-3">{next ? `${next.title} · ${date(next.dueDate)}` : "Không còn lịch mở"}</td></tr>; })}{!loading && machines.length === 0 && <tr><td colSpan={10} className="p-10 text-center text-slate-500">Không có dữ liệu phù hợp.</td></tr>}</tbody></table></div></section>
+      <section className="surface-card">
+        <div className="border-b p-5">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h2 className="text-xl font-black">Danh sách máy</h2>
+              <p className="text-sm text-slate-500"></p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Tìm ID, tên, SĐT..." className="rounded-xl border px-3 py-2" />
+              <select value={province} onChange={(e) => setProvince(e.target.value)} className="rounded-xl border px-3 py-2"><option value="">Tất cả tỉnh</option>{provinces.map((item) => <option key={item}>{item}</option>)}</select>
+              <select value={machineStatus} onChange={(e) => setMachineStatus(e.target.value)} className="rounded-xl border px-3 py-2">
+                <option value="">Tất cả máy</option>
+                {statuses.map((item) => <option key={item} value={item}>{item === "NEW_ONLY" ? "Máy mới / chưa kích hoạt" : item === "OLD_ONLY" ? "Máy cũ / đã kích hoạt" : item}</option>)}
+              </select>
+            </div>
+          </div>
+        </div>
+        <div className="max-h-[68vh] overflow-auto pb-24 pr-4">
+          <table className="min-w-[1380px] text-sm">
+            <thead className="sticky top-0 z-10 bg-white text-left shadow-sm">
+              <tr>{["Loại", "ID/Seri", "Tên máy", "Model", "Công suất", "Bảo hành", "Năm SX", "Khách hàng", "SĐT", "Tỉnh", "Trạng thái", "Ngày lắp", "Chăm sóc tiếp theo", "Thao tác"].map((h) => <th key={h} className={h === "Thao tác" ? "sticky right-0 z-20 whitespace-nowrap bg-white p-3 shadow-[-8px_0_12px_-12px_rgba(15,23,42,0.45)]" : "whitespace-nowrap p-3"}>{h}</th>)}</tr>
+            </thead>
+            <tbody>
+              {machines.map((machine) => {
+                const next = nextSchedule(machine);
+                return <tr key={machine.id} className="border-b align-top hover:bg-slate-50">
+                  <td className="p-3"><span className={`inline-flex whitespace-nowrap rounded-full px-3 py-1 text-xs font-extrabold ${machineKindClass(machine)}`}>{machineKindLabel(machine)}</span></td>
+                  <td className="whitespace-nowrap p-3 font-black text-blue-700">{machine.id}</td>
+                  <td className="min-w-[190px] p-3"><strong>{machine.name || "Thiết bị KOSOVOTA"}</strong></td>
+                  <td className="whitespace-nowrap p-3">{machine.model}</td>
+                  <td className="whitespace-nowrap p-3">{machine.capacity || "—"}</td>
+                  <td className="whitespace-nowrap p-3">{machine.warrantyMonths ? `${machine.warrantyMonths} tháng` : "—"}</td>
+                  <td className="whitespace-nowrap p-3">{machine.manufactureDate ? new Date(machine.manufactureDate).getFullYear() : "—"}</td>
+                  <td className="min-w-[150px] p-3">{machine.customer?.name || "—"}</td>
+                  <td className="whitespace-nowrap p-3">{machine.customer?.phone || "—"}</td>
+                  <td className="whitespace-nowrap p-3">{machine.provinceCode || "—"}</td>
+                  <td className="whitespace-nowrap p-3 font-bold">{machine.status}</td>
+                  <td className="whitespace-nowrap p-3">{date(machine.installDate)}</td>
+                  <td className="min-w-[190px] p-3">{next ? `${next.title} · ${date(next.dueDate)}` : "Không còn lịch mở"}</td>
+                  <td className="sticky right-0 z-[1] whitespace-nowrap bg-white p-3 shadow-[-8px_0_12px_-12px_rgba(15,23,42,0.45)]">
+                    <div className="flex gap-2">
+                      <Link href={`/admin/machines/${encodeURIComponent(machine.id)}`} className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-bold text-white">Xem chi tiết</Link>
+                      <Link href={`/qr/${encodeURIComponent(machine.id)}`} className="rounded-lg border border-emerald-200 px-3 py-2 text-xs font-bold text-emerald-700">In QR</Link>
+                      <Link href={`/service-report/${encodeURIComponent(machine.id)}`} className="rounded-lg border border-rose-200 px-3 py-2 text-xs font-bold text-rose-700">Dịch vụ</Link>
+                    </div>
+                  </td>
+                </tr>;
+              })}
+              {!loading && machines.length === 0 && <tr><td colSpan={14} className="p-10 text-center text-slate-500">Không có dữ liệu phù hợp.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </section>
 
       <section className="grid gap-6 xl:grid-cols-2"><div className="surface-card"><div className="border-b p-5"><h2 className="text-xl font-black">Hồ sơ đại lý chờ duyệt</h2></div><div className="divide-y">{pendingDealers.map((dealer) => <article key={dealer.dealerCode} className="p-5"><div className="flex flex-wrap justify-between gap-3"><div><p className="font-black">{dealer.dealerCode} · {dealer.name}</p><p className="text-sm text-slate-600">{dealer.representativeName} · {dealer.phone} · {dealer.province}</p><p className="mt-1 text-sm">{dealer.services}</p></div><div className="flex gap-2"><button type="button" onClick={() => updateDealer(dealer.dealerCode, "APPROVED")} className="rounded-lg bg-emerald-600 px-3 py-2 font-bold text-white">Duyệt</button><button type="button" onClick={() => updateDealer(dealer.dealerCode, "REJECTED")} className="rounded-lg bg-rose-600 px-3 py-2 font-bold text-white">Từ chối</button></div></div></article>)}{pendingDealers.length === 0 && <p className="p-8 text-center text-slate-500">Không có hồ sơ chờ duyệt.</p>}</div></div><div className="surface-card"><div className="border-b p-5"><h2 className="text-xl font-black">Yêu cầu tư vấn sản phẩm</h2></div><div className="max-h-96 divide-y overflow-y-auto">{(data?.leads || []).map((lead) => <article key={lead.id} className="p-5"><p className="font-black">{lead.fullName} · <a href={`tel:${lead.phone}`} className="text-emerald-700">{lead.phone}</a></p><p className="text-sm text-slate-600">{lead.productSlug || "Tư vấn chung"} · {lead.province || "Chưa chọn tỉnh"} · {date(lead.createdAt)}</p>{lead.note && <p className="mt-1 text-sm">{lead.note}</p>}</article>)}{(data?.leads || []).length === 0 && <p className="p-8 text-center text-slate-500">Chưa có yêu cầu tư vấn.</p>}</div></div></section>
 
