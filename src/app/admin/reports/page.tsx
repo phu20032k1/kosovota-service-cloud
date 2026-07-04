@@ -10,9 +10,58 @@ import { Icon } from "@/components/ui/Icon";
 import { Notice } from "@/components/ui/Notice";
 import { downloadXlsx } from "@/lib/client-xlsx";
 
-type Machine = { id: string; model: string; name?: string | null; capacity?: string | null; specification?: string | null; warrantyMonths?: number | null; serial?: string | null; provinceCode?: string | null; status: string; manufactureDate?: string | null; installDate?: string | null; lat?: number | null; lng?: number | null; buildingPhoto?: string | null; machinePhoto?: string | null; customer?: { name: string; phone: string; address?: string | null } | null; maintenanceSchedules: { dueDate: string; status: string; title: string }[] };
-type Dealer = { dealerCode: string; name: string; representativeName?: string | null; phone: string; province?: string | null; address?: string | null; lat?: number | null; lng?: number | null; services?: string | null; status: string; technicianCount?: number | null; serviceArea?: string | null; taxCode?: string | null; citizenId?: string | null; bankAccount?: string | null; accountHolder?: string | null; bankName?: string | null; createdAt: string };
-type Order = { id: string; orderCode: string; serviceType: string; status: string; dueDate?: string | null; serviceFee?: number | null; paymentStatus?: string; customerName: string; customerPhone: string; dealer?: { dealerCode: string; name: string } | null; machine: { id: string } };
+type Machine = {
+  id: string;
+  model: string;
+  name?: string | null;
+  capacity?: string | null;
+  specification?: string | null;
+  warrantyMonths?: number | null;
+  serial?: string | null;
+  provinceCode?: string | null;
+  status: string;
+  manufactureDate?: string | null;
+  installDate?: string | null;
+  lat?: number | null;
+  lng?: number | null;
+  buildingPhoto?: string | null;
+  machinePhoto?: string | null;
+  customer?: { name: string; phone: string; address?: string | null } | null;
+  maintenanceSchedules: { dueDate: string; status: string; title: string }[];
+};
+type Dealer = {
+  dealerCode: string;
+  name: string;
+  representativeName?: string | null;
+  phone: string;
+  province?: string | null;
+  address?: string | null;
+  lat?: number | null;
+  lng?: number | null;
+  services?: string | null;
+  status: string;
+  technicianCount?: number | null;
+  serviceArea?: string | null;
+  taxCode?: string | null;
+  citizenId?: string | null;
+  bankAccount?: string | null;
+  accountHolder?: string | null;
+  bankName?: string | null;
+  createdAt: string;
+};
+type Order = {
+  id: string;
+  orderCode: string;
+  serviceType: string;
+  status: string;
+  dueDate?: string | null;
+  serviceFee?: number | null;
+  paymentStatus?: string;
+  customerName: string;
+  customerPhone: string;
+  dealer?: { dealerCode: string; name: string } | null;
+  machine: { id: string };
+};
 type Sos = { id: string; machineId: string; customerName: string; customerPhone: string; status: string; priority: string; createdAt: string };
 type Lead = { id: string; fullName: string; phone: string; productSlug?: string | null; province?: string | null; note?: string | null; status: string; createdAt: string };
 type ReportData = { machines: Machine[]; dealers: Dealer[]; orders: Order[]; reports: unknown[]; sosTickets: Sos[]; leads: Lead[]; notifications: unknown[] };
@@ -32,48 +81,121 @@ function downloadTemplate(filename: string, headers: string[], sample: unknown[]
   downloadXlsx(filename, "Mẫu nhập dữ liệu", headers, sample);
 }
 
-
 export default function AdminReportsPage() {
   const [data, setData] = useState<ReportData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
   const [province, setProvince] = useState("");
   const [machineStatus, setMachineStatus] = useState("");
   const [search, setSearch] = useState("");
+  const [selectedMachineIds, setSelectedMachineIds] = useState<string[]>([]);
 
   const load = useCallback(async () => {
-    setLoading(true); setError("");
+    setLoading(true);
+    setError("");
     try {
       const response = await fetch("/api/admin/reports", { cache: "no-store" });
       const result = await response.json();
       if (!response.ok || !result.success) throw new Error(result.message || "Không tải được báo cáo");
-      setData(result.data);
-    } catch (value) { setError(value instanceof Error ? value.message : "Không tải được báo cáo"); }
-    finally { setLoading(false); }
+      const nextData = result.data as ReportData;
+      setData(nextData);
+      setSelectedMachineIds((current) => current.filter((id) => nextData.machines.some((machine) => machine.id === id)));
+    } catch (value) {
+      setError(value instanceof Error ? value.message : "Không tải được báo cáo");
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
   useEffect(() => { void load(); }, [load]);
 
   const machines = useMemo(() => (data?.machines || []).filter((machine) => {
     const text = `${machine.id} ${machine.serial || ""} ${machine.model} ${machine.name || ""} ${machine.customer?.name || ""} ${machine.customer?.phone || ""}`.toLowerCase();
-    return (!province || machine.provinceCode === province) && (!machineStatus || (machineStatus === "NEW_ONLY" ? !isActivatedMachine(machine) : machineStatus === "OLD_ONLY" ? isActivatedMachine(machine) : machine.status === machineStatus)) && (!search || text.includes(search.toLowerCase()));
+    return (!province || machine.provinceCode === province)
+      && (!machineStatus || (machineStatus === "NEW_ONLY" ? !isActivatedMachine(machine) : machineStatus === "OLD_ONLY" ? isActivatedMachine(machine) : machine.status === machineStatus))
+      && (!search || text.includes(search.toLowerCase()));
   }), [data, province, machineStatus, search]);
+
   const provinces = [...new Set((data?.machines || []).map((machine) => machine.provinceCode).filter(Boolean))] as string[];
   const statuses = ["NEW_ONLY", "OLD_ONLY", ...new Set((data?.machines || []).map((machine) => machine.status))];
   const pendingDealers = (data?.dealers || []).filter((dealer) => dealer.status === "PENDING");
   const activeSos = (data?.sosTickets || []).filter((ticket) => !["COMPLETED", "CANCELLED"].includes(ticket.status));
   const completedOrders = (data?.orders || []).filter((order) => order.status === "COMPLETED");
   const revenue = completedOrders.reduce((sum, order) => sum + (order.serviceFee || 0), 0);
+  const allVisibleMachinesSelected = machines.length > 0 && machines.every((machine) => selectedMachineIds.includes(machine.id));
 
-  async function updateDealer(dealerCode: string, status: string) {
-    const response = await fetch("/api/dealers", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ dealerCode, status }) });
-    const result = await response.json();
-    if (!response.ok || !result.success) { setError(result.message || "Không cập nhật được đại lý"); return; }
-    await load();
+  function toggleVisibleMachines() {
+    if (allVisibleMachinesSelected) {
+      setSelectedMachineIds((current) => current.filter((id) => !machines.some((machine) => machine.id === id)));
+      return;
+    }
+    setSelectedMachineIds((current) => [...new Set([...current, ...machines.map((machine) => machine.id)])]);
+  }
+
+  function toggleMachine(id: string) {
+    setSelectedMachineIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
+  }
+
+  async function updateDealers(dealerCodes: string | string[], status: string) {
+    const codes = Array.isArray(dealerCodes) ? dealerCodes : [dealerCodes];
+    if (!codes.length) return;
+    setBusy(true);
+    setError("");
+    setMessage("");
+    try {
+      const response = await fetch("/api/dealers", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(codes.length === 1 ? { dealerCode: codes[0], status } : { dealerCodes: codes, status }),
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.message || "Không cập nhật được đại lý");
+      setMessage(result.message);
+      await load();
+    } catch (value) {
+      setError(value instanceof Error ? value.message : "Không cập nhật được đại lý");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteMachines(machineIds: string | string[]) {
+    const ids = Array.isArray(machineIds) ? machineIds : [machineIds];
+    if (!ids.length) return;
+    const label = ids.length === 1 ? ids[0] : `${ids.length} máy đã chọn`;
+    if (!window.confirm(`Xóa ${label}? Dữ liệu kích hoạt, bảo trì, ticket và lệnh dịch vụ liên quan cũng sẽ bị xóa.`)) return;
+
+    setBusy(true);
+    setError("");
+    setMessage("");
+    try {
+      const response = await fetch("/api/machines", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(ids.length === 1 ? { machineId: ids[0] } : { machineIds: ids }),
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.message || "Không xóa được máy");
+      setMessage(result.message);
+      setSelectedMachineIds((current) => current.filter((id) => !ids.includes(id)));
+      await load();
+    } catch (value) {
+      setError(value instanceof Error ? value.message : "Không xóa được máy");
+    } finally {
+      setBusy(false);
+    }
   }
 
   return <main className="min-h-screen bg-slate-100">
-    <OperationsHeader title="Điều hành toàn quốc" subtitle="KPI, dữ liệu máy, đại lý, dịch vụ và SOS" actions={<><Link href="/admin/integrations" className="icon-button" title="Tích hợp dịch vụ"><Icon name="settings" size={18}/></Link><Link href="/admin/notifications" className="icon-button" title="Trung tâm thông báo"><Icon name="bell" size={18}/></Link></>} />
+    <OperationsHeader
+      title="Điều hành toàn quốc"
+      subtitle="KPI, dữ liệu máy, đại lý, dịch vụ và SOS"
+      actions={<><Link href="/admin/integrations" className="icon-button" title="Tích hợp dịch vụ"><Icon name="settings" size={18}/></Link><Link href="/admin/notifications" className="icon-button" title="Trung tâm thông báo"><Icon name="bell" size={18}/></Link></>}
+    />
     <div className="mx-auto max-w-[1480px] space-y-6 p-4 sm:p-6">
+      {message && <Notice kind="success">{message}</Notice>}
       {error && <Notice kind="error">{error}</Notice>}
       <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         <MetricCard label="Máy đã quản lý" value={data?.machines.length || 0} icon="droplet" />
@@ -85,7 +207,7 @@ export default function AdminReportsPage() {
       </section>
 
       <section className="grid gap-6 lg:grid-cols-3">
-        <div className="lg:col-span-3 rounded-2xl bg-white p-5 shadow-sm">
+        <div className="rounded-2xl bg-white p-5 shadow-sm lg:col-span-3">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <h2 className="text-lg font-black">Xuất / nhập dữ liệu vận hành</h2>
@@ -97,7 +219,7 @@ export default function AdminReportsPage() {
             </div>
           </div>
           <div className="mt-4 flex flex-wrap gap-3">
-            <button type="button" onClick={() => downloadXlsx("kosovota-machines.xlsx", "Danh sách máy", ["ID máy", "Seri cần in", "Tên máy", "Model", "Công suất", "Bảo hành", "Năm sản xuất", "Tên khách hàng", "SĐT khách hàng", "Địa chỉ", "Tỉnh", "Vĩ độ", "Kinh độ", "Ngày lắp", "Trạng thái", "Thông tin máy", "Ảnh mặt tiền", "Ảnh máy", "Chăm sóc tiếp theo"], (data?.machines || []).map((m) => [m.id, m.serial, m.name, m.model, m.capacity, m.warrantyMonths ? `${m.warrantyMonths} tháng` : "", m.manufactureDate ? new Date(m.manufactureDate).getFullYear() : "", m.customer?.name, m.customer?.phone, m.customer?.address, m.provinceCode, m.lat, m.lng, date(m.installDate), m.status, m.specification, m.buildingPhoto, m.machinePhoto, nextSchedule(m)?.title + " - " + date(nextSchedule(m)?.dueDate)]))} className="rounded-xl bg-emerald-600 px-4 py-3 font-bold text-white">Xuất Excel máy</button>
+            <button type="button" onClick={() => downloadXlsx("kosovota-machines.xlsx", "Danh sách máy", ["ID máy", "Seri cần in", "Tên máy", "Model", "Công suất", "Bảo hành", "Năm sản xuất", "Tên khách hàng", "SĐT khách hàng", "Địa chỉ", "Tỉnh", "Vĩ độ", "Kinh độ", "Ngày lắp", "Trạng thái", "Thông tin máy", "Ảnh mặt tiền", "Ảnh máy", "Chăm sóc tiếp theo"], (data?.machines || []).map((m) => { const next = nextSchedule(m); return [m.id, m.serial, m.name, m.model, m.capacity, m.warrantyMonths ? `${m.warrantyMonths} tháng` : "", m.manufactureDate ? new Date(m.manufactureDate).getFullYear() : "", m.customer?.name, m.customer?.phone, m.customer?.address, m.provinceCode, m.lat, m.lng, date(m.installDate), m.status, m.specification, m.buildingPhoto, m.machinePhoto, next ? `${next.title} - ${date(next.dueDate)}` : ""]; }))} className="rounded-xl bg-emerald-600 px-4 py-3 font-bold text-white">Xuất Excel máy</button>
             <button type="button" onClick={() => downloadXlsx("kosovota-dealers.xlsx", "Danh sách đại lý", ["Mã đại lý", "Tên đại lý", "Đại diện", "SĐT", "Tỉnh", "Địa chỉ", "Dịch vụ", "Trạng thái", "Số KTV", "Khu vực phụ trách", "Mã số thuế", "CCCD", "Số tài khoản", "Chủ tài khoản", "Ngân hàng", "Vĩ độ", "Kinh độ"], (data?.dealers || []).map((d) => [d.dealerCode, d.name, d.representativeName, d.phone, d.province, d.address, d.services, d.status, d.technicianCount, d.serviceArea, d.taxCode, d.citizenId, d.bankAccount, d.accountHolder, d.bankName, d.lat, d.lng]))} className="rounded-xl bg-blue-600 px-4 py-3 font-bold text-white">Xuất Excel đại lý</button>
             <button type="button" onClick={() => downloadXlsx("kosovota-service-orders.xlsx", "Lịch sử chăm sóc", ["Mã lệnh", "Máy", "Khách hàng", "SĐT", "Dịch vụ", "Đại lý", "Hạn", "Trạng thái", "Phí"], (data?.orders || []).map((o) => [o.orderCode, o.machine.id, o.customerName, o.customerPhone, o.serviceType, o.dealer?.dealerCode, date(o.dueDate), o.status, o.serviceFee]))} className="rounded-xl bg-amber-600 px-4 py-3 font-bold text-white">Xuất Excel chăm sóc</button>
           </div>
@@ -111,7 +233,7 @@ export default function AdminReportsPage() {
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
               <h2 className="text-xl font-black">Danh sách máy</h2>
-              <p className="text-sm text-slate-500"></p>
+              <p className="text-sm text-slate-500">Có thể chọn nhiều máy để xóa hàng loạt.</p>
             </div>
             <div className="flex flex-wrap gap-2">
               <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Tìm ID, tên, SĐT..." className="rounded-xl border px-3 py-2" />
@@ -123,15 +245,28 @@ export default function AdminReportsPage() {
             </div>
           </div>
         </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-3">
+          <label className="inline-flex items-center gap-2 text-sm font-bold text-slate-700">
+            <input type="checkbox" checked={allVisibleMachinesSelected} onChange={toggleVisibleMachines} />
+            Chọn tất cả đang lọc ({machines.length})
+          </label>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-bold text-slate-500">Đã chọn: {selectedMachineIds.length}</span>
+            <button type="button" disabled={busy || selectedMachineIds.length === 0} onClick={() => void deleteMachines(selectedMachineIds)} className="rounded-xl border border-rose-200 px-4 py-2 text-sm font-bold text-rose-700 disabled:opacity-50">Xóa máy hàng loạt</button>
+          </div>
+        </div>
+
         <div className="max-h-[68vh] overflow-auto pb-24 pr-4">
-          <table className="min-w-[1380px] text-sm">
+          <table className="min-w-[1480px] text-sm">
             <thead className="sticky top-0 z-10 bg-white text-left shadow-sm">
-              <tr>{["Loại", "ID/Seri", "Tên máy", "Model", "Công suất", "Bảo hành", "Năm SX", "Khách hàng", "SĐT", "Tỉnh", "Trạng thái", "Ngày lắp", "Chăm sóc tiếp theo", "Thao tác"].map((h) => <th key={h} className={h === "Thao tác" ? "sticky right-0 z-20 whitespace-nowrap bg-white p-3 shadow-[-8px_0_12px_-12px_rgba(15,23,42,0.45)]" : "whitespace-nowrap p-3"}>{h}</th>)}</tr>
+              <tr>{["Chọn", "Loại", "ID/Seri", "Tên máy", "Model", "Công suất", "Bảo hành", "Năm SX", "Khách hàng", "SĐT", "Tỉnh", "Trạng thái", "Ngày lắp", "Chăm sóc tiếp theo", "Thao tác"].map((h) => <th key={h} className={h === "Thao tác" ? "sticky right-0 z-20 whitespace-nowrap bg-white p-3 shadow-[-8px_0_12px_-12px_rgba(15,23,42,0.45)]" : "whitespace-nowrap p-3"}>{h}</th>)}</tr>
             </thead>
             <tbody>
               {machines.map((machine) => {
                 const next = nextSchedule(machine);
                 return <tr key={machine.id} className="border-b align-top hover:bg-slate-50">
+                  <td className="p-3"><input type="checkbox" checked={selectedMachineIds.includes(machine.id)} onChange={() => toggleMachine(machine.id)} aria-label={`Chọn ${machine.id}`} /></td>
                   <td className="p-3"><span className={`inline-flex whitespace-nowrap rounded-full px-3 py-1 text-xs font-extrabold ${machineKindClass(machine)}`}>{machineKindLabel(machine)}</span></td>
                   <td className="whitespace-nowrap p-3 font-black text-blue-700">{machine.id}</td>
                   <td className="min-w-[190px] p-3"><strong>{machine.name || "Thiết bị KOSOVOTA"}</strong></td>
@@ -150,19 +285,62 @@ export default function AdminReportsPage() {
                       <Link href={`/admin/machines/${encodeURIComponent(machine.id)}`} className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-bold text-white">Xem chi tiết</Link>
                       <Link href={`/qr/${encodeURIComponent(machine.id)}`} className="rounded-lg border border-emerald-200 px-3 py-2 text-xs font-bold text-emerald-700">In QR</Link>
                       <Link href={`/service-report/${encodeURIComponent(machine.id)}`} className="rounded-lg border border-rose-200 px-3 py-2 text-xs font-bold text-rose-700">Dịch vụ</Link>
+                      <button type="button" disabled={busy} onClick={() => void deleteMachines(machine.id)} className="rounded-lg border border-rose-200 px-3 py-2 text-xs font-bold text-rose-700 disabled:opacity-50">Xóa</button>
                     </div>
                   </td>
                 </tr>;
               })}
-              {!loading && machines.length === 0 && <tr><td colSpan={14} className="p-10 text-center text-slate-500">Không có dữ liệu phù hợp.</td></tr>}
+              {!loading && machines.length === 0 && <tr><td colSpan={15} className="p-10 text-center text-slate-500">Không có dữ liệu phù hợp.</td></tr>}
             </tbody>
           </table>
         </div>
       </section>
 
-      <section className="grid gap-6 xl:grid-cols-2"><div className="surface-card"><div className="border-b p-5"><h2 className="text-xl font-black">Hồ sơ đại lý chờ duyệt</h2></div><div className="divide-y">{pendingDealers.map((dealer) => <article key={dealer.dealerCode} className="p-5"><div className="flex flex-wrap justify-between gap-3"><div><p className="font-black">{dealer.dealerCode} · {dealer.name}</p><p className="text-sm text-slate-600">{dealer.representativeName} · {dealer.phone} · {dealer.province}</p><p className="mt-1 text-sm">{dealer.services}</p></div><div className="flex gap-2"><button type="button" onClick={() => updateDealer(dealer.dealerCode, "APPROVED")} className="rounded-lg bg-emerald-600 px-3 py-2 font-bold text-white">Duyệt</button><button type="button" onClick={() => updateDealer(dealer.dealerCode, "REJECTED")} className="rounded-lg bg-rose-600 px-3 py-2 font-bold text-white">Từ chối</button></div></div></article>)}{pendingDealers.length === 0 && <p className="p-8 text-center text-slate-500">Không có hồ sơ chờ duyệt.</p>}</div></div><div className="surface-card"><div className="border-b p-5"><h2 className="text-xl font-black">Yêu cầu tư vấn sản phẩm</h2></div><div className="max-h-96 divide-y overflow-y-auto">{(data?.leads || []).map((lead) => <article key={lead.id} className="p-5"><p className="font-black">{lead.fullName} · <a href={`tel:${lead.phone}`} className="text-emerald-700">{lead.phone}</a></p><p className="text-sm text-slate-600">{lead.productSlug || "Tư vấn chung"} · {lead.province || "Chưa chọn tỉnh"} · {date(lead.createdAt)}</p>{lead.note && <p className="mt-1 text-sm">{lead.note}</p>}</article>)}{(data?.leads || []).length === 0 && <p className="p-8 text-center text-slate-500">Chưa có yêu cầu tư vấn.</p>}</div></div></section>
+      <section className="grid gap-6 xl:grid-cols-2">
+        <div className="surface-card">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b p-5">
+            <h2 className="text-xl font-black">Hồ sơ đại lý chờ duyệt</h2>
+            <div className="flex flex-wrap gap-2">
+              <button type="button" disabled={busy || pendingDealers.length === 0} onClick={() => void updateDealers(pendingDealers.map((dealer) => dealer.dealerCode), "APPROVED")} className="rounded-lg bg-emerald-600 px-3 py-2 font-bold text-white disabled:opacity-50">Duyệt tất cả</button>
+              <button type="button" disabled={busy || pendingDealers.length === 0} onClick={() => void updateDealers(pendingDealers.map((dealer) => dealer.dealerCode), "REJECTED")} className="rounded-lg bg-rose-600 px-3 py-2 font-bold text-white disabled:opacity-50">Từ chối tất cả</button>
+            </div>
+          </div>
+          <div className="divide-y">
+            {pendingDealers.map((dealer) => <article key={dealer.dealerCode} className="p-5">
+              <div className="flex flex-wrap justify-between gap-3">
+                <div>
+                  <p className="font-black">{dealer.dealerCode} · {dealer.name}</p>
+                  <p className="text-sm text-slate-600">{dealer.representativeName} · {dealer.phone} · {dealer.province}</p>
+                  <p className="mt-1 text-sm">{dealer.services}</p>
+                </div>
+                <div className="flex gap-2">
+                  <button type="button" disabled={busy} onClick={() => void updateDealers(dealer.dealerCode, "APPROVED")} className="rounded-lg bg-emerald-600 px-3 py-2 font-bold text-white disabled:opacity-50">Duyệt</button>
+                  <button type="button" disabled={busy} onClick={() => void updateDealers(dealer.dealerCode, "REJECTED")} className="rounded-lg bg-rose-600 px-3 py-2 font-bold text-white disabled:opacity-50">Từ chối</button>
+                </div>
+              </div>
+            </article>)}
+            {pendingDealers.length === 0 && <p className="p-8 text-center text-slate-500">Không có hồ sơ chờ duyệt.</p>}
+          </div>
+        </div>
 
-      <section className="surface-card"><div className="border-b p-5"><h2 className="text-xl font-black">SOS ưu tiên cao</h2></div><div className="overflow-x-auto"><table className="min-w-full text-sm"><thead className="text-left"><tr>{["Máy", "Khách hàng", "SĐT", "Tiếp nhận", "Trạng thái"].map((h) => <th key={h} className="p-3">{h}</th>)}</tr></thead><tbody>{(data?.sosTickets || []).map((ticket) => <tr key={ticket.id} className="border-b"><td className="p-3 font-black">{ticket.machineId}</td><td className="p-3">{ticket.customerName}</td><td className="p-3"><a href={`tel:${ticket.customerPhone}`} className="text-emerald-700">{ticket.customerPhone}</a></td><td className="p-3">{date(ticket.createdAt)}</td><td className="p-3 font-bold">{ticket.status}</td></tr>)}</tbody></table></div></section>
+        <div className="surface-card">
+          <div className="border-b p-5"><h2 className="text-xl font-black">Yêu cầu tư vấn sản phẩm</h2></div>
+          <div className="max-h-96 divide-y overflow-y-auto">
+            {(data?.leads || []).map((lead) => <article key={lead.id} className="p-5"><p className="font-black">{lead.fullName} · <a href={`tel:${lead.phone}`} className="text-emerald-700">{lead.phone}</a></p><p className="text-sm text-slate-600">{lead.productSlug || "Tư vấn chung"} · {lead.province || "Chưa chọn tỉnh"} · {date(lead.createdAt)}</p>{lead.note && <p className="mt-1 text-sm">{lead.note}</p>}</article>)}
+            {(data?.leads || []).length === 0 && <p className="p-8 text-center text-slate-500">Chưa có yêu cầu tư vấn.</p>}
+          </div>
+        </div>
+      </section>
+
+      <section className="surface-card">
+        <div className="border-b p-5"><h2 className="text-xl font-black">SOS ưu tiên cao</h2></div>
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-sm">
+            <thead className="text-left"><tr>{["Máy", "Khách hàng", "SĐT", "Tiếp nhận", "Trạng thái"].map((h) => <th key={h} className="p-3">{h}</th>)}</tr></thead>
+            <tbody>{(data?.sosTickets || []).map((ticket) => <tr key={ticket.id} className="border-b"><td className="p-3 font-black">{ticket.machineId}</td><td className="p-3">{ticket.customerName}</td><td className="p-3"><a href={`tel:${ticket.customerPhone}`} className="text-emerald-700">{ticket.customerPhone}</a></td><td className="p-3">{date(ticket.createdAt)}</td><td className="p-3 font-bold">{ticket.status}</td></tr>)}</tbody>
+          </table>
+        </div>
+      </section>
     </div>
   </main>;
 }

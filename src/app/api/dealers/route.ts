@@ -7,6 +7,9 @@ import { hashPassword } from "@/lib/password";
 import { formatSequence } from "@/lib/id-sequence";
 import { provinceLetterCode } from "@/lib/province";
 
+const DEALER_STATUSES = ["PENDING", "APPROVED", "REJECTED", "SUSPENDED"] as const;
+type DealerStatus = (typeof DEALER_STATUSES)[number];
+
 function text(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -14,6 +17,21 @@ function text(value: unknown) {
 function numberOrNull(value: unknown) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function uniqueStrings(values: unknown[]) {
+  return [...new Set(values.map(text).filter(Boolean))];
+}
+
+function dealerCodesFromBody(body: Record<string, unknown>) {
+  if (Array.isArray(body.dealerCodes)) return uniqueStrings(body.dealerCodes);
+  if (Array.isArray(body.codes)) return uniqueStrings(body.codes);
+  if (Array.isArray(body.ids)) return uniqueStrings(body.ids);
+  return uniqueStrings([body.dealerCode, body.code, body.id]);
+}
+
+function isDealerStatus(value: string): value is DealerStatus {
+  return (DEALER_STATUSES as readonly string[]).includes(value);
 }
 
 export async function GET(request: NextRequest) {
@@ -142,71 +160,189 @@ export async function PATCH(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const dealerCode = text(body.dealerCode);
+    const dealerCodes = dealerCodesFromBody(body);
     const status = text(body.status).toUpperCase();
-    if (!dealerCode || !["PENDING", "APPROVED", "REJECTED", "SUSPENDED"].includes(status)) {
+
+    if (!dealerCodes.length || !isDealerStatus(status)) {
       return NextResponse.json({ success: false, message: "Dữ liệu cập nhật không hợp lệ." }, { status: 400 });
     }
 
-    const current = await prisma.dealer.findUnique({ where: { dealerCode } });
-    if (!current) {
-      return NextResponse.json({ success: false, message: "Không tìm thấy đại lý." }, { status: 404 });
-    }
+    const results = await prisma.$transaction(async (tx) => {
+      const updatedDealers: Array<{ dealerCode: string; phone: string; status: string; initialPassword: string | null }> = [];
 
-    let initialPassword: string | null = null;
-    const dealer = await prisma.$transaction(async (tx) => {
-      const updated = await tx.dealer.update({ where: { dealerCode }, data: { status } });
-      if (status === "APPROVED") {
-        const phone = normalizePhone(updated.phone);
-        const existing = await tx.user.findUnique({ where: { phone } });
-        if (existing && existing.role !== "DEALER") {
-          throw new Error("PHONE_ROLE_CONFLICT");
+      for (const dealerCode of dealerCodes) {
+        const current = await tx.dealer.findUnique({ where: { dealerCode } });
+        if (!current) {
+          throw new Error(`DEALER_NOT_FOUND:${dealerCode}`);
         }
-        if (!existing) {
-          initialPassword = `Ksv@${randomBytes(4).toString("hex")}`;
-          await tx.user.create({
-            data: {
-              phone,
-              password: hashPassword(initialPassword),
-              name: updated.representativeName || updated.name,
-              role: "DEALER",
-              dealerCode: updated.dealerCode,
-              active: true,
-            },
-          });
-        } else {
-          await tx.user.update({
-            where: { id: existing.id },
-            data: { dealerCode: updated.dealerCode, active: true, name: updated.representativeName || updated.name },
+
+        const updated = await tx.dealer.update({ where: { dealerCode }, data: { status } });
+        let initialPassword: string | null = null;
+
+        if (status === "APPROVED") {
+          const phone = normalizePhone(updated.phone);
+          const existing = await tx.user.findUnique({ where: { phone } });
+          if (existing && existing.role !== "DEALER") {
+            throw new Error("PHONE_ROLE_CONFLICT");
+          }
+          if (!existing) {
+            initialPassword = `Ksv@${randomBytes(4).toString("hex")}`;
+            await tx.user.create({
+              data: {
+                phone,
+                password: hashPassword(initialPassword),
+                name: updated.representativeName || updated.name,
+                role: "DEALER",
+                dealerCode: updated.dealerCode,
+                active: true,
+              },
+            });
+          } else {
+            await tx.user.update({
+              where: { id: existing.id },
+              data: { dealerCode: updated.dealerCode, active: true, name: updated.representativeName || updated.name },
+            });
+          }
+        } else if (status === "SUSPENDED" || status === "REJECTED") {
+          await tx.user.updateMany({
+            where: { dealerCode: updated.dealerCode, role: { in: ["DEALER", "KTV"] } },
+            data: { active: false },
           });
         }
-      } else if (status === "SUSPENDED" || status === "REJECTED") {
-        await tx.user.updateMany({
-          where: { dealerCode: updated.dealerCode, role: { in: ["DEALER", "KTV"] } },
-          data: { active: false },
-        });
+
+        updatedDealers.push({ dealerCode: updated.dealerCode, phone: updated.phone, status: updated.status, initialPassword });
       }
-      return updated;
+
+      await tx.adminLog.createMany({
+        data: updatedDealers.map((dealer) => ({
+          userId: auth.user.id,
+          action: "UPDATE_DEALER_STATUS",
+          target: dealer.dealerCode,
+          detail: status,
+        })),
+      });
+
+      return updatedDealers;
     });
 
-    const content = status === "APPROVED"
-      ? initialPassword
-        ? `Hồ sơ ${dealerCode} đã được duyệt. Tài khoản: ${dealer.phone}. Mật khẩu ban đầu: ${initialPassword}. Hãy đổi mật khẩu bằng chức năng Quên mật khẩu.`
-        : `Hồ sơ ${dealerCode} đã được duyệt. Tài khoản đại lý đã được kích hoạt.`
-      : `Hồ sơ ${dealerCode} đã được cập nhật trạng thái ${status}.`;
-
-    await prisma.notification.create({ data: { phone: dealer.phone, channel: "SMS", kind: "DEALER_STATUS", content } });
-    await prisma.adminLog.create({
-      data: { userId: auth.user.id, action: "UPDATE_DEALER_STATUS", target: dealerCode, detail: status },
+    await prisma.notification.createMany({
+      data: results.map((dealer) => ({
+        phone: dealer.phone,
+        channel: "SMS",
+        kind: "DEALER_STATUS",
+        content: status === "APPROVED"
+          ? dealer.initialPassword
+            ? `Hồ sơ ${dealer.dealerCode} đã được duyệt. Tài khoản: ${dealer.phone}. Mật khẩu ban đầu: ${dealer.initialPassword}. Hãy đổi mật khẩu bằng chức năng Quên mật khẩu.`
+            : `Hồ sơ ${dealer.dealerCode} đã được duyệt. Tài khoản đại lý đã được kích hoạt.`
+          : `Hồ sơ ${dealer.dealerCode} đã được cập nhật trạng thái ${status}.`,
+      })),
     });
 
-    return NextResponse.json({ success: true, data: dealer, message: "Đã cập nhật hồ sơ đại lý." });
+    return NextResponse.json({
+      success: true,
+      data: results,
+      message: results.length === 1
+        ? "Đã cập nhật hồ sơ đại lý."
+        : `Đã cập nhật ${results.length} hồ sơ đại lý.`,
+    });
   } catch (error) {
     console.error("PATCH /api/dealers failed", error);
-    const conflict = error instanceof Error && error.message === "PHONE_ROLE_CONFLICT";
+    const message = error instanceof Error ? error.message : "";
+    const conflict = message === "PHONE_ROLE_CONFLICT";
+    const notFound = message.startsWith("DEALER_NOT_FOUND:");
     return NextResponse.json(
-      { success: false, message: conflict ? "Số điện thoại đang thuộc một tài khoản vai trò khác." : "Không cập nhật được đại lý." },
-      { status: conflict ? 409 : 500 },
+      {
+        success: false,
+        message: conflict
+          ? "Số điện thoại đang thuộc một tài khoản vai trò khác."
+          : notFound
+            ? `Không tìm thấy đại lý ${message.split(":")[1]}.`
+            : "Không cập nhật được đại lý.",
+      },
+      { status: conflict ? 409 : notFound ? 404 : 500 },
     );
+  }
+}
+
+export async function DELETE(request: NextRequest) {
+  const auth = await hasRole(request, ["ADMIN"]);
+  if (!auth) {
+    return NextResponse.json({ success: false, message: "Chưa được cấp quyền." }, { status: 401 });
+  }
+
+  try {
+    const body = await request.json().catch(() => ({}));
+    const dealerCodes = dealerCodesFromBody(body);
+
+    if (!dealerCodes.length) {
+      return NextResponse.json({ success: false, message: "Vui lòng chọn đại lý cần xóa." }, { status: 400 });
+    }
+
+    const dealers = await prisma.dealer.findMany({
+      where: { dealerCode: { in: dealerCodes } },
+      select: { id: true, dealerCode: true, name: true },
+    });
+
+    if (!dealers.length) {
+      return NextResponse.json({ success: false, message: "Không tìm thấy đại lý cần xóa." }, { status: 404 });
+    }
+
+    const deletedCodes = dealers.map((dealer) => dealer.dealerCode);
+    const dealerIds = dealers.map((dealer) => dealer.id);
+
+    await prisma.$transaction(async (tx) => {
+      const batches = await tx.paymentBatch.findMany({
+        where: { dealerId: { in: dealerIds } },
+        select: { id: true },
+      });
+      const batchIds = batches.map((batch) => batch.id);
+      if (batchIds.length) {
+        await tx.paymentLine.deleteMany({ where: { batchId: { in: batchIds } } });
+        await tx.paymentBatch.deleteMany({ where: { id: { in: batchIds } } });
+      }
+
+      const warehouses = await tx.warehouse.findMany({
+        where: { dealerId: { in: dealerIds } },
+        select: { id: true },
+      });
+      const warehouseIds = warehouses.map((warehouse) => warehouse.id);
+      if (warehouseIds.length) {
+        await tx.stockMovement.updateMany({
+          where: { fromWarehouseId: { in: warehouseIds } },
+          data: { fromWarehouseId: null },
+        });
+        await tx.stockMovement.updateMany({
+          where: { toWarehouseId: { in: warehouseIds } },
+          data: { toWarehouseId: null },
+        });
+        await tx.stockBalance.deleteMany({ where: { warehouseId: { in: warehouseIds } } });
+        await tx.warehouse.deleteMany({ where: { id: { in: warehouseIds } } });
+      }
+
+      await tx.serviceOrder.updateMany({ where: { dealerId: { in: dealerIds } }, data: { dealerId: null } });
+      await tx.supportTicket.updateMany({ where: { dealerId: { in: dealerIds } }, data: { dealerId: null } });
+      await tx.user.updateMany({
+        where: { dealerCode: { in: deletedCodes }, role: { in: ["DEALER", "KTV"] } },
+        data: { active: false, dealerCode: null },
+      });
+      await tx.dealer.deleteMany({ where: { id: { in: dealerIds } } });
+      await tx.adminLog.createMany({
+        data: deletedCodes.map((dealerCode) => ({
+          userId: auth.user.id,
+          action: "DELETE_DEALER",
+          target: dealerCode,
+          detail: "Xóa hồ sơ đại lý; giữ lịch sử dịch vụ bằng cách bỏ liên kết dealerId.",
+        })),
+      });
+    });
+
+    return NextResponse.json({
+      success: true,
+      data: { deletedCodes },
+      message: deletedCodes.length === 1 ? "Đã xóa đại lý." : `Đã xóa ${deletedCodes.length} đại lý.`,
+    });
+  } catch (error) {
+    console.error("DELETE /api/dealers failed", error);
+    return NextResponse.json({ success: false, message: "Không xóa được đại lý." }, { status: 500 });
   }
 }
