@@ -64,27 +64,10 @@ export default function ActivationStepOnePage() {
       );
   }, [machineId]);
 
-  useEffect(() => {
-    fetch("/api/auth/me", { cache: "no-store" })
-      .then(async (response) => ({ response, result: await response.json() }))
-      .then(({ response, result }) => {
-        if (!response.ok || !result.success) return;
-        setDealerCode(result.user.dealerCode || "");
-        setInstallerName(result.user.name || "");
-        setInstallerPhone(result.user.phone || "");
-        const role = String(result.user.role || "").toUpperCase();
-        if (role === "ADMIN" || role === "SUPER_ADMIN")
-          setWorkHome("/admin/reports");
-        else if (role === "KTV") setWorkHome("/technician-portal");
-        else if (role === "CSKH") setWorkHome("/cskh/tickets");
-        else setWorkHome("/agent-portal");
-      })
-      .catch(() => undefined);
-  }, []);
-
   const [mode, setMode] = useState<"normal" | "quick">("normal");
   const [ownerName, setOwnerName] = useState("");
   const [ownerPhone, setOwnerPhone] = useState("");
+  const [ownerEmail, setOwnerEmail] = useState("");
   const [address, setAddress] = useState("");
   const [allowTestMode, setAllowTestMode] = useState(false);
   const [installationDate, setInstallationDate] = useState(getTodayString());
@@ -99,6 +82,23 @@ export default function ActivationStepOnePage() {
   const [bankName, setBankName] = useState("");
   const [completed, setCompleted] = useState(false);
   const [workHome, setWorkHome] = useState("/agent-portal");
+
+  useEffect(() => {
+    fetch("/api/auth/me", { cache: "no-store" })
+      .then(async (response) => ({ response, result: await response.json() }))
+      .then(({ response, result }) => {
+        if (!response.ok || !result.success) return;
+        setDealerCode(result.user.dealerCode || "");
+        setInstallerName(result.user.name || "");
+        setInstallerPhone(result.user.phone || "");
+        const role = String(result.user.role || "").toUpperCase();
+        if (role === "ADMIN" || role === "SUPER_ADMIN") setWorkHome("/admin/reports");
+        else if (role === "KTV") setWorkHome("/technician-portal");
+        else if (role === "CSKH") setWorkHome("/cskh/tickets");
+        else setWorkHome("/agent-portal");
+      })
+      .catch(() => undefined);
+  }, []);
 
   const [location, setLocation] = useState<LocationData | null>(null);
 
@@ -233,6 +233,7 @@ export default function ActivationStepOnePage() {
           mode,
           ownerName,
           ownerPhone,
+          ownerEmail,
           address,
           location: location || { latitude: 21.0278, longitude: 105.8342 },
           note: allowTestMode ? "Kích hoạt bằng chế độ test" : undefined,
@@ -508,6 +509,24 @@ export default function ActivationStepOnePage() {
               placeholder="Ví dụ: 0912345678"
               className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-green-600 focus:ring-2 focus:ring-green-100"
             />
+          </label>
+
+          <label className="block">
+            <span className="mb-2 block text-sm font-semibold text-slate-700">
+              Email nhận thông báo
+            </span>
+
+            <input
+              type="email"
+              value={ownerEmail}
+              onChange={(event) => setOwnerEmail(event.target.value)}
+              placeholder="Ví dụ: khachhang@gmail.com"
+              className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-green-600 focus:ring-2 focus:ring-green-100"
+            />
+
+            <p className="mt-1 text-xs text-slate-500">
+              Có email thì hệ thống sẽ gửi thông báo kích hoạt, bảo trì và dịch vụ tự động.
+            </p>
           </label>
 
           <label className="block">

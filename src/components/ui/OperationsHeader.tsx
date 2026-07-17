@@ -70,7 +70,7 @@ export function OperationsHeader({ title, subtitle, actions }: { title: string; 
   return (
     <header className="ops-header">
       <div className="ops-header-inner">
-        <div className="flex min-w-0 items-center justify-between gap-4">
+        <div className="flex min-w-0 items-center justify-between gap-2 sm:gap-4">
           <div className="flex min-w-0 items-center gap-4">
             <Brand compact href={home} />
             <span className="hidden h-8 w-px bg-slate-200 sm:block" />
@@ -80,7 +80,7 @@ export function OperationsHeader({ title, subtitle, actions }: { title: string; 
               {subtitle && <p className="mt-0.5 hidden truncate text-xs text-slate-500 lg:block">{subtitle}</p>}
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-2">
             {actions}
             {user && <span className="hidden max-w-40 truncate text-xs font-bold text-slate-500 xl:block">{user.name}</span>}
             <button type="button" onClick={logout} disabled={loggingOut} className="icon-button" title="Đăng xuất" aria-label="Đăng xuất"><Icon name="log-out" size={18}/></button>

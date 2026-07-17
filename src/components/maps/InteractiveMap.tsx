@@ -201,20 +201,23 @@ export default function InteractiveMap({ markers, activeId, onSelect, className 
 
   useEffect(() => {
     if (!ready) return;
+    const activeMarker = normalizedMarkers.find((marker) => marker.id === activeId) || null;
+
     if (googleMapRef.current && window.google?.maps) {
       const maps = window.google.maps;
       googleMarkersRef.current.forEach((marker) => marker.setMap(null));
       googleMarkersRef.current = [];
       const bounds = new maps.LatLngBounds();
       normalizedMarkers.forEach((marker) => {
+        const active = marker.id === activeId;
         const instance = new maps.Marker({
           map: googleMapRef.current,
           position: { lat: marker.lat, lng: marker.lng },
           title: marker.title,
           icon: {
-            url: markerSvg(marker, marker.id === activeId),
-            scaledSize: new maps.Size(marker.id === activeId ? 52 : 44, marker.id === activeId ? 61 : 52),
-            anchor: new maps.Point(marker.id === activeId ? 26 : 22, marker.id === activeId ? 57 : 48),
+            url: markerSvg(marker, active),
+            scaledSize: new maps.Size(active ? 56 : 44, active ? 65 : 52),
+            anchor: new maps.Point(active ? 28 : 22, active ? 60 : 48),
           },
           optimized: true,
         });
@@ -222,8 +225,16 @@ export default function InteractiveMap({ markers, activeId, onSelect, className 
         googleMarkersRef.current.push(instance);
         bounds.extend({ lat: marker.lat, lng: marker.lng });
       });
-      if (normalizedMarkers.length > 1) googleMapRef.current.fitBounds(bounds, 72);
-      else if (normalizedMarkers.length === 1) { googleMapRef.current.setCenter({ lat: normalizedMarkers[0].lat, lng: normalizedMarkers[0].lng }); googleMapRef.current.setZoom(14); }
+
+      if (activeMarker) {
+        googleMapRef.current.setCenter({ lat: activeMarker.lat, lng: activeMarker.lng });
+        googleMapRef.current.setZoom(16);
+      } else if (normalizedMarkers.length > 1) {
+        googleMapRef.current.fitBounds(bounds, 72);
+      } else if (normalizedMarkers.length === 1) {
+        googleMapRef.current.setCenter({ lat: normalizedMarkers[0].lat, lng: normalizedMarkers[0].lng });
+        googleMapRef.current.setZoom(14);
+      }
     }
 
     if (leafletMapRef.current && window.L) {
@@ -235,12 +246,18 @@ export default function InteractiveMap({ markers, activeId, onSelect, className 
         const active = marker.id === activeId;
         const html = `<div class="kosovota-map-marker ${active ? "is-active" : ""}" style="--marker-color:${color}"><span>${glyph}</span></div>`;
         return L.marker([marker.lat, marker.lng], {
-          icon: L.divIcon({ className: "kosovota-map-marker-wrap", html, iconSize: [active ? 50 : 44, active ? 58 : 52], iconAnchor: [active ? 25 : 22, active ? 55 : 49] }),
+          icon: L.divIcon({ className: "kosovota-map-marker-wrap", html, iconSize: [active ? 52 : 44, active ? 60 : 52], iconAnchor: [active ? 26 : 22, active ? 57 : 49] }),
           title: marker.title,
         }).bindTooltip(`<strong>${escapeHtml(marker.title)}</strong>${marker.subtitle ? `<br/><span>${escapeHtml(marker.subtitle)}</span>` : ""}`, { direction: "top", offset: [0, -40] }).on("click", () => onSelect?.(marker.id)).addTo(leafletMapRef.current!);
       });
-      if (normalizedMarkers.length > 1) leafletMapRef.current.fitBounds(L.latLngBounds(normalizedMarkers.map((m) => [m.lat, m.lng])), { padding: [56, 56], maxZoom: 14 });
-      else if (normalizedMarkers.length === 1) leafletMapRef.current.setView([normalizedMarkers[0].lat, normalizedMarkers[0].lng], 14);
+
+      if (activeMarker) {
+        leafletMapRef.current.setView([activeMarker.lat, activeMarker.lng], 16);
+      } else if (normalizedMarkers.length > 1) {
+        leafletMapRef.current.fitBounds(L.latLngBounds(normalizedMarkers.map((m) => [m.lat, m.lng])), { padding: [56, 56], maxZoom: 14 });
+      } else if (normalizedMarkers.length === 1) {
+        leafletMapRef.current.setView([normalizedMarkers[0].lat, normalizedMarkers[0].lng], 14);
+      }
     }
   }, [normalizedMarkers, activeId, onSelect, ready]);
 

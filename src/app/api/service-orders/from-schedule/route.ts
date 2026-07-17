@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { hasRole } from "@/lib/auth";
 import { createOrderCode } from "@/lib/order-code";
+import { queueServiceOrderCreatedNotifications } from "@/lib/notifications/events";
 
 export async function POST(request: NextRequest) {
   const auth = await hasRole(request, ["ADMIN", "CSKH"]);
@@ -36,6 +37,15 @@ export async function POST(request: NextRequest) {
       await tx.maintenanceSchedule.update({ where: { id: schedule.id }, data: { status: "ORDER_CREATED" } });
       return created;
     });
+    if (schedule.machine.customer) {
+      await queueServiceOrderCreatedNotifications({
+        orderCode: order.orderCode,
+        machineId: order.machineId,
+        serviceType: order.serviceType,
+        dueDate: order.dueDate,
+        customer: schedule.machine.customer,
+      });
+    }
     return NextResponse.json({ success: true, message: "Đã tạo lệnh từ lịch bảo trì.", data: order }, { status: 201 });
   } catch (error) {
     console.error("from schedule failed", error);

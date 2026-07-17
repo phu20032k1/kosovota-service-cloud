@@ -132,6 +132,9 @@ export async function PATCH(request: NextRequest) {
   if (!current || !CREATABLE_ROLES.has(current.role)) return NextResponse.json({ success: false, message: "Không tìm thấy tài khoản hoặc Admin không được sửa vai trò này." }, { status: 404 });
 
   const data: Record<string, unknown> = {};
+  const nextRole = "role" in body ? text(body.role).toUpperCase() : current.role;
+  if (!CREATABLE_ROLES.has(nextRole)) return NextResponse.json({ success: false, message: "Admin chỉ được đặt vai trò CSKH, Đại lý hoặc KTV." }, { status: 400 });
+  data.role = nextRole;
   if (typeof body.active === "boolean") data.active = body.active;
   if ("name" in body) {
     const name = text(body.name);
@@ -143,12 +146,22 @@ export async function PATCH(request: NextRequest) {
     if (!isValidVietnamPhone(phone)) return NextResponse.json({ success: false, message: "Số điện thoại phải là số Việt Nam hợp lệ." }, { status: 400 });
     data.phone = phone;
   }
-  if (current.role === "CSKH" && "provinceScope" in body) data.provinceScope = text(body.provinceScope) || null;
-  if (["DEALER", "KTV"].includes(current.role) && "dealerCode" in body) {
+  if (nextRole === "CSKH") {
+    const provinceScope = "provinceScope" in body ? text(body.provinceScope) : current.provinceScope || "";
+    if (!provinceScope) return NextResponse.json({ success: false, message: "Tài khoản CSKH cần phạm vi tỉnh." }, { status: 400 });
+    data.provinceScope = provinceScope;
+    data.dealerCode = null;
+  }
+  if (["DEALER", "KTV"].includes(nextRole)) {
     const dealerCode = text(body.dealerCode).toUpperCase();
     const dealer = await prisma.dealer.findUnique({ where: { dealerCode } });
     if (!dealer || dealer.status !== "APPROVED") return NextResponse.json({ success: false, message: "Mã đại lý không tồn tại hoặc chưa duyệt." }, { status: 400 });
+    if (nextRole === "DEALER") {
+      const linked = await prisma.user.findFirst({ where: { role: "DEALER", dealerCode, id: { not: id } }, select: { id: true } });
+      if (linked) return NextResponse.json({ success: false, message: "Mã đại lý đã có tài khoản Đại lý khác." }, { status: 409 });
+    }
     data.dealerCode = dealerCode;
+    data.provinceScope = null;
   }
 
   let initialPassword: string | null = null;

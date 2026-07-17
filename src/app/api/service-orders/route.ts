@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { hasRole } from "@/lib/auth";
 import { normalizePhone } from "@/lib/phone";
 import { createOrderCode } from "@/lib/order-code";
+import { queueServiceOrderCreatedNotifications } from "@/lib/notifications/events";
 
 const ORDER_INCLUDE = {
   machine: { include: { customer: true } },
@@ -82,6 +83,15 @@ export async function POST(request: NextRequest) {
     });
 
     await prisma.adminLog.create({ data: { userId: auth.user.id, action: "CREATE_SERVICE_ORDER", target: order.orderCode } });
+    if (order.machine.customer) {
+      await queueServiceOrderCreatedNotifications({
+        orderCode: order.orderCode,
+        machineId: order.machineId,
+        serviceType: order.serviceType,
+        dueDate: order.dueDate,
+        customer: order.machine.customer,
+      });
+    }
     return NextResponse.json({ success: true, message: "Đã tạo lệnh dịch vụ.", data: order }, { status: 201 });
   } catch (error) {
     console.error("POST /api/service-orders failed", error);

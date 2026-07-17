@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCustomerSession, hasRole } from "@/lib/auth";
+import { queueSosNotifications } from "@/lib/notifications/events";
 
 export async function GET(request: NextRequest) {
   const auth = await hasRole(request, ["ADMIN", "CSKH"]);
@@ -41,7 +42,12 @@ export async function POST(request: NextRequest) {
         priority: "HIGH",
       },
     });
-    await prisma.notification.create({ data: { phone: machine.customer.phone, channel: "SMS", kind: "SOS", content: `KOSOVOTA đã tiếp nhận SOS cho máy ${machineId}. Bộ phận CSKH sẽ liên hệ sớm.` } });
+    await queueSosNotifications({
+      ticketId: ticket.id,
+      machineId,
+      customer: machine.customer,
+      note: ticket.note,
+    });
     return NextResponse.json({ success: true, message: "Đã gửi SOS. CSKH sẽ xử lý ngay.", data: ticket }, { status: 201 });
   } catch (error) {
     console.error("POST SOS failed", error);

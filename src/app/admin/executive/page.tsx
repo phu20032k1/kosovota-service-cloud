@@ -7,12 +7,14 @@ import { MetricCard } from "@/components/ui/MetricCard";
 import { LoadingState } from "@/components/ui/LoadingState";
 import { Notice } from "@/components/ui/Notice";
 import { Icon } from "@/components/ui/Icon";
+import { ExecutiveReportDialog, type ExecutiveReportKey } from "@/components/ExecutiveReportDialog";
 
 type Data = {
   kpis: Record<string, number>;
   provinceRows: { provinceCode: string | null; _count: { _all: number } }[];
   lowStockRows: { id: string; quantity: number; item: { sku: string; name: string; minStock: number }; warehouse: { name: string } }[];
   topDealers: { id: string; dealerCode: string; name: string; rating?: number | null; completed: number; revenue: number }[];
+  overdueSchedules: { id: string; title: string; dueDate: string; status: string; machineId: string; machineName: string; customerName: string | null; customerPhone: string | null }[];
 };
 
 const money = (value = 0) => new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND", maximumFractionDigits: 0 }).format(value);
@@ -21,6 +23,7 @@ export default function ExecutiveDashboardPage() {
   const [data, setData] = useState<Data | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [activeReport, setActiveReport] = useState<ExecutiveReportKey | null>(null);
   const load = useCallback(async () => {
     setLoading(true); setError("");
     try {
@@ -44,16 +47,18 @@ export default function ExecutiveDashboardPage() {
       {error && <Notice kind="error">{error}</Notice>}
       {loading && !data ? <LoadingState label="Đang tổng hợp dữ liệu doanh nghiệp..." /> : data && <>
         <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <MetricCard label="Máy đang quản lý" value={data.kpis.machines} icon="droplet" tone="emerald" hint={`${data.kpis.customers} khách hàng`} />
-          <MetricCard label="Doanh thu tháng" value={money(data.kpis.revenueMonth)} icon="activity" tone="blue" hint={`${change >= 0 ? "+" : ""}${change}% so với tháng trước`} />
-          <MetricCard label="Lịch quá hạn" value={data.kpis.overdueSchedules} icon="calendar" tone="rose" hint={`${data.kpis.upcomingSchedules} lịch trong 30 ngày`} />
-          <MetricCard label="Ticket đang mở" value={data.kpis.openTickets} icon="alert" tone="amber" hint={`${data.kpis.criticalTickets} ticket khẩn cấp`} />
+          <button type="button" onClick={() => setActiveReport("machines")} className="report-card-button" title="Xem danh sách máy"><MetricCard label="Máy khách đang sử dụng" value={data.kpis.machines} icon="droplet" tone="emerald" hint={`${data.kpis.customers} khách · ${data.kpis.totalMachines} máy toàn hệ thống · Bấm để xem`} /></button>
+          <button type="button" onClick={() => setActiveReport("revenue")} className="report-card-button" title="Xem báo cáo doanh thu"><MetricCard label="Doanh thu tháng" value={money(data.kpis.revenueMonth)} icon="activity" tone="blue" hint={`${change >= 0 ? "+" : ""}${change}% so với tháng trước · Bấm để xem`} /></button>
+          <button type="button" onClick={() => setActiveReport("overdue")} className="report-card-button" title="Xem lịch quá hạn">
+            <MetricCard label="Lịch quá hạn" value={data.kpis.overdueSchedules} icon="calendar" tone="rose" hint={`${data.kpis.upcomingSchedules} lịch trong 30 ngày · Bấm để xem`} />
+          </button>
+          <button type="button" onClick={() => setActiveReport("tickets")} className="report-card-button" title="Xem ticket"><MetricCard label="Ticket đang mở" value={data.kpis.openTickets} icon="alert" tone="amber" hint={`${data.kpis.criticalTickets} ticket khẩn cấp · Bấm để xem`} /></button>
         </section>
         <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <MetricCard label="Đại lý hoạt động" value={data.kpis.dealers} icon="store" tone="violet" />
-          <MetricCard label="Giá trị tồn kho" value={money(data.kpis.inventoryValue)} icon="package" tone="emerald" />
-          <MetricCard label="Đã thanh toán" value={money(data.kpis.paid)} icon="check" tone="blue" />
-          <MetricCard label="Công nợ chờ xử lý" value={money(data.kpis.payable)} icon="wallet" tone="amber" />
+          <button type="button" onClick={() => setActiveReport("dealers")} className="report-card-button" title="Xem đại lý"><MetricCard label="Đại lý hoạt động" value={data.kpis.dealers} icon="store" tone="violet" hint="Bấm để xem chi tiết" /></button>
+          <button type="button" onClick={() => setActiveReport("inventory")} className="report-card-button" title="Xem tồn kho"><MetricCard label="Giá trị tồn kho" value={money(data.kpis.inventoryValue)} icon="package" tone="emerald" hint="Bấm để xem chi tiết" /></button>
+          <button type="button" onClick={() => setActiveReport("paid")} className="report-card-button" title="Xem thanh toán"><MetricCard label="Đã thanh toán" value={money(data.kpis.paid)} icon="check" tone="blue" hint="Bấm để xem chi tiết" /></button>
+          <button type="button" onClick={() => setActiveReport("payable")} className="report-card-button" title="Xem công nợ"><MetricCard label="Công nợ chờ xử lý" value={money(data.kpis.payable)} icon="wallet" tone="amber" hint="Bấm để xem chi tiết" /></button>
         </section>
 
         <section className="grid gap-6 xl:grid-cols-3">
@@ -73,5 +78,6 @@ export default function ExecutiveDashboardPage() {
         </section>
       </>}
     </div>
+    <ExecutiveReportDialog report={activeReport} onClose={() => setActiveReport(null)} />
   </main>;
 }

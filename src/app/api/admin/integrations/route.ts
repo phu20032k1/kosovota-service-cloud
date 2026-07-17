@@ -33,7 +33,7 @@ export async function GET(request: NextRequest) {
       otpTemplate: Boolean(process.env.ZALO_ZBS_OTP_TEMPLATE_ID),
       serviceOrderTemplate: Boolean(process.env.ZALO_ZBS_SERVICE_ORDER_TEMPLATE_ID),
     },
-    email: { ready: Boolean(process.env.EMAIL_WEBHOOK_URL) },
+    email: { ready: Boolean(process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD), from: process.env.EMAIL_FROM || process.env.GMAIL_USER || "" },
   };
   return NextResponse.json({ success: true, data });
 }

@@ -19,7 +19,12 @@ required("NEXT_PUBLIC_APP_URL");
 if (value("NEXT_PUBLIC_APP_URL") && !value("NEXT_PUBLIC_APP_URL").startsWith("https://")) errors.push("NEXT_PUBLIC_APP_URL production phải dùng https://");
 if (value("OTP_FIXED_CODE")) errors.push("Phải xóa OTP_FIXED_CODE khỏi production");
 if (value("OTP_DEBUG") !== "false") errors.push('OTP_DEBUG phải là "false"');
-if (value("NOTIFICATION_DRY_RUN") !== "false") warnings.push('NOTIFICATION_DRY_RUN chưa là "false": hệ thống sẽ không gửi SMS/Zalo thật.');
+if (value("NOTIFICATION_DRY_RUN") !== "false") warnings.push('NOTIFICATION_DRY_RUN chưa là "false": hệ thống sẽ không gửi SMS/Zalo/Email thật.');
+if (value("NOTIFICATION_DRY_RUN") === "false") {
+  required("GMAIL_USER");
+  required("GMAIL_APP_PASSWORD");
+  required("EMAIL_FROM");
+}
 
 if ((value("OTP_CHANNEL") || "SMS").toUpperCase() === "SMS") {
   required("ESMS_API_KEY");

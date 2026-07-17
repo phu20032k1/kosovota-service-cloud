@@ -6,7 +6,7 @@ export type IconName =
   | "eye" | "eye-off" | "file" | "filter" | "home" | "info" | "layers"
   | "lock" | "log-out" | "map" | "map-pin" | "menu" | "navigation"
   | "package" | "phone" | "plus" | "qr" | "refresh" | "route" | "search"
-  | "send" | "settings" | "shield" | "star" | "store" | "upload" | "user"
+  | "send" | "settings" | "shield" | "star" | "store" | "trash" | "upload" | "user"
   | "users" | "wallet" | "wrench" | "x";
 
 const paths: Record<IconName, ReactNode> = {
@@ -48,6 +48,7 @@ const paths: Record<IconName, ReactNode> = {
   shield: <><path d="M20 13c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V5l8-3 8 3Z"/><path d="m9 12 2 2 4-4"/></>,
   star: <><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></>,
   store: <><path d="M3 9 5 3h14l2 6"/><path d="M5 13v8h14v-8M3 9a3 3 0 0 0 6 0 3 3 0 0 0 6 0 3 3 0 0 0 6 0"/><path d="M9 21v-6h6v6"/></>,
+  trash: <><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/></>,
   upload: <><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></>,
   user: <><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></>,
   users: <><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></>,

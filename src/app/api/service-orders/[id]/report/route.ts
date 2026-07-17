@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { hasRole } from "@/lib/auth";
 import { createMovementCode } from "@/lib/enterprise-codes";
 import { writeAudit } from "@/lib/audit";
+import { queueServiceCompletedEmail } from "@/lib/notifications/events";
 
 type Params = { params: Promise<{ id: string }> };
 type MaterialInput = { itemId: string; quantity: number };
@@ -33,7 +34,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     const materials = parseMaterials(body.materials);
     const order = await prisma.serviceOrder.findUnique({
       where: { id },
-      include: { dealer: true, reports: { select: { id: true }, take: 1 } },
+      include: { dealer: true, machine: { include: { customer: true } }, reports: { select: { id: true }, take: 1 } },
     });
     if (!order) return NextResponse.json({ success: false, message: "Không tìm thấy lệnh dịch vụ." }, { status: 404 });
     if (auth.user.role === "DEALER" && order.dealer?.dealerCode !== auth.user.dealerCode) {
@@ -141,6 +142,15 @@ export async function POST(request: NextRequest, { params }: Params) {
       target: order.orderCode,
       detail: { reportId: result.report.id, materials: result.movements },
     });
+    if (order.machine.customer) {
+      await queueServiceCompletedEmail({
+        customer: order.machine.customer,
+        orderCode: order.orderCode,
+        machineId: order.machineId,
+        serviceType: order.serviceType,
+        products: result.report.products,
+      });
+    }
     return NextResponse.json({
       success: true,
       message: materials.length

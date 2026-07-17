@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { hasRole } from "@/lib/auth";
 import { createOrderCode } from "@/lib/order-code";
 import { normalizePhone } from "@/lib/phone";
+import { queueDealerServiceOrderEmail } from "@/lib/notifications/events";
 
 function canAccessProvince(role: string, scopeValue: string | null, provinceCode?: string | null) {
   if (role !== "CSKH") return true;
@@ -117,6 +118,16 @@ export async function POST(request: NextRequest) {
       await tx.notification.create({ data: buildNotification(updated, dealer, baseUrl) });
       await tx.adminLog.create({ data: { userId: auth.user.id, action: "ASSIGN_SERVICE_ORDER", target: updated.orderCode, detail: dealer.dealerCode } });
       return updated;
+    });
+
+    await queueDealerServiceOrderEmail({
+      dealer,
+      orderCode: order.orderCode,
+      machineId: order.machineId,
+      customerName: order.customerName,
+      customerPhone: order.customerPhone,
+      address: order.address,
+      serviceType: order.serviceType,
     });
 
     return NextResponse.json({ success: true, message: "Đã giao lệnh và xếp thông báo gửi đại lý.", data: order });

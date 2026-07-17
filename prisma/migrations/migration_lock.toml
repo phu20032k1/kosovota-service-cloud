@@ -1,0 +1,2 @@
+# Prisma migration lock for the current PostgreSQL/Neon schema.
+provider = "postgresql"

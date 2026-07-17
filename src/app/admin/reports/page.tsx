@@ -8,6 +8,7 @@ import { OperationsHeader } from "@/components/ui/OperationsHeader";
 import { MetricCard } from "@/components/ui/MetricCard";
 import { Icon } from "@/components/ui/Icon";
 import { Notice } from "@/components/ui/Notice";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { downloadXlsx } from "@/lib/client-xlsx";
 
 type Machine = {
@@ -91,6 +92,8 @@ export default function AdminReportsPage() {
   const [machineStatus, setMachineStatus] = useState("");
   const [search, setSearch] = useState("");
   const [selectedMachineIds, setSelectedMachineIds] = useState<string[]>([]);
+  const [deleteRequest, setDeleteRequest] = useState<string[] | null>(null);
+  const [dealerStatusRequest, setDealerStatusRequest] = useState<{ codes: string[]; status: "APPROVED" | "REJECTED" } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -138,7 +141,7 @@ export default function AdminReportsPage() {
     setSelectedMachineIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
   }
 
-  async function updateDealers(dealerCodes: string | string[], status: string) {
+  async function updateDealers(dealerCodes: string | string[], status: "APPROVED" | "REJECTED") {
     const codes = Array.isArray(dealerCodes) ? dealerCodes : [dealerCodes];
     if (!codes.length) return;
     setBusy(true);
@@ -164,8 +167,6 @@ export default function AdminReportsPage() {
   async function deleteMachines(machineIds: string | string[]) {
     const ids = Array.isArray(machineIds) ? machineIds : [machineIds];
     if (!ids.length) return;
-    const label = ids.length === 1 ? ids[0] : `${ids.length} máy đã chọn`;
-    if (!window.confirm(`Xóa ${label}? Dữ liệu kích hoạt, bảo trì, ticket và lệnh dịch vụ liên quan cũng sẽ bị xóa.`)) return;
 
     setBusy(true);
     setError("");
@@ -188,13 +189,27 @@ export default function AdminReportsPage() {
     }
   }
 
-  return <main className="min-h-screen bg-slate-100">
+  async function confirmDeleteMachines() {
+    if (!deleteRequest?.length) return;
+    const ids = deleteRequest;
+    setDeleteRequest(null);
+    await deleteMachines(ids);
+  }
+
+  async function confirmDealerStatus() {
+    if (!dealerStatusRequest?.codes?.length) return;
+    const request = dealerStatusRequest;
+    setDealerStatusRequest(null);
+    await updateDealers(request.codes, request.status);
+  }
+
+  return <main className="page-shell">
     <OperationsHeader
       title="Điều hành toàn quốc"
       subtitle="KPI, dữ liệu máy, đại lý, dịch vụ và SOS"
       actions={<><Link href="/admin/integrations" className="icon-button" title="Tích hợp dịch vụ"><Icon name="settings" size={18}/></Link><Link href="/admin/notifications" className="icon-button" title="Trung tâm thông báo"><Icon name="bell" size={18}/></Link></>}
     />
-    <div className="mx-auto max-w-[1480px] space-y-6 p-4 sm:p-6">
+    <div className="page-container space-y-6">
       {message && <Notice kind="success">{message}</Notice>}
       {error && <Notice kind="error">{error}</Notice>}
       <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
@@ -207,7 +222,7 @@ export default function AdminReportsPage() {
       </section>
 
       <section className="grid gap-6 lg:grid-cols-3">
-        <div className="rounded-2xl bg-white p-5 shadow-sm lg:col-span-3">
+        <div className="surface-card p-5 lg:col-span-3">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <h2 className="text-lg font-black">Xuất / nhập dữ liệu vận hành</h2>
@@ -253,7 +268,7 @@ export default function AdminReportsPage() {
           </label>
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-sm font-bold text-slate-500">Đã chọn: {selectedMachineIds.length}</span>
-            <button type="button" disabled={busy || selectedMachineIds.length === 0} onClick={() => void deleteMachines(selectedMachineIds)} className="rounded-xl border border-rose-200 px-4 py-2 text-sm font-bold text-rose-700 disabled:opacity-50">Xóa máy hàng loạt</button>
+            <button type="button" disabled={busy || selectedMachineIds.length === 0} onClick={() => setDeleteRequest(selectedMachineIds)} className="danger-button text-sm disabled:opacity-50"><Icon name="trash" size={16}/>Xóa máy hàng loạt</button>
           </div>
         </div>
 
@@ -285,7 +300,7 @@ export default function AdminReportsPage() {
                       <Link href={`/admin/machines/${encodeURIComponent(machine.id)}`} className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-bold text-white">Xem chi tiết</Link>
                       <Link href={`/qr/${encodeURIComponent(machine.id)}`} className="rounded-lg border border-emerald-200 px-3 py-2 text-xs font-bold text-emerald-700">In QR</Link>
                       <Link href={`/service-report/${encodeURIComponent(machine.id)}`} className="rounded-lg border border-rose-200 px-3 py-2 text-xs font-bold text-rose-700">Dịch vụ</Link>
-                      <button type="button" disabled={busy} onClick={() => void deleteMachines(machine.id)} className="rounded-lg border border-rose-200 px-3 py-2 text-xs font-bold text-rose-700 disabled:opacity-50">Xóa</button>
+                      <button type="button" disabled={busy} onClick={() => setDeleteRequest([machine.id])} className="ghost-danger px-3 py-2 text-xs disabled:opacity-50"><Icon name="trash" size={14}/>Xóa</button>
                     </div>
                   </td>
                 </tr>;
@@ -301,8 +316,8 @@ export default function AdminReportsPage() {
           <div className="flex flex-wrap items-center justify-between gap-3 border-b p-5">
             <h2 className="text-xl font-black">Hồ sơ đại lý chờ duyệt</h2>
             <div className="flex flex-wrap gap-2">
-              <button type="button" disabled={busy || pendingDealers.length === 0} onClick={() => void updateDealers(pendingDealers.map((dealer) => dealer.dealerCode), "APPROVED")} className="rounded-lg bg-emerald-600 px-3 py-2 font-bold text-white disabled:opacity-50">Duyệt tất cả</button>
-              <button type="button" disabled={busy || pendingDealers.length === 0} onClick={() => void updateDealers(pendingDealers.map((dealer) => dealer.dealerCode), "REJECTED")} className="rounded-lg bg-rose-600 px-3 py-2 font-bold text-white disabled:opacity-50">Từ chối tất cả</button>
+              <button type="button" disabled={busy || pendingDealers.length === 0} onClick={() => setDealerStatusRequest({ codes: pendingDealers.map((dealer) => dealer.dealerCode), status: "APPROVED" })} className="rounded-lg bg-emerald-600 px-3 py-2 font-bold text-white disabled:opacity-50">Duyệt tất cả</button>
+              <button type="button" disabled={busy || pendingDealers.length === 0} onClick={() => setDealerStatusRequest({ codes: pendingDealers.map((dealer) => dealer.dealerCode), status: "REJECTED" })} className="rounded-lg bg-rose-600 px-3 py-2 font-bold text-white disabled:opacity-50">Từ chối tất cả</button>
             </div>
           </div>
           <div className="divide-y">
@@ -314,8 +329,8 @@ export default function AdminReportsPage() {
                   <p className="mt-1 text-sm">{dealer.services}</p>
                 </div>
                 <div className="flex gap-2">
-                  <button type="button" disabled={busy} onClick={() => void updateDealers(dealer.dealerCode, "APPROVED")} className="rounded-lg bg-emerald-600 px-3 py-2 font-bold text-white disabled:opacity-50">Duyệt</button>
-                  <button type="button" disabled={busy} onClick={() => void updateDealers(dealer.dealerCode, "REJECTED")} className="rounded-lg bg-rose-600 px-3 py-2 font-bold text-white disabled:opacity-50">Từ chối</button>
+                  <button type="button" disabled={busy} onClick={() => setDealerStatusRequest({ codes: [dealer.dealerCode], status: "APPROVED" })} className="rounded-lg bg-emerald-600 px-3 py-2 font-bold text-white disabled:opacity-50">Duyệt</button>
+                  <button type="button" disabled={busy} onClick={() => setDealerStatusRequest({ codes: [dealer.dealerCode], status: "REJECTED" })} className="rounded-lg bg-rose-600 px-3 py-2 font-bold text-white disabled:opacity-50">Từ chối</button>
                 </div>
               </div>
             </article>)}
@@ -342,5 +357,29 @@ export default function AdminReportsPage() {
         </div>
       </section>
     </div>
+
+    <ConfirmDialog
+      open={Boolean(deleteRequest)}
+      tone="danger"
+      title="Xóa máy đã chọn?"
+      description="Thao tác này xóa máy cùng dữ liệu kích hoạt, bảo trì, ticket, SOS và lệnh dịch vụ liên quan. Chỉ tiếp tục khi chắc chắn dữ liệu không còn cần dùng."
+      highlight={deleteRequest?.length === 1 ? deleteRequest[0] : `${deleteRequest?.length || 0} máy đã chọn`}
+      confirmLabel="Xóa dữ liệu"
+      busy={busy}
+      onCancel={() => setDeleteRequest(null)}
+      onConfirm={() => void confirmDeleteMachines()}
+    />
+
+    <ConfirmDialog
+      open={Boolean(dealerStatusRequest)}
+      tone={dealerStatusRequest?.status === "APPROVED" ? "info" : "warning"}
+      title={dealerStatusRequest?.status === "APPROVED" ? "Duyệt hồ sơ đại lý?" : "Từ chối hồ sơ đại lý?"}
+      description="Hệ thống sẽ cập nhật trạng thái hàng loạt và tạo thông báo gửi đến đại lý. Hãy kiểm tra danh sách trước khi xác nhận."
+      highlight={dealerStatusRequest?.codes?.length === 1 ? dealerStatusRequest.codes[0] : `${dealerStatusRequest?.codes?.length || 0} hồ sơ`}
+      confirmLabel="Xác nhận"
+      busy={busy}
+      onCancel={() => setDealerStatusRequest(null)}
+      onConfirm={() => void confirmDealerStatus()}
+    />
   </main>;
 }

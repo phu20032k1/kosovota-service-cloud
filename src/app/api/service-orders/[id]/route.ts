@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { hasRole } from "@/lib/auth";
+import { queueServiceStatusEmail } from "@/lib/notifications/events";
 
 type Params = { params: Promise<{ id: string }> };
 const ALLOWED_STATUSES = [
@@ -86,6 +87,16 @@ export async function PUT(request: NextRequest, { params }: Params) {
     }
     if (status === "CUSTOMER_SELF_SERVICE" && current.maintenanceScheduleId) {
       await prisma.maintenanceSchedule.update({ where: { id: current.maintenanceScheduleId }, data: { status: "SELF_SERVICE" } });
+    }
+
+    if (status && status !== current.status && order.machine.customer) {
+      await queueServiceStatusEmail({
+        customer: order.machine.customer,
+        orderCode: order.orderCode,
+        machineId: order.machineId,
+        status,
+        serviceType: order.serviceType,
+      });
     }
 
     return NextResponse.json({ success: true, message: "Đã cập nhật lệnh dịch vụ.", data: order });

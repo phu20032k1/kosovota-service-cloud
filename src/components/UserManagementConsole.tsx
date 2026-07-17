@@ -52,6 +52,7 @@ export function UserManagementConsole({ mode }: { mode: Mode }) {
   const [dealerCode, setDealerCode] = useState("");
   const [dealerProvince, setDealerProvince] = useState("");
   const [editingUser, setEditingUser] = useState<UserRow | null>(null);
+  const [editRole, setEditRole] = useState("");
   const [editName, setEditName] = useState("");
   const [editPhone, setEditPhone] = useState("");
   const [editProvinceScope, setEditProvinceScope] = useState("");
@@ -225,6 +226,7 @@ export function UserManagementConsole({ mode }: { mode: Mode }) {
     setError("");
     setMessage("");
     setEditingUser(user);
+    setEditRole(user.role);
     setEditName(user.name);
     setEditPhone(user.phone);
     setEditProvinceScope(user.provinceScope || "");
@@ -263,10 +265,11 @@ export function UserManagementConsole({ mode }: { mode: Mode }) {
       id: editingUser.id,
       name: editName.trim(),
       phone: editPhone.trim(),
+      role: editRole,
     };
-    if (editingUser.role === "CSKH")
+    if (editRole === "CSKH")
       updates.provinceScope = editProvinceScope.trim();
-    if (editingUser.role === "KTV") updates.dealerCode = editDealerCode.trim();
+    if (["DEALER", "KTV"].includes(editRole)) updates.dealerCode = editDealerCode.trim();
     if (editPassword) updates.resetPassword = editPassword;
 
     setSaving(true);
@@ -642,9 +645,7 @@ export function UserManagementConsole({ mode }: { mode: Mode }) {
             <div className="flex items-start justify-between gap-4">
               <div>
                 <h2 className="text-xl font-black">Sửa tài khoản</h2>
-                <p className="mt-2 text-sm text-slate-500">
-                  Vai trò: {editingUser.role}
-                </p>
+                <p className="mt-2 text-sm text-slate-500">Admin được đổi vai trò giữa CSKH, Đại lý và KTV.</p>
               </div>
               <button
                 type="button"
@@ -655,6 +656,7 @@ export function UserManagementConsole({ mode }: { mode: Mode }) {
               </button>
             </div>
             <div className="mt-6 grid gap-4">
+              <label className="block"><span className="text-sm font-bold text-slate-700">Vai trò</span><select className="mt-2 w-full" value={editRole} onChange={(event) => setEditRole(event.target.value)}>{allowedRoles.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
               <label className="block">
                 <span className="text-sm font-bold text-slate-700">Họ tên</span>
                 <input
@@ -675,7 +677,7 @@ export function UserManagementConsole({ mode }: { mode: Mode }) {
                   }
                 />
               </label>
-              {editingUser.role === "CSKH" && (
+              {editRole === "CSKH" && (
                 <label className="block">
                   <span className="text-sm font-bold text-slate-700">
                     Phạm vi tỉnh
@@ -689,7 +691,7 @@ export function UserManagementConsole({ mode }: { mode: Mode }) {
                   />
                 </label>
               )}
-              {editingUser.role === "KTV" && (
+              {["DEALER", "KTV"].includes(editRole) && (
                 <label className="block">
                   <span className="text-sm font-bold text-slate-700">
                     Thuộc đại lý
@@ -707,7 +709,7 @@ export function UserManagementConsole({ mode }: { mode: Mode }) {
                   </select>
                 </label>
               )}
-              {editingUser.role === "DEALER" && (
+              {editRole === "DEALER" && (
                 <p className="rounded-xl bg-slate-50 p-3 text-sm text-slate-600">
                   Mã đại lý: <strong>{editingUser.dealerCode || "—"}</strong>.
                   Đổi mã tại hồ sơ đại lý để tránh lệch dữ liệu.

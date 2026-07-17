@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { buildMaintenanceSchedules } from "@/lib/maintenance";
 import { hasRole } from "@/lib/auth";
 import { normalizePhone as normalizeVietnamPhone, isValidVietnamPhone } from "@/lib/phone";
-
+import { queueActivationCompletedNotifications } from "@/lib/notifications/events";
 type JsonObject = Record<string, unknown>;
 
 function errorResponse(message: string, status = 400, detail?: unknown) {
@@ -98,6 +98,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ success: true, data: activation ? [activation] : [] });
     }
 
+    
+
     const activations = await prisma.activation.findMany({
       where,
       include: {
@@ -165,6 +167,7 @@ export async function POST(request: NextRequest) {
 async function saveStepOne(body: JsonObject, machineId: string) {
   const ownerName = readString(body.ownerName);
   const ownerPhone = normalizeVietnamPhone(readString(body.ownerPhone));
+  const ownerEmail = readOptionalString(body.ownerEmail ?? body.email ?? body.customerEmail);
   const address = readOptionalString(body.address);
   const mode = readString(body.mode).toLowerCase() || "normal";
 
@@ -224,10 +227,12 @@ async function saveStepOne(body: JsonObject, machineId: string) {
       create: {
         name: ownerName,
         phone: ownerPhone,
+        email: ownerEmail,
         address,
       },
       update: {
         name: ownerName,
+        ...(ownerEmail ? { email: ownerEmail } : {}),
         ...(address ? { address } : {}),
       },
     });
@@ -331,7 +336,7 @@ async function saveStepTwo(body: JsonObject, machineId: string, model: string) {
     }),
     prisma.dealer.findUnique({
       where: { dealerCode },
-      select: { id: true, status: true },
+      select: { id: true, status: true, name: true, phone: true, email: true, dealerCode: true },
     }),
   ]);
 
@@ -409,6 +414,18 @@ async function saveStepTwo(body: JsonObject, machineId: string, model: string) {
     });
 
     return { activation, machine: completedMachine };
+  });
+
+  await queueActivationCompletedNotifications({
+    machineId,
+    model,
+    warrantyMonths: result.machine.warrantyMonths,
+    installDate: result.machine.installDate,
+    customer: result.machine.customer,
+    dealer,
+    installerName,
+    installerPhone,
+    maintenanceCount: scheduleData.length,
   });
 
   return NextResponse.json({

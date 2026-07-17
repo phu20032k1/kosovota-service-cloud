@@ -11,7 +11,7 @@ export async function GET(request: NextRequest, { params }: Params) {
   const { id } = await params;
   const customer = await prisma.customer.findUnique({ where: { id }, include: {
     owner: { select: { id: true, name: true } },
-    machines: { include: { maintenanceSchedules: { orderBy: { dueDate: "asc" } }, serviceReports: { orderBy: { createdAt: "desc" } }, serviceOrders: { orderBy: { createdAt: "desc" }, include: { dealer: true } } } },
+    machines: { include: { activations: { orderBy: { createdAt: "asc" } }, maintenanceSchedules: { orderBy: { dueDate: "asc" } }, serviceReports: { orderBy: { createdAt: "desc" } }, serviceOrders: { orderBy: { createdAt: "desc" }, include: { dealer: true } } } },
     activities: { orderBy: { occurredAt: "desc" }, take: 200 },
     tickets: { orderBy: { createdAt: "desc" }, include: { assignee: { select: { name: true } }, dealer: { select: { name: true } } } },
   } });

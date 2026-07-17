@@ -12,10 +12,10 @@ type State = {
   notifications: { dryRun: boolean; otpChannel: string };
   sms: { provider: string; ready: boolean; sandbox: boolean };
   zalo: { provider: string; ready: boolean; otpTemplate: boolean; serviceOrderTemplate: boolean };
-  email: { ready: boolean };
+  email: { ready: boolean; from: string };
 };
 
-type TestKind = "map" | "sms" | "zalo";
+type TestKind = "map" | "sms" | "zalo" | "email";
 
 export default function IntegrationsPage() {
   const [data, setData] = useState<State | null>(null);
@@ -23,6 +23,7 @@ export default function IntegrationsPage() {
   const [notice, setNotice] = useState<{ kind: "success" | "error" | "info"; text: string } | null>(null);
   const [address, setAddress] = useState("Hồ Hoàn Kiếm, Hà Nội");
   const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState("");
   const [testing, setTesting] = useState<TestKind | null>(null);
 
   useEffect(() => {
@@ -40,7 +41,7 @@ export default function IntegrationsPage() {
       const response = await fetch("/api/admin/integrations/test", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ kind, address, phone }),
+        body: JSON.stringify({ kind, address, phone, email }),
       });
       const result = await response.json();
       if (!response.ok || !result.success) throw new Error(result.message || "Kiểm thử thất bại.");
@@ -56,18 +57,18 @@ export default function IntegrationsPage() {
   }
 
   return <main className="min-h-screen bg-slate-50">
-    <OperationsHeader title="Tích hợp dịch vụ" subtitle="Theo dõi và kiểm thử Map, SMS, Zalo, OTP" />
+    <OperationsHeader title="Tích hợp dịch vụ" subtitle="Theo dõi và kiểm thử Map, SMS, Zalo, Gmail, OTP" />
     <section className="mx-auto max-w-[1480px] space-y-5 p-3 sm:p-5">
       {error && <Notice kind="error">{error}</Notice>}
       {notice && <Notice kind={notice.kind}>{notice.text}</Notice>}
       {!data ? <LoadingState label="Đang kiểm tra cấu hình..." /> : <>
-        {data.notifications.dryRun && <Notice kind="warning">Hệ thống đang ở chế độ DRY RUN: SMS/Zalo chỉ được mô phỏng. Sau khi sandbox thành công, đổi <code>NOTIFICATION_DRY_RUN=false</code> để gửi thật.</Notice>}
+        {data.notifications.dryRun && <Notice kind="warning">Hệ thống đang ở chế độ DRY RUN: SMS/Zalo/Gmail chỉ được mô phỏng. Sau khi sandbox thành công, đổi <code>NOTIFICATION_DRY_RUN=false</code> để gửi thật.</Notice>}
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           <IntegrationCard icon="map" title="Bản đồ" provider={data.map.provider} ready={data.map.ready} rows={[["Khóa trình duyệt", data.map.browserKeyConfigured]]} />
           <IntegrationCard icon="map-pin" title="Geocoding địa chỉ" provider={data.geocoding.provider} ready={data.geocoding.enabled && data.geocoding.ready} rows={[["Đã bật tự động", data.geocoding.enabled], ["Khóa server", data.geocoding.ready]]} />
           <IntegrationCard icon="phone" title="SMS" provider={data.sms.provider} ready={data.sms.ready && !data.sms.sandbox && !data.notifications.dryRun} rows={[["Thông tin API", data.sms.ready], ["Sandbox đã tắt", !data.sms.sandbox], ["Gửi thật đã bật", !data.notifications.dryRun]]} />
           <IntegrationCard icon="send" title="Zalo ZBS Template" provider={data.zalo.provider} ready={data.zalo.ready && !data.notifications.dryRun} rows={[["Access token + template", data.zalo.ready], ["Template OTP", data.zalo.otpTemplate], ["Template giao lệnh", data.zalo.serviceOrderTemplate]]} />
-          <IntegrationCard icon="file" title="Email webhook" provider="webhook" ready={data.email.ready} rows={[["Webhook URL", data.email.ready]]} />
+          <IntegrationCard icon="file" title="Gmail thông báo" provider="smtp.gmail.com:587" ready={data.email.ready && !data.notifications.dryRun} rows={[["GMAIL_USER + APP_PASSWORD", data.email.ready], ["Gửi thật đã bật", !data.notifications.dryRun]]} />
           <IntegrationCard icon="shield" title="OTP" provider={data.notifications.otpChannel} ready={!data.notifications.dryRun && (data.notifications.otpChannel === "ZALO" ? data.zalo.ready : data.sms.ready)} rows={[["Kênh hiện tại", true], ["Gửi thật đã bật", !data.notifications.dryRun]]} />
         </div>
 
@@ -79,11 +80,13 @@ export default function IntegrationsPage() {
           </section>
 
           <section className="surface-card p-5 sm:p-6">
-            <div className="flex items-start gap-4"><span className="metric-icon metric-blue"><Icon name="phone" size={21}/></span><div><h2 className="text-lg font-extrabold">Test SMS / Zalo</h2><p className="mt-1 text-sm leading-6 text-slate-500">Dùng số điện thoại của chính cậu. Với Zalo, template test phải có đúng các biến đã khai báo trong <code>ZALO_ZBS_TEST_TEMPLATE_DATA</code>.</p></div></div>
+            <div className="flex items-start gap-4"><span className="metric-icon metric-blue"><Icon name="phone" size={21}/></span><div><h2 className="text-lg font-extrabold">Test SMS / Zalo / Gmail</h2><p className="mt-1 text-sm leading-6 text-slate-500">Dùng số điện thoại/email của chính cậu. Với Zalo, template test phải có đúng các biến đã khai báo trong <code>ZALO_ZBS_TEST_TEMPLATE_DATA</code>.</p></div></div>
             <input value={phone} onChange={(event) => setPhone(event.target.value.replace(/[^0-9+]/g, ""))} className="form-input mt-5" placeholder="09xxxxxxxx" />
-            <div className="mt-3 grid gap-2 sm:grid-cols-2">
+            <input value={email} onChange={(event) => setEmail(event.target.value)} className="form-input mt-3" placeholder="email-test@gmail.com" />
+            <div className="mt-3 grid gap-2 sm:grid-cols-3">
               <button type="button" onClick={() => void testIntegration("sms")} disabled={testing !== null} className="btn-primary justify-center p-3 font-extrabold text-white disabled:opacity-50"><Icon name={testing === "sms" ? "refresh" : "phone"} size={18}/> {testing === "sms" ? "Đang gửi..." : "Test SMS"}</button>
               <button type="button" onClick={() => void testIntegration("zalo")} disabled={testing !== null} className="btn-secondary justify-center p-3 font-extrabold disabled:opacity-50"><Icon name={testing === "zalo" ? "refresh" : "send"} size={18}/> {testing === "zalo" ? "Đang gửi..." : "Test Zalo"}</button>
+              <button type="button" onClick={() => void testIntegration("email")} disabled={testing !== null} className="btn-secondary justify-center p-3 font-extrabold disabled:opacity-50"><Icon name={testing === "email" ? "refresh" : "file"} size={18}/> {testing === "email" ? "Đang gửi..." : "Test Gmail"}</button>
             </div>
           </section>
         </div>

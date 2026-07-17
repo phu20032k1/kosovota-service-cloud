@@ -52,16 +52,11 @@ function LoginPageContent() {
       .then(async (response) => ({ response, result: await response.json() }))
       .then(({ response, result }) => {
         if (cancelled) return;
-        if (response.ok && result.success) {
-          const user = result.user as CurrentUser;
-          setCurrentUser(user);
-          router.replace(homeForRole(user.role));
-          router.refresh();
-        }
+        if (response.ok && result.success) setCurrentUser(result.user as CurrentUser);
       })
       .catch(() => undefined);
     return () => { cancelled = true; };
-  }, [router]);
+  }, []);
 
   async function logoutCurrent() {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -101,8 +96,8 @@ function LoginPageContent() {
     }
   }
 
-  return <main className="grid min-h-screen bg-slate-950 lg:grid-cols-[1.05fr_.95fr]">
-    <section className="relative hidden overflow-hidden bg-[linear-gradient(145deg,#032b22_0%,#064e3b_55%,#0f766e_100%)] p-10 text-white lg:flex lg:flex-col lg:justify-between xl:p-16">
+  return <main className="auth-page grid min-h-screen lg:grid-cols-[1.05fr_.95fr]">
+    <section className="auth-side hidden p-10 lg:flex lg:flex-col lg:justify-between xl:p-16">
       <div className="absolute -left-28 top-1/3 h-80 w-80 rounded-full bg-emerald-300/10 blur-3xl"/><div className="absolute -right-20 -top-20 h-96 w-96 rounded-full bg-cyan-300/10 blur-3xl"/>
       <div className="relative"><Brand inverse/></div>
       <div className="relative max-w-xl">
@@ -111,13 +106,13 @@ function LoginPageContent() {
         <p className="mt-5 max-w-lg text-base leading-8 text-emerald-50/70">Khách hàng dùng OTP. Admin, CSKH, Đại lý và KTV đăng nhập bằng tài khoản nội bộ, sau đó hệ thống tự chuyển về đúng cổng.</p>
         <div className="mt-9 grid grid-cols-2 gap-3">{ROLE_OPTIONS.map((item)=><button key={item.value} type="button" onClick={()=>setRole(item.value)} className={`flex items-center gap-3 rounded-2xl border p-4 text-left transition ${role===item.value?"border-emerald-300 bg-emerald-300/18":"border-white/10 bg-white/8 hover:bg-white/12"}`}><span className="grid h-10 w-10 place-items-center rounded-xl bg-emerald-300/12 text-emerald-200"><Icon name={item.icon} size={20}/></span><span><span className="block text-sm font-bold">{item.title}</span><span className="mt-1 block text-xs text-white/50">{item.description}</span></span></button>)}</div>
       </div>
-      <p className="relative text-xs text-white/45">KOSOVOTA Service Cloud · Không chia sẻ tài khoản hoặc OTP.</p>
+      <p className="relative text-xs text-white/45">KOSOVOTA Service Cloud — Không chia sẻ tài khoản hoặc OTP.</p>
     </section>
 
     <section className="flex min-h-screen items-center justify-center bg-[radial-gradient(circle_at_100%_0,rgba(16,185,129,.12),transparent_24rem)] px-4 py-10 sm:px-8">
       <div className="w-full max-w-md">
         <div className="mb-8 flex justify-center lg:hidden"><Brand inverse/></div>
-        <form onSubmit={submitLogin} className="rounded-[2rem] border border-white/10 bg-white p-7 shadow-2xl shadow-black/25 sm:p-9">
+        <form onSubmit={submitLogin} className="auth-panel p-7 sm:p-9">
           <div><p className="text-xs font-extrabold uppercase tracking-[.2em] text-emerald-700">KOSOVOTA SERVICE CLOUD</p><h2 className="mt-3 text-3xl font-black tracking-[-.04em] text-slate-950">Bạn đăng nhập với vai trò nào?</h2><p className="mt-2 text-sm leading-6 text-slate-500">Chọn đúng vị trí để hệ thống mở đúng màn hình và quyền dữ liệu.</p></div>
           <div className="mt-6 grid gap-3 sm:grid-cols-2">{ROLE_OPTIONS.map((item)=><button key={item.value} type="button" onClick={()=>setRole(item.value)} className={`rounded-2xl border p-4 text-left transition ${role===item.value?"border-emerald-500 bg-emerald-50 text-emerald-950 shadow-sm":"border-slate-200 bg-white text-slate-600 hover:border-emerald-200 hover:bg-emerald-50/50"}`}><Icon name={item.icon} size={20}/><strong className="mt-3 block text-sm">{item.title}</strong><span className="mt-1 block text-xs leading-5 opacity-70">{item.description}</span></button>)}</div>
           <div className="mt-5 rounded-2xl border border-emerald-100 bg-emerald-50 p-4 text-sm leading-6 text-emerald-900"><strong>{selectedRole.title}:</strong> {selectedRole.helper}</div>
@@ -127,7 +122,7 @@ function LoginPageContent() {
           {!customerMode && <div className="mt-7 space-y-5"><label className="block"><span className="mb-2 block text-sm font-bold text-slate-700">Số điện thoại</span><div className="relative"><Icon name="phone" size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400"/><input type="tel" inputMode="numeric" value={phone} onChange={(e)=>setPhone(e.target.value.replace(/\D/g,""))} placeholder="Nhập số điện thoại" className="pl-11" required={!customerMode} minLength={10} autoComplete="username"/></div></label><label className="block"><span className="mb-2 block text-sm font-bold text-slate-700">Mật khẩu</span><div className="relative"><Icon name="lock" size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400"/><input type={showPassword?"text":"password"} value={password} onChange={(e)=>setPassword(e.target.value)} placeholder="Nhập mật khẩu" className="pl-11 pr-12" required={!customerMode} autoComplete="current-password"/><button type="button" onClick={()=>setShowPassword((v)=>!v)} className="absolute right-2.5 top-1/2 grid h-9 w-9 -translate-y-1/2 place-items-center rounded-xl text-slate-400 hover:bg-slate-100 hover:text-emerald-700" title={showPassword?"Ẩn mật khẩu":"Hiện mật khẩu"}><Icon name={showPassword?"eye-off":"eye"} size={18}/></button></div></label></div>}
 
           <button type="submit" disabled={submitting} className="btn-primary mt-7 flex w-full items-center justify-center gap-2 px-5 py-4 text-base font-extrabold text-white disabled:opacity-60">{customerMode?<><Icon name="user" size={18}/>Tiếp tục cổng khách hàng</>:submitting?<><span className="animate-spin"><Icon name="refresh" size={19}/></span>Đang đăng nhập...</>:<><Icon name="lock" size={18}/>Đăng nhập {selectedRole.title}</>}</button>
-          <div className="mt-5 flex items-center justify-between gap-3 text-sm"><Link href="/forgot-password" className="font-semibold text-slate-500 hover:text-emerald-700">Quên mật khẩu?</Link><Link href="/" className="inline-flex items-center gap-1 font-semibold text-slate-500 hover:text-emerald-700">Trang chủ <Icon name="chevron-right" size={15}/></Link></div>
+          <div className="mt-5 flex items-center justify-between gap-3 text-sm"><Link href="/forgot-password" className="font-semibold text-slate-500 hover:text-emerald-700">Quên mật khẩu?</Link><Link href="/dealer-register" className="font-semibold text-slate-500 hover:text-emerald-700">Đăng ký đại lý</Link><Link href="/" className="inline-flex items-center gap-1 font-semibold text-slate-500 hover:text-emerald-700">Trang chủ <Icon name="chevron-right" size={15}/></Link></div>
         </form>
       </div>
     </section>

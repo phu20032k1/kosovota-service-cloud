@@ -10,6 +10,8 @@ function normalizedHeader(value: unknown) {
   return String(value ?? "")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/Đ/g, "D")
     .trim()
     .toLowerCase()
     .replace(/\s+/g, " ");
@@ -174,13 +176,14 @@ export async function POST(request: NextRequest) {
             console.warn(`Không geocode được dòng ${rowNumber}:`, geocodeError);
           }
         }
-        const customer = phone ? await prisma.customer.upsert({
-          where: { phone },
-          update: { name, address: address || undefined },
-          create: { name, phone, address: address || null },
-        }) : null;
-        const existed = await prisma.machine.findUnique({ where: { id: machineId }, select: { id: true } });
-        const machine = await prisma.machine.upsert({
+        const outcome = await prisma.$transaction(async (tx) => {
+          const customer = phone ? await tx.customer.upsert({
+            where: { phone },
+            update: { name, address: address || undefined },
+            create: { name, phone, address: address || null },
+          }) : null;
+          const existed = await tx.machine.findUnique({ where: { id: machineId }, select: { id: true } });
+          const machine = await tx.machine.upsert({
           where: { id: machineId },
           update: {
             model,
@@ -213,13 +216,15 @@ export async function POST(request: NextRequest) {
             lat,
             lng,
           },
+          });
+          if (installDate) {
+            const count = await tx.maintenanceSchedule.count({ where: { machineId } });
+            if (!count) await tx.maintenanceSchedule.createMany({ data: buildMaintenanceSchedules(machineId, installDate, machine.model) });
+          }
+          return { existed: Boolean(existed) };
         });
-        if (installDate) {
-          const count = await prisma.maintenanceSchedule.count({ where: { machineId } });
-          if (!count) await prisma.maintenanceSchedule.createMany({ data: buildMaintenanceSchedules(machineId, installDate, machine.model) });
-        }
         successCount += 1;
-        if (existed) updatedCount += 1; else createdCount += 1;
+        if (outcome.existed) updatedCount += 1; else createdCount += 1;
       } catch (error) {
         errors.push({ row: rowNumber, message: error instanceof Error ? error.message : "Dữ liệu không hợp lệ" });
       }

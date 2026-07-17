@@ -38,17 +38,24 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: true, message: `Map/Geocoding hoạt động qua ${result.provider}.`, data: result });
     }
 
-    if (kind !== "sms" && kind !== "zalo") {
+    if (kind !== "sms" && kind !== "zalo" && kind !== "email") {
       return NextResponse.json({ success: false, message: "Loại kiểm thử không hợp lệ." }, { status: 400 });
     }
 
+    const channel = kind === "sms" ? "SMS" : kind === "zalo" ? "ZALO" : "EMAIL";
     const phone = normalizePhone(typeof body.phone === "string" ? body.phone : "");
-    if (!isValidVietnamPhone(phone)) return NextResponse.json({ success: false, message: "Số điện thoại Việt Nam không hợp lệ." }, { status: 400 });
+    const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+    if (channel === "EMAIL") {
+      if (!email || !/^\S+@\S+\.\S+$/.test(email)) return NextResponse.json({ success: false, message: "Email test không hợp lệ." }, { status: 400 });
+    } else if (!isValidVietnamPhone(phone)) {
+      return NextResponse.json({ success: false, message: "Số điện thoại Việt Nam không hợp lệ." }, { status: 400 });
+    }
 
-    const channel = kind === "sms" ? "SMS" : "ZALO";
     const content = kind === "sms"
       ? "KOSOVOTA: Tin nhan kiem tra ket noi he thong. Vui long bo qua tin nay."
-      : "KOSOVOTA kiểm tra kết nối Zalo.";
+      : kind === "zalo"
+        ? "KOSOVOTA kiểm tra kết nối Zalo."
+        : "Xin chào,\nĐây là email kiểm thử từ hệ thống thông báo KOSO VOTA.";
     const payload = kind === "zalo"
       ? JSON.stringify({
           templateId: process.env.ZALO_ZBS_OTP_TEMPLATE_ID || process.env.ZALO_ZBS_TEMPLATE_ID,
@@ -57,7 +64,7 @@ export async function POST(request: NextRequest) {
       : null;
 
     const notification = await prisma.notification.create({
-      data: { phone, channel, kind: "INTEGRATION_TEST", content, payload, status: "PROCESSING", attempts: 1 },
+      data: { phone: channel === "EMAIL" ? null : phone, email: channel === "EMAIL" ? email : null, channel, kind: "INTEGRATION_TEST", subject: channel === "EMAIL" ? "KOSO VOTA - Test Gmail" : null, content, payload, status: "PROCESSING", attempts: 1 },
     });
 
     try {
@@ -71,7 +78,7 @@ export async function POST(request: NextRequest) {
         success: true,
         message: dryRun
           ? `${channel} đang DRY RUN: cấu hình ứng dụng chạy được nhưng chưa gửi ra nhà cung cấp.`
-          : `${channel} đã được nhà cung cấp chấp nhận. Kiểm tra điện thoại và lịch sử thông báo.`,
+          : `${channel} đã được nhà cung cấp chấp nhận. Kiểm tra điện thoại/email và lịch sử thông báo.`,
         data: { channel, dryRun, providerMessageId: result.providerMessageId },
       });
     } catch (error) {

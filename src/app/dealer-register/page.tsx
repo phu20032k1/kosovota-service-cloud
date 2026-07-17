@@ -3,10 +3,12 @@
 import {
   ChangeEvent,
   FormEvent,
+  type ReactNode,
   useState,
 } from "react";
 import { Brand } from "@/components/ui/Brand";
 import { Icon } from "@/components/ui/Icon";
+import { Notice } from "@/components/ui/Notice";
 import { SmartBackButton } from "@/components/ui/SmartBackButton";
 
 type RegistrationType = "dealer" | "collaborator";
@@ -122,6 +124,8 @@ export default function DealerRegisterPage() {
 
   const [generatedId, setGeneratedId] =
     useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [formError, setFormError] = useState("");
 
   function getCurrentLocation() {
     if (!navigator.geolocation) {
@@ -217,29 +221,37 @@ async function handleSubmit(
   event.preventDefault();
 
   if (!location) {
-    alert("Anh/chị cần bấm BẬT GPS.");
+    setFormError("Anh/chị cần bấm Lấy vị trí GPS trước khi gửi hồ sơ.");
+    window.scrollTo({ top: 0, behavior: "smooth" });
     return;
   }
 
   if (!photos.portrait) {
-    alert("Anh/chị cần chọn ảnh chân dung.");
+    setFormError("Anh/chị cần chọn ảnh chân dung.");
+    window.scrollTo({ top: 0, behavior: "smooth" });
     return;
   }
 
   if (!photos.store) {
-    alert("Anh/chị cần chọn ảnh cửa hàng hoặc mặt tiền.");
+    setFormError("Anh/chị cần chọn ảnh cửa hàng hoặc mặt tiền.");
+    window.scrollTo({ top: 0, behavior: "smooth" });
     return;
   }
 
   if (selectedServices.length === 0) {
-    alert("Hãy chọn ít nhất một dịch vụ.");
+    setFormError("Hãy chọn ít nhất một dịch vụ.");
+    window.scrollTo({ top: 0, behavior: "smooth" });
     return;
   }
 
   if (phone.length < 9) {
-    alert("Số điện thoại chưa hợp lệ.");
+    setFormError("Số điện thoại chưa hợp lệ.");
+    window.scrollTo({ top: 0, behavior: "smooth" });
     return;
   }
+
+  setSubmitting(true);
+  setFormError("");
 
   try {
     const portraitPhoto = await uploadFile(photos.portrait.file);
@@ -307,14 +319,17 @@ async function handleSubmit(
     });
   } catch (error) {
     console.error(error);
-    alert("Không gửi được đăng ký. Vui lòng thử lại.");
+    setFormError(error instanceof Error ? error.message : "Không gửi được đăng ký. Vui lòng thử lại.");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  } finally {
+    setSubmitting(false);
   }
 }
 
   if (generatedId) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-slate-100 px-4 py-10">
-        <section className="w-full max-w-lg rounded-3xl bg-white p-8 text-center shadow-lg">
+      <main className="auth-page flex min-h-screen items-center justify-center px-4 py-10">
+        <section className="auth-panel w-full max-w-lg p-8 text-center">
           <div className="icon-orb mx-auto"><Icon name="check" size={30} /></div>
 
           <div className="mt-6 flex justify-center"><Brand compact /></div>
@@ -328,7 +343,7 @@ async function handleSubmit(
           </p>
 
           <div className="mt-4 rounded-2xl bg-green-50 p-5">
-            <p className="text-2xl font-bold text-green-700">
+            <p className="text-2xl font-bold text-emerald-700">
               {generatedId}
             </p>
           </div>
@@ -340,7 +355,7 @@ async function handleSubmit(
 
           <SmartBackButton
             label="Quay lại"
-            className="mt-7 w-full justify-center rounded-xl bg-green-600 px-5 py-4 font-bold text-white hover:bg-green-700"
+            className="mt-7 w-full justify-center rounded-xl bg-emerald-600 px-5 py-4 font-bold text-white hover:bg-emerald-700"
           />
         </section>
       </main>
@@ -348,13 +363,13 @@ async function handleSubmit(
   }
 
   return (
-    <main className="min-h-screen bg-slate-100 px-4 py-8">
+    <main className="page-shell px-4 py-8">
       <form
         onSubmit={handleSubmit}
-        className="mx-auto max-w-2xl space-y-6"
+        className="mx-auto max-w-3xl space-y-6"
       >
-        <header className="rounded-2xl bg-white p-6 shadow-sm">
-          <p className="text-sm font-bold uppercase tracking-widest text-green-700">
+        <header className="surface-card p-6">
+          <p className="text-sm font-bold uppercase tracking-widest text-emerald-700">
             KOSOVOTA
           </p>
 
@@ -367,7 +382,9 @@ async function handleSubmit(
           </p>
         </header>
 
-        <section className="space-y-5 rounded-2xl bg-white p-5 shadow-sm">
+        {formError && <Notice kind="error">{formError}</Notice>}
+
+        <section className="surface-card space-y-5 p-5">
           <h2 className="text-lg font-bold text-slate-900">
             Loại đăng ký
           </h2>
@@ -376,7 +393,7 @@ async function handleSubmit(
             <label
               className={`cursor-pointer rounded-xl border p-4 ${
                 registrationType === "dealer"
-                  ? "border-green-600 bg-green-50"
+                  ? "border-emerald-600 bg-emerald-50"
                   : "border-slate-200"
               }`}
             >
@@ -396,7 +413,7 @@ async function handleSubmit(
             <label
               className={`cursor-pointer rounded-xl border p-4 ${
                 registrationType === "collaborator"
-                  ? "border-green-600 bg-green-50"
+                  ? "border-emerald-600 bg-emerald-50"
                   : "border-slate-200"
               }`}
             >
@@ -417,7 +434,7 @@ async function handleSubmit(
           </div>
         </section>
 
-        <section className="space-y-5 rounded-2xl bg-white p-5 shadow-sm">
+        <section className="surface-card space-y-5 p-5">
           <h2 className="text-lg font-bold text-slate-900">
             Thông tin cơ bản
           </h2>
@@ -484,7 +501,7 @@ async function handleSubmit(
           />
         </section>
 
-        <section className="space-y-5 rounded-2xl bg-white p-5 shadow-sm">
+        <section className="surface-card space-y-5 p-5">
           <h2 className="text-lg font-bold text-slate-900">
             Địa chỉ
           </h2>
@@ -568,7 +585,7 @@ async function handleSubmit(
               <p
                 className={
                   location
-                    ? "text-green-700"
+                    ? "text-emerald-700"
                     : "text-slate-600"
                 }
               >
@@ -592,7 +609,7 @@ async function handleSubmit(
           </div>
         </section>
 
-        <section className="space-y-5 rounded-2xl bg-white p-5 shadow-sm">
+        <section className="surface-card space-y-5 p-5">
           <h2 className="text-lg font-bold text-slate-900">
             Thông tin cơ sở
           </h2>
@@ -665,14 +682,14 @@ async function handleSubmit(
             />
 
             {videoName && (
-              <p className="mt-2 text-sm text-green-700">
+              <p className="mt-2 text-sm text-emerald-700">
                 Đã chọn: {videoName}
               </p>
             )}
           </FormField>
         </section>
 
-        <section className="space-y-5 rounded-2xl bg-white p-5 shadow-sm">
+        <section className="surface-card space-y-5 p-5">
           <h2 className="text-lg font-bold text-slate-900">
             Năng lực kỹ thuật
           </h2>
@@ -716,7 +733,7 @@ async function handleSubmit(
           </FormField>
         </section>
 
-        <section className="space-y-5 rounded-2xl bg-white p-5 shadow-sm">
+        <section className="surface-card space-y-5 p-5">
           <div>
             <h2 className="text-lg font-bold text-slate-900">
               Thông tin tài chính
@@ -800,9 +817,10 @@ async function handleSubmit(
 
         <button
           type="submit"
-          className="w-full rounded-2xl bg-green-600 px-6 py-4 text-lg font-bold text-white shadow-lg hover:bg-green-700"
+          disabled={submitting}
+          className="btn-primary w-full px-6 py-4 text-lg font-black text-white disabled:opacity-60"
         >
-          ĐĂNG KÝ
+          {submitting ? "ĐANG GỬI HỒ SƠ..." : "GỬI HỒ SƠ ĐĂNG KÝ"}
         </button>
 
         <div className="text-center">
@@ -816,7 +834,7 @@ async function handleSubmit(
 type FormFieldProps = {
   label: string;
   required?: boolean;
-  children: React.ReactNode;
+  children: ReactNode;
 };
 
 function FormField({
@@ -864,8 +882,8 @@ function PhotoInput({
         )}
       </p>
 
-      <label className="block cursor-pointer rounded-xl border-2 border-dashed border-slate-300 p-4 text-center hover:border-green-600 hover:bg-green-50">
-        <span className="font-bold text-green-700">
+      <label className="block cursor-pointer rounded-xl border-2 border-dashed border-slate-300 p-4 text-center hover:border-emerald-600 hover:bg-emerald-50">
+        <span className="font-bold text-emerald-700">
           CHỤP HOẶC CHỌN ẢNH
         </span>
 
