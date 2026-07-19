@@ -8,6 +8,7 @@ import { Icon } from "@/components/ui/Icon";
 import { LoadingState } from "@/components/ui/LoadingState";
 import { Notice } from "@/components/ui/Notice";
 import { StatusBadge } from "@/components/ui/StatusBadge";
+import { readApiResponse } from "@/lib/client-api";
 
 type Schedule = { id: string; title: string; dueDate: string; status: string };
 type Machine = {
@@ -63,7 +64,9 @@ export default function OperationsMapPage() {
         fetch("/api/service-orders", { cache: "no-store" }),
       ]);
       const [machineResult, dealerResult, orderResult] = await Promise.all([
-        machineResponse.json(), dealerResponse.json(), orderResponse.json(),
+        readApiResponse<Machine[]>(machineResponse),
+        readApiResponse<Dealer[]>(dealerResponse),
+        readApiResponse<Order[]>(orderResponse),
       ]);
       if (!machineResponse.ok || !machineResult.success) throw new Error(machineResult.message || "Không tải được máy.");
       if (!dealerResponse.ok || !dealerResult.success) throw new Error(dealerResult.message || "Không tải được đại lý.");
@@ -146,7 +149,7 @@ export default function OperationsMapPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ machineId: selectedMachine.id, serviceType: selectedOrder?.serviceType || serviceType, limit: 30 }),
       });
-      const result = await response.json();
+      const result = await readApiResponse<ShortlistDealer[]>(response);
       if (!response.ok || !result.success) throw new Error(result.message || "Không tìm được đại lý.");
       const items = (result.data || []).filter((dealer: ShortlistDealer) => dealer.distanceKm <= radius);
       setShortlist(items);
@@ -173,8 +176,8 @@ export default function OperationsMapPage() {
           dealerId: dealer.id,
         }),
       });
-      const result = await response.json();
-      if (!response.ok || !result.success) throw new Error(result.message || "Không giao được lệnh.");
+      const result = await readApiResponse<Order>(response);
+      if (!response.ok || !result.success || !result.data) throw new Error(result.message || "Không giao được lệnh.");
       setNotice({ kind: "success", text: `Đã ${selectedOrder ? "giao" : "tạo và giao"} lệnh ${result.data.orderCode} cho ${dealer.name}.` });
       setShortlist([]);
       await load();

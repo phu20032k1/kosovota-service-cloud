@@ -8,6 +8,7 @@ import { Icon } from "@/components/ui/Icon";
 import { LoadingState } from "@/components/ui/LoadingState";
 import { Notice } from "@/components/ui/Notice";
 import { StatusBadge } from "@/components/ui/StatusBadge";
+import { readApiResponse } from "@/lib/client-api";
 
 type Report = {
   id: string;
@@ -62,7 +63,7 @@ type Order = {
     contactName: string;
     contactPhone: string;
     createdAt: string;
-    messages?: Array<{ id: string; senderName: string; message: string; createdAt: string }>;
+    messages?: Array<{ id: string; authorName: string; message: string; createdAt: string }>;
   } | null;
 };
 
@@ -107,9 +108,9 @@ export default function ServiceOrderDetailPage() {
     setLoading(true);
     try {
       const response = await fetch(`/api/service-orders/${id}`, { cache: "no-store" });
-      const result = await response.json();
-      if (!response.ok || !result.success) throw new Error(result.message || "Không tải được lệnh dịch vụ.");
-      const item = result.data as Order;
+      const result = await readApiResponse<Order>(response);
+      if (!response.ok || !result.success || !result.data) throw new Error(result.message || "Không tải được lệnh dịch vụ.");
+      const item = result.data;
       setOrder(item);
       setStatus(item.status);
       setDueDate(item.dueDate ? new Date(item.dueDate).toISOString().slice(0, 16) : "");
@@ -141,7 +142,7 @@ export default function ServiceOrderDetailPage() {
           serviceFee: serviceFee === "" ? null : Number(serviceFee),
         }),
       });
-      const result = await response.json();
+      const result = await readApiResponse<Order>(response);
       if (!response.ok || !result.success) throw new Error(result.message || "Không cập nhật được lệnh.");
       setNotice({ kind: "success", text: "Đã lưu trạng thái, lịch hẹn và phí dịch vụ." });
       await load();
@@ -188,7 +189,7 @@ export default function ServiceOrderDetailPage() {
               <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="section-kicker">Mô tả lại yêu cầu</p><h3 className="mt-1 text-xl font-black text-slate-950">{order.sourceTicket.subject}</h3></div><div className="flex gap-2"><StatusBadge value={order.sourceTicket.priority}/><StatusBadge value={order.sourceTicket.status}/></div></div>
               <div className="requirement-summary mt-5"><span className="summary-icon"><Icon name="file" size={20}/></span><div><p className="text-xs font-black uppercase tracking-[.14em] text-emerald-700">Nội dung khách hàng/đại lý đã yêu cầu</p><p className="mt-2 whitespace-pre-wrap break-words text-sm leading-7 text-slate-700">{order.sourceTicket.description || "Ticket chưa có mô tả chi tiết. CSKH cần bổ sung trước khi triển khai."}</p></div></div>
               <div className="summary-grid mt-4"><Detail label="Loại yêu cầu" value={order.sourceTicket.type}/><Detail label="Người liên hệ" value={order.sourceTicket.contactName}/><Detail label="Điện thoại" value={order.sourceTicket.contactPhone}/><Detail label="Ngày tiếp nhận" value={formatDate(order.sourceTicket.createdAt)}/></div>
-              {!!order.sourceTicket.messages?.length && <div className="mt-5"><p className="text-sm font-black text-slate-900">Trao đổi trong Ticket</p><div className="mt-3 space-y-2">{order.sourceTicket.messages.map((message) => <article key={message.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4"><div className="flex flex-wrap justify-between gap-2 text-xs"><strong className="text-slate-700">{message.senderName}</strong><span className="text-slate-400">{formatDate(message.createdAt)}</span></div><p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-slate-600">{message.message}</p></article>)}</div></div>}
+              {!!order.sourceTicket.messages?.length && <div className="mt-5"><p className="text-sm font-black text-slate-900">Trao đổi trong Ticket</p><div className="mt-3 space-y-2">{order.sourceTicket.messages.map((message) => <article key={message.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4"><div className="flex flex-wrap justify-between gap-2 text-xs"><strong className="text-slate-700">{message.authorName}</strong><span className="text-slate-400">{formatDate(message.createdAt)}</span></div><p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-slate-600">{message.message}</p></article>)}</div></div>}
             </section>}
 
             <section className="surface-card p-5 sm:p-6"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="section-kicker">Khách hàng & thiết bị</p><h3 className="mt-1 text-xl font-black">Thông tin thực hiện dịch vụ</h3></div><Link href={order.machine.customer ? `/admin/customers/${order.machine.customer.id}` : `/machine/${order.machine.id}`} className="btn-secondary px-3 py-2 text-sm font-bold">Xem hồ sơ 360° <Icon name="chevron-right" size={16}/></Link></div>

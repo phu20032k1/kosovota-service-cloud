@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { hasRole } from "@/lib/auth";
 import { queueServiceStatusEmail } from "@/lib/notifications/events";
+import { databaseErrorMessage } from "@/lib/database-errors";
 
 type Params = { params: Promise<{ id: string }> };
 const ALLOWED_STATUSES = [
@@ -24,11 +25,19 @@ async function getAuthorizedOrder(request: NextRequest, id: string) {
 }
 
 export async function GET(request: NextRequest, { params }: Params) {
-  const { id } = await params;
-  const result = await getAuthorizedOrder(request, id);
-  if (!result.auth) return NextResponse.json({ success: false, message: "Chưa được cấp quyền." }, { status: 401 });
-  if (!result.order) return NextResponse.json({ success: false, message: "Không tìm thấy lệnh dịch vụ." }, { status: 404 });
-  return NextResponse.json({ success: true, data: result.order });
+  try {
+    const { id } = await params;
+    const result = await getAuthorizedOrder(request, id);
+    if (!result.auth) return NextResponse.json({ success: false, message: "Chưa được cấp quyền." }, { status: 401 });
+    if (!result.order) return NextResponse.json({ success: false, message: "Không tìm thấy lệnh dịch vụ." }, { status: 404 });
+    return NextResponse.json({ success: true, data: result.order });
+  } catch (error) {
+    console.error("GET /api/service-orders/[id] failed", error);
+    return NextResponse.json(
+      { success: false, message: databaseErrorMessage(error, "Không tải được chi tiết lệnh dịch vụ.") },
+      { status: 500 },
+    );
+  }
 }
 
 export async function PUT(request: NextRequest, { params }: Params) {
@@ -65,7 +74,16 @@ export async function PUT(request: NextRequest, { params }: Params) {
     const rejected = ["DEALER", "CTV"].includes(auth.user.role) && status === "NEW" && body.dealerId === null;
     const dueDate = status === "CALLED_NO_ANSWER"
       ? new Date(Date.now() + 3 * 24 * 60 * 60 * 1000)
-      : body.dueDate ? new Date(body.dueDate) : undefined;
+      : body.dueDate === null || body.dueDate === ""
+        ? null
+        : body.dueDate
+          ? new Date(body.dueDate)
+          : undefined;
+    const serviceFee = body.serviceFee === null || body.serviceFee === ""
+      ? null
+      : Number.isFinite(Number(body.serviceFee))
+        ? Number(body.serviceFee)
+        : undefined;
 
     const order = await prisma.serviceOrder.update({
       where: { id },
@@ -76,7 +94,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
         rejectedAt: rejected || typeof body.rejectReason === "string" ? new Date() : undefined,
         serviceType: typeof body.serviceType === "string" ? body.serviceType.trim() : undefined,
         dueDate,
-        serviceFee: Number.isFinite(Number(body.serviceFee)) ? Number(body.serviceFee) : undefined,
+        serviceFee,
         paymentStatus: typeof body.paymentStatus === "string" && ["ADMIN", "SUPER_ADMIN"].includes(auth.user.role) ? body.paymentStatus : undefined,
       },
       include: { machine: { include: { customer: true, activations: true, maintenanceSchedules: true } }, dealer: true, technician: true, reports: true, maintenanceSchedule: true, sourceTicket: { include: { messages: { orderBy: { createdAt: "asc" } } } } },
@@ -102,7 +120,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
     return NextResponse.json({ success: true, message: "Đã cập nhật lệnh dịch vụ.", data: order });
   } catch (error) {
     console.error("PUT /api/service-orders/[id] failed", error);
-    return NextResponse.json({ success: false, message: "Không cập nhật được lệnh dịch vụ." }, { status: 500 });
+    return NextResponse.json({ success: false, message: databaseErrorMessage(error, "Không cập nhật được lệnh dịch vụ.") }, { status: 500 });
   }
 }
 

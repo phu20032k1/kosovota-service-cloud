@@ -5,6 +5,7 @@ import { OperationsHeader } from "@/components/ui/OperationsHeader";
 import { SuperAdminHeader } from "@/components/ui/SuperAdminHeader";
 import { Icon } from "@/components/ui/Icon";
 import { Notice } from "@/components/ui/Notice";
+import { readApiResponse } from "@/lib/client-api";
 
 type Mode = "super" | "admin";
 type UserRow = {
@@ -70,8 +71,8 @@ export function UserManagementConsole({ mode }: { mode: Mode }) {
     setError("");
     try {
       const response = await fetch(endpoint, { cache: "no-store" });
-      const result = await response.json();
-      if (!response.ok || !result.success) {
+      const result = await readApiResponse<{ users: UserRow[]; dealers: DealerOption[] }>(response);
+      if (!response.ok || !result.success || !result.data) {
         setError(result.message || "Không tải được dữ liệu.");
         return;
       }
@@ -85,6 +86,13 @@ export function UserManagementConsole({ mode }: { mode: Mode }) {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (!editingUser) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = previous; };
+  }, [editingUser]);
 
   const stats = useMemo(
     () =>
@@ -168,12 +176,13 @@ export function UserManagementConsole({ mode }: { mode: Mode }) {
         dealerProvince,
       }),
     });
-    const result = await response.json();
+    const result = await readApiResponse<UserRow>(response);
     if (!response.ok || !result.success) {
       setError(result.message || "Không tạo được tài khoản.");
       return;
     }
-    setMessage(`Đã tạo ${role}. Mật khẩu ban đầu: ${result.initialPassword}`);
+    const initialPassword = typeof result.initialPassword === "string" ? result.initialPassword : "(không nhận được)";
+    setMessage(`Đã tạo ${role}. Mật khẩu ban đầu: ${initialPassword}`);
     resetCreateForm();
     await load();
   }
@@ -184,7 +193,7 @@ export function UserManagementConsole({ mode }: { mode: Mode }) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    const result = await response.json();
+    const result = await readApiResponse<UserRow>(response);
     if (!response.ok || !result.success)
       throw new Error(result.message || "Không cập nhật được tài khoản.");
     return result;
@@ -213,7 +222,7 @@ export function UserManagementConsole({ mode }: { mode: Mode }) {
     setMessage("");
     try {
       const result = await patchUser({ id: user.id, resetPassword: true });
-      setMessage(`Mật khẩu mới của ${user.name}: ${result.initialPassword}`);
+      setMessage(`Mật khẩu mới của ${user.name}: ${typeof result.initialPassword === "string" ? result.initialPassword : "(không nhận được)"}`);
     } catch (caught) {
       setError(
         caught instanceof Error
@@ -276,7 +285,7 @@ export function UserManagementConsole({ mode }: { mode: Mode }) {
     setSaving(true);
     try {
       const result = await patchUser(updates);
-      setMessage(`Đã cập nhật tài khoản ${result.data.name}.`);
+      setMessage(`Đã cập nhật tài khoản ${result.data?.name || editName.trim()}.`);
       closeEditModal();
       await load();
     } catch (caught) {
@@ -304,7 +313,7 @@ export function UserManagementConsole({ mode }: { mode: Mode }) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id: user.id }),
     });
-    const result = await response.json();
+    const result = await readApiResponse<{ id: string }>(response);
     if (!response.ok || !result.success) {
       setError(result.message || "Không xóa được tài khoản.");
       return;
@@ -334,7 +343,7 @@ export function UserManagementConsole({ mode }: { mode: Mode }) {
       {error && <Notice kind="error">{error}</Notice>}
       {message && <Notice kind="success">{message}</Notice>}
 
-      <section className="grid gap-6 lg:grid-cols-[420px_minmax(0,1fr)]">
+      <section className="grid gap-6 xl:grid-cols-[360px_minmax(0,1fr)]">
         <form
           onSubmit={createUser}
           className="h-fit rounded-2xl bg-white p-5 shadow-sm"
@@ -459,7 +468,7 @@ export function UserManagementConsole({ mode }: { mode: Mode }) {
 
         <section className="min-w-0 overflow-hidden rounded-2xl bg-white shadow-sm">
           <div className="border-b border-slate-100 p-5">
-            <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+            <div className="flex flex-col gap-4 2xl:flex-row 2xl:items-end 2xl:justify-between">
               <div>
                 <h2 className="text-lg font-black">Danh sách tài khoản</h2>
                 <p className="mt-1 text-sm text-slate-500">
@@ -467,7 +476,7 @@ export function UserManagementConsole({ mode }: { mode: Mode }) {
                   điện thoại.
                 </p>
               </div>
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[150px_180px_160px_minmax(220px,1fr)_auto]">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-[150px_180px_160px_minmax(220px,1fr)_auto]">
                 <label className="block">
                   <span className="mb-1 block text-xs font-black uppercase text-slate-500">
                     Bộ phận
@@ -641,125 +650,114 @@ export function UserManagementConsole({ mode }: { mode: Mode }) {
       {content}
 
       {editingUser && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4">
-          <div className="w-full max-w-2xl overflow-hidden rounded-[2rem] bg-white p-6 shadow-2xl">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h2 className="text-xl font-black">Sửa tài khoản</h2>
-                <p className="mt-2 text-sm text-slate-500">Admin được đổi vai trò giữa CSKH, Đại lý và KTV.</p>
+        <div
+          className="modal-backdrop"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !saving) closeEditModal();
+          }}
+        >
+          <section className="modal-panel max-w-2xl" role="dialog" aria-modal="true" aria-labelledby="edit-user-title">
+            <header className="modal-header">
+              <div className="min-w-0">
+                <p className="eyebrow">Quản lý tài khoản</p>
+                <h2 id="edit-user-title" className="mt-1 text-xl font-black">Sửa tài khoản</h2>
+                <p className="mt-2 text-sm leading-6 text-slate-500">
+                  Admin được đổi vai trò giữa CSKH, Đại lý, CTV và KTV.
+                </p>
               </div>
               <button
                 type="button"
                 onClick={closeEditModal}
-                className="rounded-full border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-bold"
+                disabled={saving}
+                className="icon-button shrink-0 disabled:opacity-50"
+                title="Đóng"
+                aria-label="Đóng cửa sổ sửa tài khoản"
               >
-                Đóng
+                <Icon name="x" size={18} />
               </button>
-            </div>
-            <div className="mt-6 grid gap-4">
-              <label className="block"><span className="text-sm font-bold text-slate-700">Vai trò</span><select className="mt-2 w-full" value={editRole} onChange={(event) => setEditRole(event.target.value)}>{allowedRoles.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
-              <label className="block">
-                <span className="text-sm font-bold text-slate-700">Họ tên</span>
-                <input
-                  className="mt-2 w-full"
-                  value={editName}
-                  onChange={(event) => setEditName(event.target.value)}
-                />
-              </label>
-              <label className="block">
-                <span className="text-sm font-bold text-slate-700">
-                  Số điện thoại
-                </span>
-                <input
-                  className="mt-2 w-full"
-                  value={editPhone}
-                  onChange={(event) =>
-                    setEditPhone(event.target.value.replace(/\D/g, ""))
-                  }
-                />
-              </label>
-              {editRole === "CSKH" && (
+            </header>
+
+            <div className="modal-body">
+              {error && <Notice kind="error">{error}</Notice>}
+              <div className={`grid gap-4 ${error ? "mt-4" : ""}`}>
                 <label className="block">
-                  <span className="text-sm font-bold text-slate-700">
-                    Phạm vi tỉnh
-                  </span>
-                  <input
-                    className="mt-2 w-full"
-                    value={editProvinceScope}
-                    onChange={(event) =>
-                      setEditProvinceScope(event.target.value)
-                    }
-                  />
-                </label>
-              )}
-              {["DEALER", "CTV", "KTV"].includes(editRole) && (
-                <label className="block">
-                  <span className="text-sm font-bold text-slate-700">
-                    Thuộc đại lý
-                  </span>
-                  <select
-                    className="mt-2 w-full"
-                    value={editDealerCode}
-                    onChange={(event) => setEditDealerCode(event.target.value)}
-                  >
-                    {dealers.map((dealer) => (
-                      <option key={dealer.dealerCode} value={dealer.dealerCode}>
-                        {dealer.dealerCode} — {dealer.name}
-                      </option>
-                    ))}
+                  <span className="text-sm font-bold text-slate-700">Vai trò</span>
+                  <select className="mt-2 w-full" value={editRole} onChange={(event) => setEditRole(event.target.value)}>
+                    {allowedRoles.map((item) => <option key={item} value={item}>{item}</option>)}
                   </select>
                 </label>
-              )}
-              {["DEALER", "CTV"].includes(editRole) && (
-                <p className="rounded-xl bg-slate-50 p-3 text-sm text-slate-600">
-                  Mã đại lý: <strong>{editingUser.dealerCode || "—"}</strong>.
-                  Đổi mã tại hồ sơ đại lý để tránh lệch dữ liệu.
-                </p>
-              )}
-              <label className="block">
-                <span className="text-sm font-bold text-slate-700">
-                  Mật khẩu mới
-                </span>
-                <input
-                  type="password"
-                  className="mt-2 w-full"
-                  value={editPassword}
-                  onChange={(event) => setEditPassword(event.target.value)}
-                  placeholder="Để trống nếu không đổi"
-                />
-              </label>
-              <label className="block">
-                <span className="text-sm font-bold text-slate-700">
-                  Xác nhận mật khẩu
-                </span>
-                <input
-                  type="password"
-                  className="mt-2 w-full"
-                  value={editPasswordConfirm}
-                  onChange={(event) =>
-                    setEditPasswordConfirm(event.target.value)
-                  }
-                />
-              </label>
+                <label className="block">
+                  <span className="text-sm font-bold text-slate-700">Họ tên</span>
+                  <input className="mt-2 w-full" value={editName} onChange={(event) => setEditName(event.target.value)} />
+                </label>
+                <label className="block">
+                  <span className="text-sm font-bold text-slate-700">Số điện thoại</span>
+                  <input
+                    className="mt-2 w-full"
+                    inputMode="numeric"
+                    value={editPhone}
+                    onChange={(event) => setEditPhone(event.target.value.replace(/\D/g, ""))}
+                  />
+                </label>
+                {editRole === "CSKH" && (
+                  <label className="block">
+                    <span className="text-sm font-bold text-slate-700">Phạm vi tỉnh</span>
+                    <input className="mt-2 w-full" value={editProvinceScope} onChange={(event) => setEditProvinceScope(event.target.value)} />
+                    <span className="mt-1 block text-xs text-slate-500">Nhập một hoặc nhiều mã tỉnh, cách nhau bằng dấu phẩy.</span>
+                  </label>
+                )}
+                {["DEALER", "CTV", "KTV"].includes(editRole) && (
+                  <label className="block">
+                    <span className="text-sm font-bold text-slate-700">Thuộc đại lý</span>
+                    <select className="mt-2 w-full" value={editDealerCode} onChange={(event) => setEditDealerCode(event.target.value)}>
+                      <option value="">Chọn đại lý đã duyệt</option>
+                      {dealers.map((dealer) => (
+                        <option key={dealer.dealerCode} value={dealer.dealerCode}>
+                          {dealer.dealerCode} — {dealer.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                {["DEALER", "CTV"].includes(editRole) && (
+                  <p className="rounded-xl bg-slate-50 p-3 text-sm leading-6 text-slate-600">
+                    Mã hiện tại: <strong>{editingUser.dealerCode || "—"}</strong>. Khi đổi tài khoản sang mã khác, hãy kiểm tra hồ sơ đại lý để tránh lệch dữ liệu.
+                  </p>
+                )}
+                <label className="block">
+                  <span className="text-sm font-bold text-slate-700">Mật khẩu mới</span>
+                  <input
+                    type="password"
+                    autoComplete="new-password"
+                    className="mt-2 w-full"
+                    value={editPassword}
+                    onChange={(event) => setEditPassword(event.target.value)}
+                    placeholder="Để trống nếu không đổi"
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-sm font-bold text-slate-700">Xác nhận mật khẩu</span>
+                  <input
+                    type="password"
+                    autoComplete="new-password"
+                    className="mt-2 w-full"
+                    value={editPasswordConfirm}
+                    onChange={(event) => setEditPasswordConfirm(event.target.value)}
+                  />
+                </label>
+              </div>
             </div>
-            <div className="mt-6 flex justify-end gap-3">
-              <button
-                type="button"
-                onClick={closeEditModal}
-                className="rounded-2xl border border-slate-200 px-5 py-3 font-bold"
-              >
+
+            <footer className="modal-footer">
+              <button type="button" onClick={closeEditModal} disabled={saving} className="btn-secondary px-5 py-3 font-bold disabled:opacity-50">
                 Hủy
               </button>
-              <button
-                type="button"
-                onClick={saveEdit}
-                disabled={saving}
-                className="rounded-2xl bg-emerald-700 px-5 py-3 font-bold text-white disabled:opacity-60"
-              >
+              <button type="button" onClick={saveEdit} disabled={saving} className="btn-primary px-5 py-3 font-bold text-white disabled:opacity-60">
+                <Icon name="check" size={17} />
                 {saving ? "Đang lưu..." : "Lưu thay đổi"}
               </button>
-            </div>
-          </div>
+            </footer>
+          </section>
         </div>
       )}
     </main>

@@ -8,6 +8,7 @@ import { Notice } from "@/components/ui/Notice";
 import { LoadingState } from "@/components/ui/LoadingState";
 import { Icon } from "@/components/ui/Icon";
 import { StatusBadge } from "@/components/ui/StatusBadge";
+import { readApiResponse } from "@/lib/client-api";
 
 type TicketMessage = { id: string; authorName: string; message: string; isInternal: boolean; createdAt: string };
 type ServiceOrder = {
@@ -94,18 +95,20 @@ export default function TicketsPage() {
   const [form, setForm] = useState<TicketForm>(EMPTY_FORM);
   const [reply, setReply] = useState("");
   const [busy, setBusy] = useState(false);
+  const [createdOrderId, setCreatedOrderId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const response = await fetch("/api/support-tickets", { cache: "no-store" });
-      const result = await response.json();
-      if (!response.ok || !result.success) throw new Error(result.message || "Không tải được ticket");
-      setData(result.data);
+      const result = await readApiResponse<Data>(response);
+      if (!response.ok || !result.success || !result.data) throw new Error(result.message || "Không tải được ticket");
+      const nextData = result.data;
+      setData(nextData);
       const requestedTicketId = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("ticket") : null;
       setSelectedId((current) => {
-        if (requestedTicketId && result.data.tickets.some((ticket: Ticket) => ticket.id === requestedTicketId)) return requestedTicketId;
-        return current && result.data.tickets.some((ticket: Ticket) => ticket.id === current) ? current : result.data.tickets[0]?.id || null;
+        if (requestedTicketId && nextData.tickets.some((ticket: Ticket) => ticket.id === requestedTicketId)) return requestedTicketId;
+        return current && nextData.tickets.some((ticket: Ticket) => ticket.id === current) ? current : nextData.tickets[0]?.id || null;
       });
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Không tải được ticket");
@@ -114,6 +117,12 @@ export default function TicketsPage() {
     }
   }, []);
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    if (!open) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = previous; };
+  }, [open]);
 
   const selected = data?.tickets.find((ticket) => ticket.id === selectedId) || null;
   const visible = useMemo(() => {
@@ -142,11 +151,13 @@ export default function TicketsPage() {
   async function create(event: FormEvent) {
     event.preventDefault();
     setBusy(true);
+    setCreatedOrderId(null);
     try {
       const response = await fetch("/api/support-tickets", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
-      const result = await response.json();
-      if (!response.ok || !result.success) throw new Error(result.message || "Không tạo được ticket");
-      showNotice("success", result.message);
+      const result = await readApiResponse<Ticket>(response);
+      if (!response.ok || !result.success || !result.data) throw new Error(result.message || "Không tạo được ticket");
+      showNotice("success", result.message || "Đã tạo yêu cầu hỗ trợ.");
+      setCreatedOrderId(result.data.serviceOrder?.id || null);
       setOpen(false);
       setForm(EMPTY_FORM);
       await load();
@@ -163,9 +174,9 @@ export default function TicketsPage() {
     setBusy(true);
     try {
       const response = await fetch(`/api/support-tickets/${selected.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-      const result = await response.json();
+      const result = await readApiResponse<Ticket>(response);
       if (!response.ok || !result.success) throw new Error(result.message || "Không cập nhật được ticket");
-      showNotice("success", result.message);
+      showNotice("success", result.message || "Đã cập nhật yêu cầu.");
       setReply("");
       await load();
     } catch (caught) {
@@ -190,7 +201,7 @@ export default function TicketsPage() {
   return <main className="min-h-screen">
     <OperationsHeader title="Ticket & Điều phối" subtitle="Tạo yêu cầu, tự sinh lệnh điều phối, phân công và theo dõi SLA trên một luồng" actions={<button type="button" onClick={load} className="icon-button"><Icon name="refresh" size={18}/></button>}/>
     <div className="page-container space-y-6">
-      {message && <Notice kind="success">{message}</Notice>}
+      {message && <Notice kind="success"><div className="flex flex-wrap items-center gap-3"><span>{message}</span>{createdOrderId && <Link href={`/operations-map?order=${createdOrderId}`} className="mini-chip mini-chip--green"><Icon name="map" size={14}/>Mở lệnh vừa tạo tại Điều phối</Link>}</div></Notice>}
       {error && <Notice kind="error">{error}</Notice>}
       {loading && !data ? <LoadingState label="Đang tải yêu cầu hỗ trợ..."/> : data && <>
         <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">

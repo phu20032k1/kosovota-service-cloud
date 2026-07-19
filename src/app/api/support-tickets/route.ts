@@ -6,6 +6,7 @@ import { createOrderCode } from "@/lib/order-code";
 import { writeAudit } from "@/lib/audit";
 import { normalizePhone } from "@/lib/phone";
 import { queueServiceOrderCreatedNotifications } from "@/lib/notifications/events";
+import { databaseErrorMessage } from "@/lib/database-errors";
 
 const include = {
   customer: true,
@@ -38,34 +39,42 @@ function serviceTypeFromTicket(type: string, subject: string) {
 }
 
 export async function GET(request: NextRequest) {
-  const auth = await hasRole(request, ["ADMIN", "CSKH", "DEALER", "CTV"]);
-  if (!auth) return NextResponse.json({ success: false, message: "Chưa được cấp quyền." }, { status: 401 });
-  const status = request.nextUrl.searchParams.get("status") || undefined;
-  const priority = request.nextUrl.searchParams.get("priority") || undefined;
-  const dealerOperator = DEALER_OPERATOR_ROLES.has(auth.user.role);
-  const tickets = await prisma.supportTicket.findMany({
-    where: {
-      ...(status ? { status } : {}),
-      ...(priority ? { priority } : {}),
-      ...(dealerOperator ? { dealer: { dealerCode: auth.user.dealerCode || "__NONE__" } } : {}),
-      ...(auth.user.role === "CSKH" && auth.user.provinceScope ? {
-        OR: [
-          { assigneeId: auth.user.id },
-          { machine: { provinceCode: { in: auth.user.provinceScope.split(",").map((v) => v.trim()).filter(Boolean) } } },
-        ],
-      } : {}),
-    },
-    include,
-    orderBy: [{ priority: "desc" }, { createdAt: "desc" }],
-    take: 500,
-  });
-  const [customers, machines, dealers, staff] = dealerOperator ? [[], [], [], []] : await Promise.all([
-    prisma.customer.findMany({ orderBy: { name: "asc" }, take: 1000 }),
-    prisma.machine.findMany({ include: { customer: true }, orderBy: { updatedAt: "desc" }, take: 2000 }),
-    prisma.dealer.findMany({ where: { status: "APPROVED" }, orderBy: { name: "asc" } }),
-    prisma.user.findMany({ where: { active: true, role: { in: ["ADMIN", "CSKH"] } }, select: { id: true, name: true, role: true } }),
-  ]);
-  return NextResponse.json({ success: true, data: { tickets, customers, machines, dealers, staff } });
+  try {
+    const auth = await hasRole(request, ["ADMIN", "CSKH", "DEALER", "CTV"]);
+    if (!auth) return NextResponse.json({ success: false, message: "Chưa được cấp quyền." }, { status: 401 });
+    const status = request.nextUrl.searchParams.get("status") || undefined;
+    const priority = request.nextUrl.searchParams.get("priority") || undefined;
+    const dealerOperator = DEALER_OPERATOR_ROLES.has(auth.user.role);
+    const tickets = await prisma.supportTicket.findMany({
+      where: {
+        ...(status ? { status } : {}),
+        ...(priority ? { priority } : {}),
+        ...(dealerOperator ? { dealer: { dealerCode: auth.user.dealerCode || "__NONE__" } } : {}),
+        ...(auth.user.role === "CSKH" && auth.user.provinceScope ? {
+          OR: [
+            { assigneeId: auth.user.id },
+            { machine: { provinceCode: { in: auth.user.provinceScope.split(",").map((v) => v.trim()).filter(Boolean) } } },
+          ],
+        } : {}),
+      },
+      include,
+      orderBy: [{ priority: "desc" }, { createdAt: "desc" }],
+      take: 500,
+    });
+    const [customers, machines, dealers, staff] = dealerOperator ? [[], [], [], []] : await Promise.all([
+      prisma.customer.findMany({ orderBy: { name: "asc" }, take: 1000 }),
+      prisma.machine.findMany({ include: { customer: true }, orderBy: { updatedAt: "desc" }, take: 2000 }),
+      prisma.dealer.findMany({ where: { status: "APPROVED" }, orderBy: { name: "asc" } }),
+      prisma.user.findMany({ where: { active: true, role: { in: ["ADMIN", "CSKH"] } }, select: { id: true, name: true, role: true } }),
+    ]);
+    return NextResponse.json({ success: true, data: { tickets, customers, machines, dealers, staff } });
+  } catch (error) {
+    console.error("GET /api/support-tickets failed", error);
+    return NextResponse.json(
+      { success: false, message: databaseErrorMessage(error, "Không tải được danh sách Ticket.") },
+      { status: 500 },
+    );
+  }
 }
 
 export async function POST(request: NextRequest) {
@@ -179,6 +188,6 @@ export async function POST(request: NextRequest) {
     }, { status: 201 });
   } catch (error) {
     console.error("POST /api/support-tickets failed", error);
-    return NextResponse.json({ success: false, message: "Không tạo được yêu cầu hỗ trợ." }, { status: 500 });
+    return NextResponse.json({ success: false, message: databaseErrorMessage(error, "Không tạo được yêu cầu hỗ trợ.") }, { status: 500 });
   }
 }

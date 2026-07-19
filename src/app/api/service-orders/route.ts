@@ -4,6 +4,7 @@ import { hasRole } from "@/lib/auth";
 import { normalizePhone } from "@/lib/phone";
 import { createOrderCode } from "@/lib/order-code";
 import { queueServiceOrderCreatedNotifications } from "@/lib/notifications/events";
+import { databaseErrorMessage } from "@/lib/database-errors";
 
 const ORDER_INCLUDE = {
   machine: { include: { customer: true } },
@@ -40,7 +41,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ success: true, data: orders });
   } catch (error) {
     console.error("GET /api/service-orders failed", error);
-    return NextResponse.json({ success: false, message: "Không tải được danh sách lệnh." }, { status: 500 });
+    return NextResponse.json({ success: false, message: databaseErrorMessage(error, "Không tải được danh sách lệnh.") }, { status: 500 });
   }
 }
 
@@ -96,6 +97,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: true, message: "Đã tạo lệnh dịch vụ.", data: order }, { status: 201 });
   } catch (error) {
     console.error("POST /api/service-orders failed", error);
-    return NextResponse.json({ success: false, message: "Không tạo được lệnh dịch vụ." }, { status: 500 });
+    return NextResponse.json({ success: false, message: databaseErrorMessage(error, "Không tạo được lệnh dịch vụ.") }, { status: 500 });
   }
 }
