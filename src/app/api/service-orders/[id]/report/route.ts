@@ -25,7 +25,7 @@ function parseMaterials(value: unknown): MaterialInput[] {
 }
 
 export async function POST(request: NextRequest, { params }: Params) {
-  const auth = await hasRole(request, ["ADMIN", "DEALER", "KTV"]);
+  const auth = await hasRole(request, ["ADMIN", "DEALER", "CTV", "KTV"]);
   if (!auth) return NextResponse.json({ success: false, message: "Chưa được cấp quyền." }, { status: 401 });
 
   try {
@@ -37,7 +37,7 @@ export async function POST(request: NextRequest, { params }: Params) {
       include: { dealer: true, machine: { include: { customer: true } }, reports: { select: { id: true }, take: 1 } },
     });
     if (!order) return NextResponse.json({ success: false, message: "Không tìm thấy lệnh dịch vụ." }, { status: 404 });
-    if (auth.user.role === "DEALER" && order.dealer?.dealerCode !== auth.user.dealerCode) {
+    if (["DEALER", "CTV"].includes(auth.user.role) && order.dealer?.dealerCode !== auth.user.dealerCode) {
       return NextResponse.json({ success: false, message: "Lệnh không thuộc đại lý này." }, { status: 403 });
     }
     if (auth.user.role === "KTV" && order.technicianId !== auth.user.id) {

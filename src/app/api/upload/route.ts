@@ -6,7 +6,7 @@ import { storeUpload, UPLOAD_TYPES } from "@/lib/storage";
 const MAX_IMAGE = 8 * 1024 * 1024;
 const MAX_VIDEO = 40 * 1024 * 1024;
 const PUBLIC_PURPOSES = new Set(["dealer-registration"]);
-const INTERNAL_ROLES = new Set(["SUPER_ADMIN", "ADMIN", "CSKH", "DEALER", "KTV"]);
+const INTERNAL_ROLES = new Set(["SUPER_ADMIN", "ADMIN", "CSKH", "DEALER", "CTV", "KTV"]);
 
 export async function POST(request: NextRequest) {
   try {

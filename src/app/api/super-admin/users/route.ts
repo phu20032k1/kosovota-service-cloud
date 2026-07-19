@@ -5,7 +5,7 @@ import { hasRole } from "@/lib/auth";
 import { hashPassword } from "@/lib/password";
 import { normalizePhone, isValidVietnamPhone } from "@/lib/phone";
 
-const CREATABLE_ROLES = new Set(["ADMIN", "CSKH", "DEALER", "KTV"]);
+const CREATABLE_ROLES = new Set(["ADMIN", "CSKH", "DEALER", "CTV", "KTV"]);
 
 function text(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
@@ -26,9 +26,9 @@ function safeUser(user: { id: string; phone: string; name: string; role: string;
 }
 
 async function validateDealer(role: string, dealerCode: string) {
-  if (!["DEALER", "KTV"].includes(role)) return null;
+  if (!["DEALER", "CTV", "KTV"].includes(role)) return null;
   if (!dealerCode) throw new Error("ROLE_NEEDS_DEALER");
-  if (role === "KTV") {
+  if (["CTV", "KTV"].includes(role)) {
     const dealer = await prisma.dealer.findUnique({ where: { dealerCode } });
     if (!dealer || dealer.status !== "APPROVED") throw new Error("DEALER_NOT_FOUND");
     return dealer;
@@ -42,7 +42,7 @@ export async function GET(request: NextRequest) {
 
   const [users, dealers] = await Promise.all([
     prisma.user.findMany({
-      where: { role: { in: ["ADMIN", "CSKH", "DEALER", "KTV"] } },
+      where: { role: { in: ["ADMIN", "CSKH", "DEALER", "CTV", "KTV"] } },
       orderBy: [{ role: "asc" }, { createdAt: "desc" }],
     }),
     prisma.dealer.findMany({
@@ -112,7 +112,7 @@ export async function POST(request: NextRequest) {
           phone,
           name,
           role,
-          dealerCode: ["DEALER", "KTV"].includes(role) ? dealerCode : null,
+          dealerCode: ["DEALER", "CTV", "KTV"].includes(role) ? dealerCode : null,
           provinceScope: role === "CSKH" ? provinceScope : null,
           password: hashPassword(initialPassword),
           active: true,
@@ -133,7 +133,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: true, data: safeUser(user), initialPassword }, { status: 201 });
   } catch (error) {
     if (error instanceof Error && error.message === "ROLE_NEEDS_DEALER") {
-      return NextResponse.json({ success: false, message: "Đại lý/KTV bắt buộc phải có mã đại lý." }, { status: 400 });
+      return NextResponse.json({ success: false, message: "Đại lý/CTV/KTV bắt buộc phải có mã đại lý." }, { status: 400 });
     }
     if (error instanceof Error && error.message === "DEALER_NOT_FOUND") {
       return NextResponse.json({ success: false, message: "Không tìm thấy đại lý đã duyệt cho KTV." }, { status: 404 });
@@ -169,7 +169,7 @@ export async function PATCH(request: NextRequest) {
     data.phone = phone;
   }
   if (current.role === "CSKH" && "provinceScope" in body) data.provinceScope = text(body.provinceScope) || null;
-  if (["DEALER", "KTV"].includes(current.role) && "dealerCode" in body) {
+  if (["DEALER", "CTV", "KTV"].includes(current.role) && "dealerCode" in body) {
     const dealerCode = text(body.dealerCode).toUpperCase();
     const dealer = await prisma.dealer.findUnique({ where: { dealerCode } });
     if (!dealer || dealer.status !== "APPROVED") return NextResponse.json({ success: false, message: "Mã đại lý không tồn tại hoặc chưa duyệt." }, { status: 400 });

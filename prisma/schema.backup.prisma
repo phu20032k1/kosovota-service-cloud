@@ -10,6 +10,7 @@ datasource db {
 model User {
   id                    String          @id @default(cuid())
   phone                 String          @unique
+  email                 String?
   password              String
   name                  String
   role                  String
@@ -30,6 +31,7 @@ model Customer {
   id             String             @id @default(cuid())
   name           String
   phone          String             @unique
+  email          String?
   address        String?
   notifyChannels String?
   callFrom       String?
@@ -54,6 +56,7 @@ model Dealer {
   dealerCode         String          @unique
   name               String
   phone              String
+  email              String?
   province           String?
   address            String?
   lat                Float?
@@ -169,6 +172,7 @@ model ServiceOrder {
   technician            User?                @relation("TechnicianOrders", fields: [technicianId], references: [id])
   reports               ServiceReport[]
   stockMovements        StockMovement[]
+  sourceTicket          SupportTicket?       @relation("TicketServiceOrder")
 
   @@index([machineId])
   @@index([dealerId])
@@ -213,9 +217,12 @@ model MaintenanceSchedule {
 
 model Notification {
   id                String    @id @default(cuid())
-  phone             String
+  phone             String?
+  email             String?
+  recipientName     String?
   channel           String
   kind              String?
+  subject           String?
   content           String
   payload           String?
   status            String    @default("PENDING")
@@ -228,6 +235,8 @@ model Notification {
   updatedAt         DateTime  @default(now()) @updatedAt
 
   @@index([phone, status])
+  @@index([email, status])
+  @@index([channel, status])
   @@index([status, createdAt])
 }
 
@@ -424,6 +433,7 @@ model SupportTicket {
   machineId    String?
   dealerId     String?
   assigneeId   String?
+  serviceOrderId String?          @unique
   contactName  String
   contactPhone String
   dueAt        DateTime?
@@ -435,6 +445,7 @@ model SupportTicket {
   customer     Customer?       @relation(fields: [customerId], references: [id])
   dealer       Dealer?         @relation(fields: [dealerId], references: [id])
   machine      Machine?        @relation(fields: [machineId], references: [id])
+  serviceOrder ServiceOrder?   @relation("TicketServiceOrder", fields: [serviceOrderId], references: [id], onDelete: SetNull)
   messages     TicketMessage[]
 
   @@index([status, priority, createdAt])

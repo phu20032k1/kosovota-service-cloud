@@ -11,11 +11,12 @@ const ORDER_INCLUDE = {
   reports: true,
   maintenanceSchedule: true,
   technician: { select: { id: true, name: true, phone: true, active: true } },
+  sourceTicket: { select: { id: true, ticketCode: true, subject: true, status: true, priority: true } },
 } as const;
 
 export async function GET(request: NextRequest) {
   try {
-    const auth = await hasRole(request, ["ADMIN", "CSKH", "DEALER", "KTV"]);
+    const auth = await hasRole(request, ["ADMIN", "CSKH", "DEALER", "CTV", "KTV"]);
     if (!auth) return NextResponse.json({ success: false, message: "Chưa được cấp quyền." }, { status: 401 });
 
     const status = request.nextUrl.searchParams.get("status") || undefined;
@@ -26,7 +27,7 @@ export async function GET(request: NextRequest) {
       where: {
         ...(status ? { status } : {}),
         ...(machineId ? { machineId } : {}),
-        ...(auth.user.role === "DEALER" ? { dealer: { dealerCode: auth.user.dealerCode || "__NONE__" } } : {}),
+        ...(["DEALER", "CTV"].includes(auth.user.role) ? { dealer: { dealerCode: auth.user.dealerCode || "__NONE__" } } : {}),
         ...(auth.user.role === "KTV" ? { technicianId: auth.user.id } : {}),
         ...(auth.user.role === "CSKH" && provinceScope.length
           ? { machine: { provinceCode: { in: provinceScope } } }

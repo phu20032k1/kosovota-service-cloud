@@ -172,6 +172,7 @@ model ServiceOrder {
   technician            User?                @relation("TechnicianOrders", fields: [technicianId], references: [id])
   reports               ServiceReport[]
   stockMovements        StockMovement[]
+  sourceTicket          SupportTicket?       @relation("TicketServiceOrder")
 
   @@index([machineId])
   @@index([dealerId])
@@ -432,6 +433,7 @@ model SupportTicket {
   machineId    String?
   dealerId     String?
   assigneeId   String?
+  serviceOrderId String?          @unique
   contactName  String
   contactPhone String
   dueAt        DateTime?
@@ -443,6 +445,7 @@ model SupportTicket {
   customer     Customer?       @relation(fields: [customerId], references: [id])
   dealer       Dealer?         @relation(fields: [dealerId], references: [id])
   machine      Machine?        @relation(fields: [machineId], references: [id])
+  serviceOrder ServiceOrder?   @relation("TicketServiceOrder", fields: [serviceOrderId], references: [id], onDelete: SetNull)
   messages     TicketMessage[]
 
   @@index([status, priority, createdAt])

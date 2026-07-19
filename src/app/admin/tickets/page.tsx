@@ -1,6 +1,7 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { OperationsHeader } from "@/components/ui/OperationsHeader";
 import { MetricCard } from "@/components/ui/MetricCard";
 import { Notice } from "@/components/ui/Notice";
@@ -8,22 +9,304 @@ import { LoadingState } from "@/components/ui/LoadingState";
 import { Icon } from "@/components/ui/Icon";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 
-type Ticket={id:string;ticketCode:string;type:string;subject:string;description?:string|null;status:string;priority:string;contactName:string;contactPhone:string;dueAt?:string|null;createdAt:string;customer?:{id:string;name:string;phone:string}|null;machine?:{id:string;model:string}|null;dealer?:{id:string;dealerCode:string;name:string}|null;assignee?:{id:string;name:string}|null;messages:{id:string;authorName:string;message:string;isInternal:boolean;createdAt:string}[]};
-type Option={id:string;name:string;phone?:string};type Data={tickets:Ticket[];customers:Option[];machines:{id:string;model:string;customer?:Option|null}[];dealers:{id:string;dealerCode:string;name:string}[];staff:{id:string;name:string}[]};
-const date=(v?:string|null)=>v?new Intl.DateTimeFormat("vi-VN",{dateStyle:"short",timeStyle:"short"}).format(new Date(v)):"—";
+type TicketMessage = { id: string; authorName: string; message: string; isInternal: boolean; createdAt: string };
+type ServiceOrder = {
+  id: string;
+  orderCode: string;
+  machineId: string;
+  serviceType: string;
+  status: string;
+  dueDate?: string | null;
+  createdAt: string;
+  dealer?: { id: string; dealerCode: string; name: string } | null;
+  technician?: { id: string; name: string; phone: string } | null;
+  reports: { id: string; createdAt: string }[];
+};
+type Ticket = {
+  id: string;
+  ticketCode: string;
+  type: string;
+  source: string;
+  subject: string;
+  description?: string | null;
+  status: string;
+  priority: string;
+  contactName: string;
+  contactPhone: string;
+  dueAt?: string | null;
+  createdAt: string;
+  customer?: { id: string; name: string; phone: string; address?: string | null } | null;
+  machine?: { id: string; model: string; name?: string | null; status?: string } | null;
+  dealer?: { id: string; dealerCode: string; name: string } | null;
+  assignee?: { id: string; name: string } | null;
+  serviceOrder?: ServiceOrder | null;
+  messages: TicketMessage[];
+};
+type Option = { id: string; name: string; phone?: string; address?: string | null };
+type Data = {
+  tickets: Ticket[];
+  customers: Option[];
+  machines: { id: string; model: string; name?: string | null; customer?: Option | null }[];
+  dealers: { id: string; dealerCode: string; name: string }[];
+  staff: { id: string; name: string }[];
+};
 
-export default function TicketsPage(){
- const[data,setData]=useState<Data|null>(null);const[loading,setLoading]=useState(true);const[error,setError]=useState("");const[message,setMessage]=useState("");const[selected,setSelected]=useState<Ticket|null>(null);const[open,setOpen]=useState(false);const[filter,setFilter]=useState("ALL");
- const[form,setForm]=useState({type:"WARRANTY",subject:"",description:"",priority:"NORMAL",customerId:"",machineId:"",dealerId:"",assigneeId:"",contactName:"",contactPhone:"",dueAt:""});const[reply,setReply]=useState("");
- const load=useCallback(async()=>{setLoading(true);try{const r=await fetch("/api/support-tickets",{cache:"no-store"});const j=await r.json();if(!r.ok||!j.success)throw new Error(j.message);setData(j.data);setSelected((current)=>current?j.data.tickets.find((t:Ticket)=>t.id===current.id)||current:current);}catch(e){setError(e instanceof Error?e.message:"Không tải được ticket");}finally{setLoading(false);}},[]);useEffect(()=>{void load();},[load]);
- const visible=useMemo(()=>data?.tickets.filter(t=>filter==="ALL"||t.status===filter)||[],[data,filter]);const stats=useMemo(()=>({open:data?.tickets.filter(t=>!["RESOLVED","CLOSED","CANCELLED"].includes(t.status)).length||0,critical:data?.tickets.filter(t=>t.priority==="CRITICAL"&&!["RESOLVED","CLOSED"].includes(t.status)).length||0,waiting:data?.tickets.filter(t=>t.status==="WAITING_CUSTOMER").length||0,resolved:data?.tickets.filter(t=>["RESOLVED","CLOSED"].includes(t.status)).length||0}),[data]);
- async function create(e:FormEvent){e.preventDefault();const r=await fetch("/api/support-tickets",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(form)});const j=await r.json();if(!r.ok||!j.success){setError(j.message);return;}setMessage(j.message);setOpen(false);setForm({...form,subject:"",description:""});await load();}
- async function update(payload:Record<string,unknown>){if(!selected)return;const r=await fetch(`/api/support-tickets/${selected.id}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});const j=await r.json();if(!r.ok||!j.success){setError(j.message);return;}setMessage(j.message);setReply("");await load();}
- function selectCustomer(id:string){const c=data?.customers.find(x=>x.id===id);setForm({...form,customerId:id,contactName:c?.name||form.contactName,contactPhone:c?.phone||form.contactPhone});}
- return <main className="min-h-screen"><OperationsHeader title="Bảo hành & khiếu nại" subtitle="Theo dõi SLA, phân công xử lý và lưu toàn bộ trao đổi" actions={<button type="button" onClick={load} className="icon-button"><Icon name="refresh" size={18}/></button>}/><div className="page-container space-y-6">{message&&<Notice kind="success">{message}</Notice>}{error&&<Notice kind="error">{error}</Notice>}{loading&&!data?<LoadingState label="Đang tải yêu cầu hỗ trợ..."/>:data&&<>
- <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><MetricCard label="Đang mở" value={stats.open} icon="alert" tone="blue"/><MetricCard label="Khẩn cấp" value={stats.critical} icon="bell" tone="rose"/><MetricCard label="Chờ khách hàng" value={stats.waiting} icon="clock" tone="amber"/><MetricCard label="Đã giải quyết" value={stats.resolved} icon="check" tone="emerald"/></section>
- <section className="split-panel"><article className="surface-card"><div className="data-toolbar"><div className="flex flex-wrap gap-2">{["ALL","NEW","ASSIGNED","IN_PROGRESS","WAITING_CUSTOMER","RESOLVED","CLOSED"].map(s=><button type="button" key={s} onClick={()=>setFilter(s)} className={`rounded-xl px-3 py-2 text-xs font-bold ${filter===s?"bg-emerald-600 text-white":"bg-slate-100 text-slate-600"}`}>{s==="ALL"?"Tất cả":s}</button>)}</div><button type="button" onClick={()=>setOpen(true)} className="btn-primary inline-flex items-center gap-2 px-4 py-3 font-black text-white"><Icon name="plus" size={17}/>Tạo yêu cầu</button></div><div className="divide-y">{visible.map(t=><button type="button" key={t.id} onClick={()=>setSelected(t)} className={`w-full p-4 text-left hover:bg-emerald-50 ${selected?.id===t.id?"bg-emerald-50":""}`}><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="font-black">{t.ticketCode} · {t.subject}</p><p className="mt-1 text-sm text-slate-600">{t.contactName} · {t.contactPhone} {t.machine?`· ${t.machine.id}`:""}</p><p className="mt-1 text-xs text-slate-400">Tạo {date(t.createdAt)} · Hạn {date(t.dueAt)}</p></div><div className="flex gap-2"><StatusBadge value={t.priority}/><StatusBadge value={t.status}/></div></div></button>)}{!visible.length&&<div className="empty-state"><div><Icon name="file" size={32} className="mx-auto mb-2"/><p className="font-bold">Không có yêu cầu phù hợp</p></div></div>}</div></article>
- <aside className="surface-card h-fit xl:sticky xl:top-28">{selected?<><div className="border-b p-5"><div className="flex items-start justify-between gap-3"><div><p className="text-xs font-extrabold uppercase tracking-wider text-emerald-700">{selected.ticketCode}</p><h2 className="mt-1 text-xl font-black">{selected.subject}</h2></div><StatusBadge value={selected.priority}/></div><p className="mt-3 text-sm text-slate-600">{selected.description||"Không có mô tả."}</p></div><div className="space-y-4 p-5"><div className="grid gap-3 sm:grid-cols-2"><label><span className="mb-1 block text-xs font-bold">Trạng thái</span><select value={selected.status} onChange={e=>update({status:e.target.value})}>{["NEW","ASSIGNED","IN_PROGRESS","WAITING_CUSTOMER","RESOLVED","CLOSED","CANCELLED"].map(x=><option key={x}>{x}</option>)}</select></label><label><span className="mb-1 block text-xs font-bold">Nhân viên phụ trách</span><select value={selected.assignee?.id||""} onChange={e=>update({assigneeId:e.target.value})}><option value="">Chưa phân công</option>{data.staff.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></label><label className="sm:col-span-2"><span className="mb-1 block text-xs font-bold">Đại lý xử lý</span><select value={selected.dealer?.id||""} onChange={e=>update({dealerId:e.target.value})}><option value="">Chưa giao đại lý</option>{data.dealers.map(d=><option key={d.id} value={d.id}>{d.dealerCode} · {d.name}</option>)}</select></label></div><div><p className="mb-3 text-sm font-black">Lịch sử trao đổi</p><div className="timeline max-h-72 overflow-y-auto">{selected.messages.map(m=><div key={m.id} className="timeline-item"><div className="flex justify-between gap-3"><strong className="text-sm">{m.authorName}</strong><span className="text-[11px] text-slate-400">{date(m.createdAt)}</span></div><p className="mt-1 text-sm text-slate-600">{m.message}</p>{m.isInternal&&<span className="mt-1 inline-block text-[10px] font-bold text-amber-700">Ghi chú nội bộ</span>}</div>)}{!selected.messages.length&&<p className="text-sm text-slate-400">Chưa có trao đổi.</p>}</div></div><label><span className="mb-1 block text-sm font-bold">Thêm trao đổi</span><textarea value={reply} onChange={e=>setReply(e.target.value)} placeholder="Nhập nội dung cập nhật..."/></label><button type="button" disabled={!reply.trim()} onClick={()=>update({message:reply})} className="btn-primary w-full p-3 font-black text-white disabled:opacity-50">Gửi cập nhật</button></div></>:<div className="empty-state"><div><Icon name="chevron-right" size={30} className="mx-auto mb-2"/><p className="font-bold">Chọn một yêu cầu để xử lý</p></div></div>}</aside></section>
- </>}</div>{open&&<div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><form onSubmit={create} className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-3xl bg-white p-6 shadow-2xl"><div className="mb-5 flex justify-between"><div><h3 className="text-xl font-black">Tạo yêu cầu hỗ trợ</h3><p className="text-sm text-slate-500">Bảo hành, khiếu nại, sửa chữa hoặc yêu cầu khác</p></div><button type="button" onClick={()=>setOpen(false)} className="icon-button"><Icon name="x" size={18}/></button></div><div className="form-grid"><Field label="Loại yêu cầu" className="span-4"><select value={form.type} onChange={e=>setForm({...form,type:e.target.value})}><option value="WARRANTY">Bảo hành</option><option value="COMPLAINT">Khiếu nại</option><option value="REPAIR">Sửa chữa</option><option value="CONSULTING">Tư vấn</option></select></Field><Field label="Mức ưu tiên" className="span-4"><select value={form.priority} onChange={e=>setForm({...form,priority:e.target.value})}><option value="LOW">Thấp</option><option value="NORMAL">Bình thường</option><option value="HIGH">Cao</option><option value="CRITICAL">Khẩn cấp</option></select></Field><Field label="Hạn xử lý" className="span-4"><input type="datetime-local" value={form.dueAt} onChange={e=>setForm({...form,dueAt:e.target.value})}/></Field><Field label="Khách hàng" className="span-6"><select value={form.customerId} onChange={e=>selectCustomer(e.target.value)}><option value="">Chọn khách hàng</option>{data?.customers.map(c=><option key={c.id} value={c.id}>{c.name} · {c.phone}</option>)}</select></Field><Field label="Máy liên quan" className="span-6"><select value={form.machineId} onChange={e=>setForm({...form,machineId:e.target.value})}><option value="">Không chọn máy</option>{data?.machines.map(m=><option key={m.id} value={m.id}>{m.id} · {m.model}</option>)}</select></Field><Field label="Người liên hệ" className="span-6"><input value={form.contactName} onChange={e=>setForm({...form,contactName:e.target.value})}/></Field><Field label="Số điện thoại" className="span-6"><input value={form.contactPhone} onChange={e=>setForm({...form,contactPhone:e.target.value})}/></Field><Field label="Tiêu đề" className="span-12"><input value={form.subject} onChange={e=>setForm({...form,subject:e.target.value})}/></Field><Field label="Mô tả" className="span-12"><textarea value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></Field><button className="btn-primary col-span-12 p-3 font-black text-white">Tạo yêu cầu</button></div></form></div>}</main>;
+type TicketForm = {
+  type: string;
+  subject: string;
+  description: string;
+  priority: string;
+  customerId: string;
+  machineId: string;
+  dealerId: string;
+  assigneeId: string;
+  contactName: string;
+  contactPhone: string;
+  dueAt: string;
+};
+
+const EMPTY_FORM: TicketForm = {
+  type: "WARRANTY",
+  subject: "",
+  description: "",
+  priority: "NORMAL",
+  customerId: "",
+  machineId: "",
+  dealerId: "",
+  assigneeId: "",
+  contactName: "",
+  contactPhone: "",
+  dueAt: "",
+};
+const OPERATIONAL_TYPES = new Set(["WARRANTY", "REPAIR", "MAINTENANCE", "INSTALLATION", "COMPLAINT"]);
+const date = (value?: string | null) => value ? new Intl.DateTimeFormat("vi-VN", { dateStyle: "short", timeStyle: "short" }).format(new Date(value)) : "—";
+const TYPE_LABEL: Record<string, string> = { WARRANTY: "Bảo hành", COMPLAINT: "Khiếu nại", REPAIR: "Sửa chữa", MAINTENANCE: "Bảo trì", INSTALLATION: "Lắp đặt", CONSULTING: "Tư vấn" };
+
+export default function TicketsPage() {
+  const [data, setData] = useState<Data | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
+  const [filter, setFilter] = useState("ALL");
+  const [query, setQuery] = useState("");
+  const [form, setForm] = useState<TicketForm>(EMPTY_FORM);
+  const [reply, setReply] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const response = await fetch("/api/support-tickets", { cache: "no-store" });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.message || "Không tải được ticket");
+      setData(result.data);
+      const requestedTicketId = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("ticket") : null;
+      setSelectedId((current) => {
+        if (requestedTicketId && result.data.tickets.some((ticket: Ticket) => ticket.id === requestedTicketId)) return requestedTicketId;
+        return current && result.data.tickets.some((ticket: Ticket) => ticket.id === current) ? current : result.data.tickets[0]?.id || null;
+      });
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Không tải được ticket");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+  useEffect(() => { void load(); }, [load]);
+
+  const selected = data?.tickets.find((ticket) => ticket.id === selectedId) || null;
+  const visible = useMemo(() => {
+    const normalized = query.trim().toLowerCase();
+    return (data?.tickets || []).filter((ticket) => {
+      const matchesStatus = filter === "ALL" || ticket.status === filter;
+      const text = `${ticket.ticketCode} ${ticket.subject} ${ticket.contactName} ${ticket.contactPhone} ${ticket.machine?.id || ""} ${ticket.serviceOrder?.orderCode || ""}`.toLowerCase();
+      return matchesStatus && (!normalized || text.includes(normalized));
+    });
+  }, [data, filter, query]);
+  const stats = useMemo(() => ({
+    open: data?.tickets.filter((ticket) => !["RESOLVED", "CLOSED", "CANCELLED"].includes(ticket.status)).length || 0,
+    critical: data?.tickets.filter((ticket) => ticket.priority === "CRITICAL" && !["RESOLVED", "CLOSED"].includes(ticket.status)).length || 0,
+    waiting: data?.tickets.filter((ticket) => ticket.status === "WAITING_CUSTOMER").length || 0,
+    dispatched: data?.tickets.filter((ticket) => Boolean(ticket.serviceOrder)).length || 0,
+  }), [data]);
+  const customerMachines = useMemo(() => form.customerId
+    ? (data?.machines || []).filter((machine) => machine.customer?.id === form.customerId)
+    : data?.machines || [], [data, form.customerId]);
+
+  function showNotice(kind: "success" | "error", text: string) {
+    if (kind === "success") { setMessage(text); setError(""); }
+    else { setError(text); setMessage(""); }
+  }
+
+  async function create(event: FormEvent) {
+    event.preventDefault();
+    setBusy(true);
+    try {
+      const response = await fetch("/api/support-tickets", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.message || "Không tạo được ticket");
+      showNotice("success", result.message);
+      setOpen(false);
+      setForm(EMPTY_FORM);
+      await load();
+      setSelectedId(result.data.id);
+    } catch (caught) {
+      showNotice("error", caught instanceof Error ? caught.message : "Không tạo được ticket");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function update(payload: Record<string, unknown>) {
+    if (!selected) return;
+    setBusy(true);
+    try {
+      const response = await fetch(`/api/support-tickets/${selected.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.message || "Không cập nhật được ticket");
+      showNotice("success", result.message);
+      setReply("");
+      await load();
+    } catch (caught) {
+      showNotice("error", caught instanceof Error ? caught.message : "Không cập nhật được ticket");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function selectCustomer(id: string) {
+    const customer = data?.customers.find((item) => item.id === id);
+    const machines = (data?.machines || []).filter((machine) => machine.customer?.id === id);
+    setForm((current) => ({
+      ...current,
+      customerId: id,
+      machineId: machines.length === 1 ? machines[0].id : "",
+      contactName: customer?.name || current.contactName,
+      contactPhone: customer?.phone || current.contactPhone,
+    }));
+  }
+
+  return <main className="min-h-screen">
+    <OperationsHeader title="Ticket & Điều phối" subtitle="Tạo yêu cầu, tự sinh lệnh điều phối, phân công và theo dõi SLA trên một luồng" actions={<button type="button" onClick={load} className="icon-button"><Icon name="refresh" size={18}/></button>}/>
+    <div className="page-container space-y-6">
+      {message && <Notice kind="success">{message}</Notice>}
+      {error && <Notice kind="error">{error}</Notice>}
+      {loading && !data ? <LoadingState label="Đang tải yêu cầu hỗ trợ..."/> : data && <>
+        <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <MetricCard label="Đang mở" value={stats.open} icon="alert" tone="blue"/>
+          <MetricCard label="Khẩn cấp" value={stats.critical} icon="bell" tone="rose"/>
+          <MetricCard label="Chờ khách hàng" value={stats.waiting} icon="clock" tone="amber"/>
+          <MetricCard label="Đã sang Điều phối" value={stats.dispatched} icon="map" tone="emerald"/>
+        </section>
+
+        <section className="surface-card p-4">
+          <div className="grid gap-3 lg:grid-cols-[minmax(260px,1fr)_auto] lg:items-center">
+            <label className="relative"><Icon name="search" size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400"/><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Tìm mã ticket, lệnh, khách hàng, máy..." className="pl-11"/></label>
+            <button type="button" onClick={() => setOpen(true)} className="btn-primary justify-center px-5 py-3 font-black text-white"><Icon name="plus" size={17}/>Tạo yêu cầu</button>
+          </div>
+          <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
+            {["ALL", "NEW", "ASSIGNED", "IN_PROGRESS", "WAITING_CUSTOMER", "RESOLVED", "CLOSED"].map((status) => <button type="button" key={status} onClick={() => setFilter(status)} className={`shrink-0 rounded-xl px-3 py-2 text-xs font-bold ${filter === status ? "bg-emerald-600 text-white" : "bg-slate-100 text-slate-600"}`}>{status === "ALL" ? "Tất cả" : status}</button>)}
+          </div>
+        </section>
+
+        <section className="ticket-workspace">
+          <article className="surface-card overflow-hidden">
+            <div className="border-b px-5 py-4"><h2 className="page-section-title">Danh sách yêu cầu</h2><p className="page-section-subtitle">Bấm từng yêu cầu để xem đầy đủ dữ liệu và lệnh Điều phối liên kết.</p></div>
+            <div className="ticket-list-scroll divide-y">
+              {visible.map((ticket) => <button type="button" key={ticket.id} onClick={() => setSelectedId(ticket.id)} className={`ticket-list-item ${selected?.id === ticket.id ? "is-selected" : ""}`}>
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="break-words font-black">{ticket.ticketCode} · {ticket.subject}</p>
+                    <p className="mt-1 text-sm text-slate-600">{ticket.contactName} · {ticket.contactPhone}</p>
+                    <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-500">
+                      {ticket.machine && <span className="mini-chip"><Icon name="droplet" size={13}/>{ticket.machine.id}</span>}
+                      {ticket.serviceOrder && <span className="mini-chip mini-chip--green"><Icon name="map" size={13}/>{ticket.serviceOrder.orderCode}</span>}
+                      {!ticket.serviceOrder && ticket.machine && <span className="mini-chip mini-chip--amber">Chưa tạo lệnh</span>}
+                    </div>
+                    <p className="mt-2 text-xs text-slate-400">Tạo {date(ticket.createdAt)} · Hạn {date(ticket.dueAt)}</p>
+                  </div>
+                  <div className="flex flex-wrap gap-2"><StatusBadge value={ticket.priority}/><StatusBadge value={ticket.status}/></div>
+                </div>
+              </button>)}
+              {!visible.length && <div className="empty-state"><div><Icon name="file" size={32} className="mx-auto mb-2"/><p className="font-bold">Không có yêu cầu phù hợp</p></div></div>}
+            </div>
+          </article>
+
+          <aside className="surface-card ticket-detail-panel">
+            {selected ? <TicketDetail ticket={selected} data={data} reply={reply} setReply={setReply} busy={busy} update={update}/> : <div className="empty-state"><div><Icon name="chevron-right" size={30} className="mx-auto mb-2"/><p className="font-bold">Chọn một yêu cầu để xử lý</p></div></div>}
+          </aside>
+        </section>
+      </>}
+    </div>
+
+    {open && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setOpen(false); }}>
+      <form onSubmit={create} className="modal-panel max-w-4xl">
+        <div className="modal-header"><div><p className="eyebrow">Ticket → Điều phối</p><h3 className="mt-1 text-2xl font-black">Tạo yêu cầu hỗ trợ</h3><p className="text-sm text-slate-500">Khi chọn máy, hệ thống tự tạo lệnh và đưa sang tab Điều phối.</p></div><button type="button" onClick={() => setOpen(false)} className="icon-button"><Icon name="x" size={18}/></button></div>
+        <div className="modal-body space-y-5">
+          <div className="form-grid">
+            <Field label="Loại yêu cầu" className="span-4"><select value={form.type} onChange={(event) => setForm({ ...form, type: event.target.value })}>{Object.entries(TYPE_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></Field>
+            <Field label="Mức ưu tiên" className="span-4"><select value={form.priority} onChange={(event) => setForm({ ...form, priority: event.target.value })}><option value="LOW">Thấp</option><option value="NORMAL">Bình thường</option><option value="HIGH">Cao</option><option value="CRITICAL">Khẩn cấp</option></select></Field>
+            <Field label="Hạn xử lý" className="span-4"><input type="datetime-local" value={form.dueAt} onChange={(event) => setForm({ ...form, dueAt: event.target.value })}/></Field>
+            <Field label="Khách hàng CRM" className="span-6"><select value={form.customerId} onChange={(event) => selectCustomer(event.target.value)}><option value="">Nhập người liên hệ thủ công</option>{(data?.customers || []).map((customer) => <option key={customer.id} value={customer.id}>{customer.name} · {customer.phone}</option>)}</select></Field>
+            <Field label="Máy / sản phẩm cần xử lý" className="span-6"><select value={form.machineId} onChange={(event) => setForm({ ...form, machineId: event.target.value })}><option value="">Chưa xác định máy</option>{customerMachines.map((machine) => <option key={machine.id} value={machine.id}>{machine.id} · {machine.name || machine.model}</option>)}</select></Field>
+            <Field label="Tên người liên hệ" className="span-6"><input required value={form.contactName} onChange={(event) => setForm({ ...form, contactName: event.target.value })}/></Field>
+            <Field label="Số điện thoại" className="span-6"><input required value={form.contactPhone} onChange={(event) => setForm({ ...form, contactPhone: event.target.value.replace(/\D/g, "") })}/></Field>
+            <Field label="Nhân viên phụ trách" className="span-6"><select value={form.assigneeId} onChange={(event) => setForm({ ...form, assigneeId: event.target.value })}><option value="">Chưa phân công</option>{(data?.staff || []).map((staff) => <option key={staff.id} value={staff.id}>{staff.name}</option>)}</select></Field>
+            <Field label="Đại lý dự kiến" className="span-6"><select value={form.dealerId} onChange={(event) => setForm({ ...form, dealerId: event.target.value })}><option value="">Để Điều phối lựa chọn</option>{(data?.dealers || []).map((dealer) => <option key={dealer.id} value={dealer.id}>{dealer.dealerCode} · {dealer.name}</option>)}</select></Field>
+            <Field label="Tiêu đề yêu cầu" className="span-12"><input required value={form.subject} onChange={(event) => setForm({ ...form, subject: event.target.value })} placeholder="Ví dụ: Máy rò nước, cần kiểm tra trong ngày"/></Field>
+            <Field label="Mô tả chi tiết" className="span-12"><textarea required value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} placeholder="Hiện tượng, thời điểm phát sinh, mong muốn của khách hàng..."/></Field>
+          </div>
+          <RequirementRestatement form={form} machineLabel={data?.machines.find((machine) => machine.id === form.machineId)?.name || data?.machines.find((machine) => machine.id === form.machineId)?.model}/>
+        </div>
+        <div className="modal-footer"><button type="button" onClick={() => setOpen(false)} className="btn-secondary">Hủy</button><button disabled={busy} className="btn-primary px-6 py-3 font-black text-white disabled:opacity-60">{busy ? "Đang tạo..." : "Tạo Ticket & chuyển Điều phối"}</button></div>
+      </form>
+    </div>}
+  </main>;
 }
-function Field({label,className="",children}:{label:string;className?:string;children:React.ReactNode}){return <label className={className}><span className="mb-1 block text-sm font-bold">{label}</span>{children}</label>}
+
+function TicketDetail({ ticket, data, reply, setReply, busy, update }: { ticket: Ticket; data: Data; reply: string; setReply: (value: string) => void; busy: boolean; update: (payload: Record<string, unknown>) => Promise<void> }) {
+  return <div>
+    <div className="border-b p-5">
+      <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-extrabold uppercase tracking-wider text-emerald-700">{ticket.ticketCode}</p><h2 className="mt-1 text-xl font-black">{ticket.subject}</h2></div><div className="flex gap-2"><StatusBadge value={ticket.priority}/><StatusBadge value={ticket.status}/></div></div>
+      <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-600">{ticket.description || "Không có mô tả."}</p>
+    </div>
+    <div className="space-y-5 p-5">
+      <section className="requirement-summary">
+        <div className="flex items-center gap-2"><span className="summary-icon"><Icon name="file" size={18}/></span><div><h3 className="font-black">Mô tả lại yêu cầu</h3><p className="text-xs text-slate-500">Thông tin đã được chuẩn hóa để CSKH, Điều phối và Đại lý cùng hiểu.</p></div></div>
+        <dl className="summary-grid mt-4">
+          <Summary label="Khách hàng" value={`${ticket.contactName} · ${ticket.contactPhone}`}/>
+          <Summary label="Máy cần xử lý" value={ticket.machine ? `${ticket.machine.id} · ${ticket.machine.name || ticket.machine.model}` : "Chưa xác định"}/>
+          <Summary label="Loại / ưu tiên" value={`${TYPE_LABEL[ticket.type] || ticket.type} · ${ticket.priority}`}/>
+          <Summary label="Mong muốn" value={ticket.description || ticket.subject}/>
+        </dl>
+      </section>
+
+      <section className={`dispatch-link-card ${ticket.serviceOrder ? "is-linked" : ""}`}>
+        <div className="flex flex-wrap items-start justify-between gap-3"><div className="flex gap-3"><span className="summary-icon"><Icon name="map" size={18}/></span><div><h3 className="font-black">Lệnh Điều phối</h3><p className="text-xs text-slate-500">Ticket và lệnh dùng chung máy, khách hàng, đại lý và trạng thái xử lý.</p></div></div>{ticket.serviceOrder && <StatusBadge value={ticket.serviceOrder.status}/>}</div>
+        {ticket.serviceOrder ? <div className="mt-4 rounded-2xl bg-white/80 p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs font-bold text-emerald-700">{ticket.serviceOrder.orderCode}</p><p className="mt-1 font-black">{ticket.serviceOrder.serviceType}</p><p className="mt-1 text-xs text-slate-500">{ticket.serviceOrder.dealer?.name || "Chưa giao đại lý"} · Hạn {date(ticket.serviceOrder.dueDate)}</p></div><div className="flex flex-wrap gap-2"><Link href={`/admin/service-orders/${ticket.serviceOrder.id}`} className="btn-secondary text-xs"><Icon name="eye" size={15}/>Xem chi tiết lệnh</Link><Link href={`/operations-map?order=${ticket.serviceOrder.id}`} className="btn-primary px-3 py-2 text-xs font-black text-white"><Icon name="map" size={15}/>Mở Điều phối</Link></div></div></div> : ticket.machine ? <div className="mt-4"><Notice kind="warning">Ticket cũ chưa có lệnh liên kết. Bấm nút dưới để tạo ngay, không cần nhập lại dữ liệu.</Notice><button type="button" disabled={busy} onClick={() => update({ ensureServiceOrder: true })} className="btn-primary mt-3 w-full justify-center px-4 py-3 font-black text-white disabled:opacity-60"><Icon name="plus" size={17}/>Tạo lệnh Điều phối từ Ticket</button></div> : <div className="mt-4"><Notice kind="warning">Chưa xác định máy nên chưa thể chuyển sang Điều phối. Hãy tạo lại ticket và chọn đúng máy của khách hàng.</Notice></div>}
+      </section>
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label><span className="mb-1 block text-xs font-bold">Trạng thái</span><select value={ticket.status} disabled={busy} onChange={(event) => update({ status: event.target.value })}>{["NEW", "ASSIGNED", "IN_PROGRESS", "WAITING_CUSTOMER", "RESOLVED", "CLOSED", "CANCELLED"].map((value) => <option key={value}>{value}</option>)}</select></label>
+        <label><span className="mb-1 block text-xs font-bold">Nhân viên phụ trách</span><select value={ticket.assignee?.id || ""} disabled={busy} onChange={(event) => update({ assigneeId: event.target.value })}><option value="">Chưa phân công</option>{(data?.staff || []).map((staff) => <option key={staff.id} value={staff.id}>{staff.name}</option>)}</select></label>
+        <label className="sm:col-span-2"><span className="mb-1 block text-xs font-bold">Đại lý xử lý</span><select value={ticket.dealer?.id || ""} disabled={busy} onChange={(event) => update({ dealerId: event.target.value, status: event.target.value ? "ASSIGNED" : "NEW" })}><option value="">Chưa giao đại lý</option>{(data?.dealers || []).map((dealer) => <option key={dealer.id} value={dealer.id}>{dealer.dealerCode} · {dealer.name}</option>)}</select></label>
+      </div>
+
+      <div><p className="mb-3 text-sm font-black">Lịch sử trao đổi</p><div className="timeline max-h-80 overflow-y-auto pr-2">{ticket.messages.map((item) => <div key={item.id} className="timeline-item"><div className="flex justify-between gap-3"><strong className="text-sm">{item.authorName}</strong><span className="text-[11px] text-slate-400">{date(item.createdAt)}</span></div><p className="mt-1 whitespace-pre-wrap text-sm text-slate-600">{item.message}</p>{item.isInternal && <span className="mt-1 inline-block text-[10px] font-bold text-amber-700">Ghi chú nội bộ</span>}</div>)}{!ticket.messages.length && <p className="text-sm text-slate-400">Chưa có trao đổi.</p>}</div></div>
+      <label><span className="mb-1 block text-sm font-bold">Thêm trao đổi</span><textarea value={reply} onChange={(event) => setReply(event.target.value)} placeholder="Nhập nội dung cập nhật..."/></label>
+      <button type="button" disabled={busy || !reply.trim()} onClick={() => update({ message: reply })} className="btn-primary w-full justify-center p-3 font-black text-white disabled:opacity-50"><Icon name="send" size={17}/>Gửi cập nhật</button>
+    </div>
+  </div>;
+}
+
+function RequirementRestatement({ form, machineLabel }: { form: TicketForm; machineLabel?: string }) {
+  const willDispatch = Boolean(form.machineId && OPERATIONAL_TYPES.has(form.type));
+  return <section className="requirement-summary">
+    <div className="flex items-center gap-2"><span className="summary-icon"><Icon name="file" size={18}/></span><div><h3 className="font-black">Mô tả lại yêu cầu</h3><p className="text-xs text-slate-500">Kiểm tra nội dung hệ thống sẽ chuyển cho bộ phận Điều phối.</p></div></div>
+    <dl className="summary-grid mt-4"><Summary label="Người yêu cầu" value={`${form.contactName || "Chưa nhập"} · ${form.contactPhone || "Chưa nhập"}`}/><Summary label="Thiết bị" value={form.machineId ? `${form.machineId}${machineLabel ? ` · ${machineLabel}` : ""}` : "Chưa chọn máy"}/><Summary label="Nhu cầu" value={`${TYPE_LABEL[form.type] || form.type}: ${form.subject || "Chưa nhập tiêu đề"}`}/><Summary label="Luồng sau khi lưu" value={willDispatch ? "Tự động tạo lệnh NEW/ASSIGNED và hiển thị ngay tại Điều phối" : "Chỉ lưu Ticket; cần bổ sung máy để tạo lệnh Điều phối"}/></dl>
+  </section>;
+}
+
+function Summary({ label, value }: { label: string; value: string }) { return <div><dt>{label}</dt><dd>{value}</dd></div>; }
+function Field({ label, className = "", children }: { label: string; className?: string; children: ReactNode }) { return <label className={className}><span className="mb-1 block text-sm font-bold">{label}</span>{children}</label>; }

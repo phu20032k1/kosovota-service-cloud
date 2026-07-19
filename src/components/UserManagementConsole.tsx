@@ -28,6 +28,7 @@ const ROLE_NOTE: Record<string, string> = {
   ADMIN: "Quản trị toàn bộ hoạt động vận hành.",
   CSKH: "Chăm sóc dữ liệu trong phạm vi tỉnh được giao.",
   DEALER: "Quản lý lệnh, kho và đội KTV của một đại lý.",
+  CTV: "Nhận và theo dõi lệnh cộng tác theo mã CRM được giao.",
   KTV: "Nhận lệnh và gửi báo cáo kỹ thuật của đại lý.",
 };
 
@@ -37,8 +38,8 @@ export function UserManagementConsole({ mode }: { mode: Mode }) {
   const allowedRoles = useMemo(
     () =>
       mode === "super"
-        ? ["ADMIN", "CSKH", "DEALER", "KTV"]
-        : ["CSKH", "DEALER", "KTV"],
+        ? ["ADMIN", "CSKH", "DEALER", "CTV", "KTV"]
+        : ["CSKH", "DEALER", "CTV", "KTV"],
     [mode],
   );
   const [users, setUsers] = useState<UserRow[]>([]);
@@ -99,7 +100,7 @@ export function UserManagementConsole({ mode }: { mode: Mode }) {
     users.forEach((user) => {
       if (user.role === "CSKH" && user.provinceScope)
         values.add(`Tỉnh: ${user.provinceScope}`);
-      if (["DEALER", "KTV"].includes(user.role) && user.dealerCode)
+      if (["DEALER", "CTV", "KTV"].includes(user.role) && user.dealerCode)
         values.add(`Đại lý: ${user.dealerCode}`);
     });
     return Array.from(values).sort((a, b) => a.localeCompare(b));
@@ -111,7 +112,7 @@ export function UserManagementConsole({ mode }: { mode: Mode }) {
       const scopeText =
         user.role === "CSKH"
           ? `Tỉnh: ${user.provinceScope || ""}`
-          : ["DEALER", "KTV"].includes(user.role)
+          : ["DEALER", "CTV", "KTV"].includes(user.role)
             ? `Đại lý: ${user.dealerCode || ""}`
             : "Toàn hệ thống";
       const matchesRole = roleFilter === "ALL" || user.role === roleFilter;
@@ -269,7 +270,7 @@ export function UserManagementConsole({ mode }: { mode: Mode }) {
     };
     if (editRole === "CSKH")
       updates.provinceScope = editProvinceScope.trim();
-    if (["DEALER", "KTV"].includes(editRole)) updates.dealerCode = editDealerCode.trim();
+    if (["DEALER", "CTV", "KTV"].includes(editRole)) updates.dealerCode = editDealerCode.trim();
     if (editPassword) updates.resetPassword = editPassword;
 
     setSaving(true);
@@ -400,7 +401,7 @@ export function UserManagementConsole({ mode }: { mode: Mode }) {
             </label>
           )}
 
-          {role === "DEALER" && (
+          {["DEALER", "CTV"].includes(role) && (
             <>
               <label className="mt-4 block">
                 <span className="mb-2 block text-sm font-bold">Mã đại lý</span>
@@ -564,7 +565,7 @@ export function UserManagementConsole({ mode }: { mode: Mode }) {
                     <td className="px-4 py-3 text-slate-600">
                       {user.role === "CSKH"
                         ? `Tỉnh: ${user.provinceScope || "—"}`
-                        : ["DEALER", "KTV"].includes(user.role)
+                        : ["DEALER", "CTV", "KTV"].includes(user.role)
                           ? `Đại lý: ${user.dealerCode || "—"}`
                           : "Toàn hệ thống"}
                     </td>
@@ -691,7 +692,7 @@ export function UserManagementConsole({ mode }: { mode: Mode }) {
                   />
                 </label>
               )}
-              {["DEALER", "KTV"].includes(editRole) && (
+              {["DEALER", "CTV", "KTV"].includes(editRole) && (
                 <label className="block">
                   <span className="text-sm font-bold text-slate-700">
                     Thuộc đại lý
@@ -709,7 +710,7 @@ export function UserManagementConsole({ mode }: { mode: Mode }) {
                   </select>
                 </label>
               )}
-              {editRole === "DEALER" && (
+              {["DEALER", "CTV"].includes(editRole) && (
                 <p className="rounded-xl bg-slate-50 p-3 text-sm text-slate-600">
                   Mã đại lý: <strong>{editingUser.dealerCode || "—"}</strong>.
                   Đổi mã tại hồ sơ đại lý để tránh lệch dữ liệu.

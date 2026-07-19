@@ -45,7 +45,7 @@ export default function ImportDealersButton({ onComplete }: { onComplete?: () =>
         <div className="min-w-0">
           <p className="text-xs font-black uppercase tracking-[.18em] text-blue-700">Excel import</p>
           <h3 className="mt-1 text-lg font-black text-slate-950">Import danh sách đại lý</h3>
-          <p className="mt-1 text-sm text-slate-500">Nhận file Excel .xlsx. Nếu thiếu Mã đại lý, hệ thống tự sinh mã. Nếu Trạng thái = APPROVED, hệ thống tạo/kích hoạt tài khoản đại lý.</p>
+          <p className="mt-1 text-sm text-slate-500">Nhận file Excel .xlsx có Mã đại lý/Mã CRM. Sau khi import, toàn bộ dòng hợp lệ được tự động duyệt và tạo/kích hoạt tài khoản ngay; hệ thống không tự sinh mã.</p>
         </div>
         <button type="button" onClick={() => inputRef.current?.click()} disabled={loading} className="btn-primary inline-flex shrink-0 items-center gap-2 px-4 py-3 text-sm font-black text-white disabled:opacity-60">
           <Icon name="upload" size={17} />
@@ -53,7 +53,7 @@ export default function ImportDealersButton({ onComplete }: { onComplete?: () =>
         </button>
       </div>
       <div className="mt-4 grid gap-2 rounded-2xl border border-dashed border-blue-200 bg-blue-50/70 p-3 text-xs text-blue-900 sm:grid-cols-3">
-        <span><strong>1.</strong> Chọn file .xlsx</span><span><strong>2.</strong> Tạo mới/cập nhật đại lý</span><span><strong>3.</strong> APPROVED là tạo tài khoản luôn</span>
+        <span><strong>1.</strong> Chọn file .xlsx</span><span><strong>2.</strong> Đồng bộ đúng Mã CRM</span><span><strong>3.</strong> Tự động duyệt + tạo tài khoản</span>
       </div>
       <input ref={inputRef} type="file" accept=".xlsx,.xlsm" onChange={handleUpload} disabled={loading} className="sr-only" />
       {fileName && <p className="mt-3 break-all rounded-xl bg-slate-50 px-3 py-2 text-xs font-bold text-slate-600">File: {fileName}</p>}

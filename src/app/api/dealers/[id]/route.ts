@@ -37,6 +37,8 @@ export async function PUT(request: NextRequest, { params }: Params) {
         representativeName: text(body.representativeName) || null,
         companyName: text(body.companyName) || null,
         registrationType: text(body.registrationType) || null,
+        birthDate: text(body.birthDate) ? new Date(text(body.birthDate)) : null,
+        locationType: text(body.locationType) || null,
         email: text(body.email) || null,
         province: text(body.province) || null,
         address: text(body.address) || null,
@@ -48,6 +50,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
         bankAccount: text(body.bankAccount) || null,
         accountHolder: text(body.accountHolder) || null,
         bankName: text(body.bankName) || null,
+        videoName: text(body.videoName) || null,
       } });
       if (current.dealerCode !== dealerCode) await tx.user.updateMany({ where: { dealerCode: current.dealerCode }, data: { dealerCode } });
       return dealer;

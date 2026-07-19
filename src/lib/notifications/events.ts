@@ -130,6 +130,12 @@ export async function queueActivationCompletedNotifications(input: {
     "ACTIVATION_COMPLETED_SMS",
     { machineId: input.machineId },
   );
+  await queueZalo(
+    input.customer || {},
+    customerContent,
+    "ACTIVATION_COMPLETED_ZALO",
+    { machineId: input.machineId },
+  );
 
   const dealerContent = joinLines([
     "Một máy đã được kích hoạt thành công.",

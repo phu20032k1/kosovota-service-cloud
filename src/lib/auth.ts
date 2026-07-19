@@ -26,7 +26,7 @@ export async function hasRole(request: NextRequest, roles: string[]) {
 }
 
 export function isDealerOperator(role?: string | null) {
-  return role === "DEALER" || role === "KTV";
+  return role === "DEALER" || role === "CTV" || role === "KTV";
 }
 
 export function isSuperAdmin(role?: string | null) {

@@ -120,8 +120,8 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const auth = await hasRole(request, ["DEALER", "KTV"]);
-  if (!auth?.user.dealerCode) return errorResponse("Cần đăng nhập Đại lý hoặc KTV đã liên kết đại lý", 401);
+  const auth = await hasRole(request, ["DEALER", "CTV", "KTV"]);
+  if (!auth?.user.dealerCode) return errorResponse("Cần đăng nhập Đại lý, CTV hoặc KTV đã liên kết đại lý", 401);
   let body: JsonObject;
 
   try {

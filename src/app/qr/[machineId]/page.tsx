@@ -37,7 +37,7 @@ type MachineSummary = {
 
 function isStaffRole(role?: string | null) {
   const normalizedRole = String(role || "").toUpperCase();
-  return ["ADMIN", "SUPER_ADMIN", "KTV", "DEALER", "CSKH"].includes(
+  return ["ADMIN", "SUPER_ADMIN", "KTV", "DEALER", "CTV", "CSKH"].includes(
     normalizedRole,
   );
 }
@@ -47,7 +47,7 @@ function getWorkHome(role?: string | null) {
   if (normalizedRole === "ADMIN" || normalizedRole === "SUPER_ADMIN")
     return "/admin/reports";
   if (normalizedRole === "KTV") return "/technician-portal";
-  if (normalizedRole === "DEALER") return "/agent-portal";
+  if (normalizedRole === "DEALER" || normalizedRole === "CTV") return "/agent-portal";
   if (normalizedRole === "CSKH") return "/cskh/tickets";
   return "/";
 }
@@ -112,6 +112,13 @@ export default function QrLandingPage() {
           tone: "action-card--amber",
           href: getAdminDetailHref(machineId, currentUser?.role),
         },
+        {
+          title: "Đăng ký Đại lý / CTV",
+          description: "Mở form đăng ký và đồng bộ mã đại lý với mã khách hàng trên CRM.",
+          icon: "store",
+          tone: "action-card--blue",
+          href: "/dealer-register",
+        },
       ];
     }
 
@@ -130,6 +137,13 @@ export default function QrLandingPage() {
     }
 
     customerActions.push(
+      {
+        title: "Đăng ký Đại lý / CTV",
+        description: "Dành cho đơn vị, kỹ thuật hoặc cộng tác viên muốn nhận lệnh dịch vụ KOSOVOTA.",
+        icon: "store",
+        tone: "action-card--amber",
+        href: "/dealer-register",
+      },
       {
         title: "Báo cáo dịch vụ",
         description: "Gửi yêu cầu thay lõi, sửa chữa hoặc hỗ trợ kỹ thuật.",
@@ -225,7 +239,7 @@ export default function QrLandingPage() {
               </h1>
               <p className="mt-3 max-w-xl text-sm leading-7 text-slate-600 sm:text-base">
                 {isStaff
-                  ? "Bạn đang đăng nhập vai trò vận hành/KTV/đại lý, nên QR sẽ hiện bước kích hoạt và hồ sơ kỹ thuật thay vì giao diện khách hàng."
+                  ? "Bạn đang đăng nhập vai trò vận hành/KTV/đại lý/CTV, nên QR sẽ hiện bước kích hoạt và hồ sơ kỹ thuật thay vì giao diện khách hàng."
                   : "Mỗi thao tác được liên kết với đúng mã máy. Dữ liệu khách hàng chỉ hiển thị sau khi xác thực phù hợp."}
               </p>
               {currentUser && (
@@ -280,7 +294,7 @@ export default function QrLandingPage() {
                   Tải hoặc in QR để dán lên máy
                 </h2>
                 <p className="mt-2 text-sm leading-6 text-slate-600">
-                  QR dẫn thẳng tới hồ sơ thiết bị này. Khi chạy thật, hãy đặt{" "}
+                  QR dẫn thẳng tới cổng thiết bị này. Khách hàng xác thực số điện thoại bằng OTP để xem đúng các máy đang sở hữu; đây là cách đăng nhập thứ hai ngoài việc nhập số điện thoại tại cổng khách hàng. Khi chạy thật, hãy đặt{" "}
                   <code>NEXT_PUBLIC_APP_URL</code> bằng tên miền HTTPS của hệ
                   thống trước khi in hàng loạt.
                 </p>

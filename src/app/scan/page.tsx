@@ -47,7 +47,7 @@ export default function ScanQrPage() {
     void scannerRef.current?.clear().catch(() => undefined);
 
     router.push(`/qr/${encodeURIComponent(machineId)}`);
-  } catch (err) {
+  } catch {
     setError("Lỗi kích hoạt máy");
   }
 }, [router]);

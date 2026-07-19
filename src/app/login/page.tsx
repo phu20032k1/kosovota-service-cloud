@@ -8,7 +8,7 @@ import { Icon, type IconName } from "@/components/ui/Icon";
 import { Notice } from "@/components/ui/Notice";
 import { homeForRole, ROLE_LABEL, type InternalRole } from "@/lib/access-control";
 
-type LoginRole = "CUSTOMER" | "ADMIN" | "CSKH" | "DEALER" | "KTV";
+type LoginRole = "CUSTOMER" | "ADMIN" | "CSKH" | "DEALER" | "CTV" | "KTV";
 type CurrentUser = { name: string; role: InternalRole };
 
 const ROLE_OPTIONS: Array<{
@@ -22,6 +22,7 @@ const ROLE_OPTIONS: Array<{
   { value: "ADMIN", title: "Admin", description: "Quản trị toàn bộ dữ liệu, báo cáo, kho và đối soát.", icon: "shield", helper: "Chỉ tài khoản ADMIN mới vào được khu quản trị." },
   { value: "CSKH", title: "CSKH", description: "Chăm sóc khách, lịch CSOS, bản đồ và phiếu hỗ trợ.", icon: "phone", helper: "Dữ liệu được lọc theo phạm vi tỉnh nếu tài khoản có provinceScope." },
   { value: "DEALER", title: "Đại lý", description: "Quản lý lệnh, KTV, kho và thanh toán của đại lý.", icon: "store", helper: "Đại lý chỉ thấy dữ liệu thuộc mã đại lý của mình và có thể quản lý KTV nội bộ." },
+  { value: "CTV", title: "CTV", description: "Nhận và theo dõi lệnh cộng tác trong phạm vi được giao.", icon: "users", helper: "CTV đăng nhập bằng mã CRM của đơn vị/đối tác và chỉ thấy lệnh được phân công." },
   { value: "KTV", title: "KTV", description: "Nhận lệnh được giao và gửi báo cáo tại nhà khách.", icon: "wrench", helper: "KTV chỉ thao tác lệnh/báo cáo thuộc đại lý của mình, không thấy doanh thu toàn hệ thống." },
 ];
 
@@ -103,7 +104,7 @@ function LoginPageContent() {
       <div className="relative max-w-xl">
         <div className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-4 py-2 text-xs font-extrabold uppercase tracking-[.18em] text-emerald-200"><span className="h-2 w-2 rounded-full bg-emerald-300"/> Đăng nhập theo đúng vị trí</div>
         <h1 className="mt-6 text-5xl font-black leading-[1.12] tracking-[-.05em] xl:text-6xl">Mỗi người vào đúng màn hình cần làm việc.</h1>
-        <p className="mt-5 max-w-lg text-base leading-8 text-emerald-50/70">Khách hàng dùng OTP. Admin, CSKH, Đại lý và KTV đăng nhập bằng tài khoản nội bộ, sau đó hệ thống tự chuyển về đúng cổng.</p>
+        <p className="mt-5 max-w-lg text-base leading-8 text-emerald-50/70">Khách hàng dùng OTP. Admin, CSKH, Đại lý, CTV và KTV đăng nhập bằng tài khoản nội bộ, sau đó hệ thống tự chuyển về đúng cổng.</p>
         <div className="mt-9 grid grid-cols-2 gap-3">{ROLE_OPTIONS.map((item)=><button key={item.value} type="button" onClick={()=>setRole(item.value)} className={`flex items-center gap-3 rounded-2xl border p-4 text-left transition ${role===item.value?"border-emerald-300 bg-emerald-300/18":"border-white/10 bg-white/8 hover:bg-white/12"}`}><span className="grid h-10 w-10 place-items-center rounded-xl bg-emerald-300/12 text-emerald-200"><Icon name={item.icon} size={20}/></span><span><span className="block text-sm font-bold">{item.title}</span><span className="mt-1 block text-xs text-white/50">{item.description}</span></span></button>)}</div>
       </div>
       <p className="relative text-xs text-white/45">KOSOVOTA Service Cloud — Không chia sẻ tài khoản hoặc OTP.</p>

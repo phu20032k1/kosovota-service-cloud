@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { hasRole } from "@/lib/auth";
 
 export async function GET(request: NextRequest) {
-  const auth = await hasRole(request, ["DEALER", "KTV"]);
+  const auth = await hasRole(request, ["DEALER", "CTV", "KTV"]);
   if (!auth) return NextResponse.json({ success: false, message: "Chưa được cấp quyền." }, { status: 401 });
   try {
     const dealerCode = auth.user.dealerCode;
@@ -22,8 +22,8 @@ export async function GET(request: NextRequest) {
     });
 
     const completed = orders.filter((order) => order.status === "COMPLETED");
-    const revenue = auth.user.role === "DEALER" ? completed.reduce((sum, order) => sum + (order.serviceFee || 0), 0) : 0;
-    const paid = auth.user.role === "DEALER" ? completed.filter((order) => order.paymentStatus === "PAID").reduce((sum, order) => sum + (order.serviceFee || 0), 0) : 0;
+    const revenue = ["DEALER", "CTV"].includes(auth.user.role) ? completed.reduce((sum, order) => sum + (order.serviceFee || 0), 0) : 0;
+    const paid = ["DEALER", "CTV"].includes(auth.user.role) ? completed.filter((order) => order.paymentStatus === "PAID").reduce((sum, order) => sum + (order.serviceFee || 0), 0) : 0;
     return NextResponse.json({ success: true, dealer, data: orders, summary: { revenue, paid, pending: revenue - paid }, scope: auth.user.role });
   } catch (error) {
     console.error("agent orders failed", error);

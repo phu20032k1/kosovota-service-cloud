@@ -77,6 +77,7 @@ export default function DealerRegisterPage() {
   const [registrationType, setRegistrationType] =
     useState<RegistrationType>("dealer");
 
+  const [crmCustomerCode, setCrmCustomerCode] = useState("");
   const [companyName, setCompanyName] = useState("");
   const [fullName, setFullName] = useState("");
   const [phone, setPhone] = useState("");
@@ -220,6 +221,12 @@ async function handleSubmit(
 ) {
   event.preventDefault();
 
+  if (!crmCustomerCode.trim()) {
+    setFormError("Bắt buộc nhập Mã khách hàng/Mã đại lý đã có trên CRM. Hệ thống không tự sinh mã.");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    return;
+  }
+
   if (!location) {
     setFormError("Anh/chị cần bấm Lấy vị trí GPS trước khi gửi hồ sơ.");
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -276,6 +283,8 @@ async function handleSubmit(
       body: JSON.stringify({
         provinceCode,
         typeCode,
+        dealerCode: crmCustomerCode.trim().toUpperCase(),
+        crmCustomerCode: crmCustomerCode.trim().toUpperCase(),
         name: companyName || fullName,
         representativeName: fullName,
         phone,
@@ -339,7 +348,7 @@ async function handleSubmit(
           </h1>
 
           <p className="mt-4 text-slate-600">
-            Mã đăng ký của anh/chị là:
+            Mã CRM đã đồng bộ của anh/chị là:
           </p>
 
           <div className="mt-4 rounded-2xl bg-green-50 p-5">
@@ -438,6 +447,22 @@ async function handleSubmit(
           <h2 className="text-lg font-bold text-slate-900">
             Thông tin cơ bản
           </h2>
+
+          <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm leading-6 text-blue-950">
+            <strong>Mã đăng nhập đồng bộ CRM:</strong> Nhập đúng Mã khách hàng/Mã đại lý đã được cấp trên CRM. Mã này sẽ dùng xuyên suốt cho hồ sơ đại lý, tài khoản đăng nhập và điều phối; hệ thống không tạo mã ngẫu nhiên.
+          </div>
+
+          <FormField label="Mã khách hàng / Mã đại lý trên CRM" required>
+            <input
+              type="text"
+              required
+              value={crmCustomerCode}
+              onChange={(event) => setCrmCustomerCode(event.target.value.toUpperCase().replace(/[^A-Z0-9._/-]/g, ""))}
+              placeholder="Ví dụ: KH-HN-000123"
+              className="form-input uppercase"
+              maxLength={40}
+            />
+          </FormField>
 
           <FormField label="Tên công ty / cửa hàng">
             <input

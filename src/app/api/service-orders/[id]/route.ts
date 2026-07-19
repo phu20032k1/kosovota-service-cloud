@@ -11,14 +11,14 @@ const ALLOWED_STATUSES = [
 ];
 
 async function getAuthorizedOrder(request: NextRequest, id: string) {
-  const auth = await hasRole(request, ["ADMIN", "CSKH", "DEALER", "KTV"]);
+  const auth = await hasRole(request, ["ADMIN", "CSKH", "DEALER", "CTV", "KTV"]);
   if (!auth) return { auth: null, order: null };
   const order = await prisma.serviceOrder.findUnique({
     where: { id },
-    include: { machine: { include: { customer: true } }, dealer: true, reports: true, maintenanceSchedule: true },
+    include: { machine: { include: { customer: true, activations: true, maintenanceSchedules: true } }, dealer: true, technician: true, reports: true, maintenanceSchedule: true, sourceTicket: { include: { messages: { orderBy: { createdAt: "asc" } } } } },
   });
   if (!order) return { auth, order: null };
-  if (auth.user.role === "DEALER" && order.dealer?.dealerCode !== auth.user.dealerCode) return { auth: null, order: null };
+  if (["DEALER", "CTV"].includes(auth.user.role) && order.dealer?.dealerCode !== auth.user.dealerCode) return { auth: null, order: null };
   if (auth.user.role === "KTV" && order.technicianId !== auth.user.id) return { auth: null, order: null };
   return { auth, order };
 }
@@ -44,7 +44,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
       return NextResponse.json({ success: false, message: "Trạng thái không hợp lệ." }, { status: 400 });
     }
 
-    if (auth.user.role === "DEALER") {
+    if (["DEALER", "CTV"].includes(auth.user.role)) {
       const allowedDealerStatuses = ["ACCEPTED", "IN_PROGRESS", "NEW"];
       if (status && !allowedDealerStatuses.includes(status)) {
         return NextResponse.json({ success: false, message: "Đại lý không được phép đặt trạng thái này." }, { status: 403 });
@@ -62,7 +62,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
       }
     }
 
-    const rejected = auth.user.role === "DEALER" && status === "NEW" && body.dealerId === null;
+    const rejected = ["DEALER", "CTV"].includes(auth.user.role) && status === "NEW" && body.dealerId === null;
     const dueDate = status === "CALLED_NO_ANSWER"
       ? new Date(Date.now() + 3 * 24 * 60 * 60 * 1000)
       : body.dueDate ? new Date(body.dueDate) : undefined;
@@ -79,7 +79,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
         serviceFee: Number.isFinite(Number(body.serviceFee)) ? Number(body.serviceFee) : undefined,
         paymentStatus: typeof body.paymentStatus === "string" && ["ADMIN", "SUPER_ADMIN"].includes(auth.user.role) ? body.paymentStatus : undefined,
       },
-      include: { machine: { include: { customer: true } }, dealer: true, reports: true, maintenanceSchedule: true },
+      include: { machine: { include: { customer: true, activations: true, maintenanceSchedules: true } }, dealer: true, technician: true, reports: true, maintenanceSchedule: true, sourceTicket: { include: { messages: { orderBy: { createdAt: "asc" } } } } },
     });
 
     if (status === "CUSTOMER_REJECTED" && current.maintenanceScheduleId) {

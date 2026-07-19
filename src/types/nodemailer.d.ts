@@ -10,6 +10,9 @@ declare module "nodemailer" {
   type Transporter = {
     sendMail(options: SendMailOptions): Promise<{ messageId?: string; [key: string]: unknown }>;
   };
-  function createTransport(options: unknown): Transporter;
-  export default { createTransport };
+  type NodemailerModule = {
+    createTransport(options: unknown): Transporter;
+  };
+  const nodemailer: NodemailerModule;
+  export default nodemailer;
 }

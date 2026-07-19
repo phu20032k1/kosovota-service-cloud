@@ -1,7 +1,7 @@
 export const SESSION_COOKIE = "kosovota_session";
 export const SESSION_DURATION_SECONDS = 60 * 60 * 8;
 
-export const USER_ROLES = ["ADMIN", "CSKH", "DEALER", "CUSTOMER"] as const;
+export const USER_ROLES = ["ADMIN", "CSKH", "DEALER", "CTV", "KTV", "CUSTOMER"] as const;
 export type UserRole = (typeof USER_ROLES)[number];
 
 export type SessionPayload = {

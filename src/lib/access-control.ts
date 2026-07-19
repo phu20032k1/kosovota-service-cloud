@@ -1,4 +1,4 @@
-export const INTERNAL_ROLES = ["SUPER_ADMIN", "ADMIN", "CSKH", "DEALER", "KTV"] as const;
+export const INTERNAL_ROLES = ["SUPER_ADMIN", "ADMIN", "CSKH", "DEALER", "CTV", "KTV"] as const;
 export type InternalRole = (typeof INTERNAL_ROLES)[number];
 
 export const ROLE_HOME: Record<InternalRole, string> = {
@@ -6,6 +6,7 @@ export const ROLE_HOME: Record<InternalRole, string> = {
   ADMIN: "/admin/executive",
   CSKH: "/csos",
   DEALER: "/agent-portal",
+  CTV: "/agent-portal",
   KTV: "/technician-portal",
 };
 
@@ -14,6 +15,7 @@ export const ROLE_LABEL: Record<InternalRole, string> = {
   ADMIN: "Admin vận hành",
   CSKH: "Nhân viên CSKH",
   DEALER: "Đại lý",
+  CTV: "Cộng tác viên",
   KTV: "Kỹ thuật viên",
 };
 
@@ -22,10 +24,10 @@ export const PROTECTED_ROUTE_RULES: Array<{ prefix: string; roles: InternalRole[
   { prefix: "/admin", roles: ["ADMIN"] },
   { prefix: "/cskh", roles: ["CSKH"] },
   { prefix: "/csos", roles: ["CSKH"] },
-  { prefix: "/agent-portal", roles: ["DEALER"] },
+  { prefix: "/agent-portal", roles: ["DEALER", "CTV"] },
   { prefix: "/technician-portal", roles: ["KTV"] },
-  { prefix: "/activate", roles: ["DEALER", "KTV"] },
-  { prefix: "/service-report", roles: ["DEALER", "KTV"] },
+  { prefix: "/activate", roles: ["DEALER", "CTV", "KTV"] },
+  { prefix: "/service-report", roles: ["DEALER", "CTV", "KTV"] },
   { prefix: "/customer-map", roles: ["ADMIN", "CSKH"] },
   { prefix: "/dealer-map", roles: ["ADMIN", "CSKH"] },
   { prefix: "/operations-map", roles: ["ADMIN", "CSKH"] },

@@ -10,7 +10,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const auth = await hasRole(request, ["DEALER", "KTV"]);
+  const auth = await hasRole(request, ["DEALER", "CTV", "KTV"]);
   if (!auth?.user.dealerCode) return NextResponse.json({ success: false, message: "Cần đăng nhập Đại lý hoặc KTV." }, { status: 401 });
   try {
     const body = await request.json();

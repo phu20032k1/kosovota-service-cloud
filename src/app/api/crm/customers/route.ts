@@ -16,7 +16,7 @@ export async function GET(request: NextRequest) {
     },
     include: {
       owner: { select: { id: true, name: true } },
-      machines: { select: { id: true, model: true, status: true, installDate: true } },
+      machines: { select: { id: true, model: true, name: true, serial: true, status: true, installDate: true } },
       _count: { select: { activities: true, tickets: true } },
     }, orderBy: [{ nextContactAt: "asc" }, { updatedAt: "desc" }], take: 1000,
   });

@@ -4,8 +4,6 @@ import { prisma } from "@/lib/prisma";
 import { hasRole } from "@/lib/auth";
 import { normalizePhone, isValidVietnamPhone } from "@/lib/phone";
 import { hashPassword } from "@/lib/password";
-import { formatSequence } from "@/lib/id-sequence";
-import { provinceLetterCode } from "@/lib/province";
 
 const DEALER_STATUSES = ["PENDING", "APPROVED", "REJECTED", "SUSPENDED"] as const;
 type DealerStatus = (typeof DEALER_STATUSES)[number];
@@ -35,12 +33,12 @@ function isDealerStatus(value: string): value is DealerStatus {
 }
 
 export async function GET(request: NextRequest) {
-  const auth = await hasRole(request, ["ADMIN", "CSKH", "DEALER", "KTV"]);
+  const auth = await hasRole(request, ["ADMIN", "CSKH", "DEALER", "CTV", "KTV"]);
   if (!auth) {
     return NextResponse.json({ success: false, message: "Chưa được cấp quyền." }, { status: 401 });
   }
 
-  const where = ["DEALER", "KTV"].includes(auth.user.role)
+  const where = ["DEALER", "CTV", "KTV"].includes(auth.user.role)
     ? { dealerCode: auth.user.dealerCode || "__NONE__" }
     : undefined;
 
@@ -61,24 +59,30 @@ export async function POST(request: NextRequest) {
     const companyName = text(extra.companyName || body.companyName);
     const phone = normalizePhone(body.phone);
     const province = text(body.province);
-    const provinceCode = text(body.provinceCode) || provinceLetterCode(province);
     const registrationType = text(extra.registrationType || body.registrationType) || "DEALER";
-    const requestedTypeCode = text(body.typeCode).toUpperCase();
-    const registrationKey = registrationType.toUpperCase();
-    const typeCode = requestedTypeCode === "CTV" || registrationKey.includes("CTV") || registrationKey.includes("COLLAB")
-      ? "CTV"
-      : "DL";
+    const dealerCode = text(body.dealerCode || body.crmCustomerCode || body.crmCode).toUpperCase();
     const services = Array.isArray(body.services)
       ? body.services.map(text).filter(Boolean).join(", ")
       : text(body.services);
 
-    if (!representativeName || !isValidVietnamPhone(phone) || !province || !services) {
+    if (!dealerCode) {
       return NextResponse.json(
-        { success: false, message: "Vui lòng nhập đủ họ tên, số điện thoại hợp lệ, tỉnh và năng lực dịch vụ." },
+        { success: false, message: "Bắt buộc nhập Mã khách hàng/Mã đại lý trên CRM. Hệ thống không tự sinh mã." },
         { status: 400 },
       );
     }
-
+    if (!/^[A-Z0-9][A-Z0-9._/-]{2,39}$/.test(dealerCode)) {
+      return NextResponse.json(
+        { success: false, message: "Mã CRM chỉ gồm chữ in hoa, số, dấu chấm, gạch ngang, gạch dưới hoặc dấu /." },
+        { status: 400 },
+      );
+    }
+    if (!representativeName || !isValidVietnamPhone(phone) || !province || !services) {
+      return NextResponse.json(
+        { success: false, message: "Vui lòng nhập đủ mã CRM, họ tên, số điện thoại hợp lệ, tỉnh và năng lực dịch vụ." },
+        { status: 400 },
+      );
+    }
     if (!text(extra.citizenId || body.citizenId) || !text(extra.bankAccount || body.bankAccount)) {
       return NextResponse.json(
         { success: false, message: "CCCD và số tài khoản là thông tin bắt buộc." },
@@ -86,48 +90,41 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const year = String(new Date().getFullYear()).slice(-2);
-    const sequenceKey = `DEALER:${provinceCode}:${typeCode}:${year}`;
+    const [codeExists, phoneExists] = await Promise.all([
+      prisma.dealer.findUnique({ where: { dealerCode }, select: { id: true } }),
+      prisma.dealer.findFirst({ where: { phone }, select: { dealerCode: true } }),
+    ]);
+    if (codeExists) return NextResponse.json({ success: false, message: `Mã CRM ${dealerCode} đã tồn tại.` }, { status: 409 });
+    if (phoneExists) return NextResponse.json({ success: false, message: `Số điện thoại đã thuộc hồ sơ ${phoneExists.dealerCode}.` }, { status: 409 });
 
-    const dealer = await prisma.$transaction(async (tx) => {
-      const sequence = await tx.idSequence.upsert({
-        where: { key: sequenceKey },
-        create: { key: sequenceKey, value: 1 },
-        update: { value: { increment: 1 } },
-      });
-      const dealerCode = `${provinceCode}-${typeCode}-${year}-${formatSequence(sequence.value)}`;
-
-      return tx.dealer.create({
-        data: {
-          dealerCode,
-          name: companyName || representativeName,
-          phone,
-          province,
-          address: text(body.address) || null,
-          lat: numberOrNull(body.lat),
-          lng: numberOrNull(body.lng),
-          services,
-          technicianCount: numberOrNull(body.technicianCount),
-          status: "PENDING",
-          representativeName,
-          registrationType,
-          companyName: companyName || null,
-          birthDate: text(extra.birthDate || body.birthDate)
-            ? new Date(text(extra.birthDate || body.birthDate))
-            : null,
-          locationType: text(extra.locationType || body.locationType) || null,
-          serviceArea: text(extra.serviceArea || body.serviceArea) || null,
-          taxCode: text(extra.taxCode || body.taxCode) || null,
-          citizenId: text(extra.citizenId || body.citizenId),
-          bankAccount: text(extra.bankAccount || body.bankAccount),
-          accountHolder: text(extra.accountHolder || body.accountHolder) || null,
-          bankName: text(extra.bankName || body.bankName) || null,
-          portraitPhoto: text(extra.portraitPhoto || body.portraitPhoto) || null,
-          storePhoto: text(extra.storePhoto || body.storePhoto) || null,
-          warehousePhoto: text(extra.warehousePhoto || body.warehousePhoto) || null,
-          videoName: text(extra.videoName || body.videoName) || null,
-        },
-      });
+    const dealer = await prisma.dealer.create({
+      data: {
+        dealerCode,
+        name: companyName || representativeName,
+        phone,
+        province,
+        address: text(body.address) || null,
+        lat: numberOrNull(body.lat),
+        lng: numberOrNull(body.lng),
+        services,
+        technicianCount: numberOrNull(body.technicianCount),
+        status: "PENDING",
+        representativeName,
+        registrationType,
+        companyName: companyName || null,
+        birthDate: text(extra.birthDate || body.birthDate) ? new Date(text(extra.birthDate || body.birthDate)) : null,
+        locationType: text(extra.locationType || body.locationType) || null,
+        serviceArea: text(extra.serviceArea || body.serviceArea) || null,
+        taxCode: text(extra.taxCode || body.taxCode) || null,
+        citizenId: text(extra.citizenId || body.citizenId),
+        bankAccount: text(extra.bankAccount || body.bankAccount),
+        accountHolder: text(extra.accountHolder || body.accountHolder) || null,
+        bankName: text(extra.bankName || body.bankName) || null,
+        portraitPhoto: text(extra.portraitPhoto || body.portraitPhoto) || null,
+        storePhoto: text(extra.storePhoto || body.storePhoto) || null,
+        warehousePhoto: text(extra.warehousePhoto || body.warehousePhoto) || null,
+        videoName: text(extra.videoName || body.videoName) || null,
+      },
     });
 
     await prisma.notification.create({
@@ -135,18 +132,18 @@ export async function POST(request: NextRequest) {
         phone,
         channel: "SMS",
         kind: "DEALER_REGISTRATION",
-        content: `KOSOVOTA đã nhận đăng ký ${dealer.dealerCode}. Hồ sơ đang chờ duyệt.`,
+        content: `KOSOVOTA đã nhận đăng ký ${dealer.dealerCode}. Mã hồ sơ đồng bộ theo CRM và đang chờ duyệt.`,
       },
     });
 
     return NextResponse.json(
-      { success: true, message: `Đăng ký thành công. Mã hồ sơ: ${dealer.dealerCode}.`, data: dealer },
+      { success: true, message: `Đăng ký thành công. Mã hồ sơ CRM: ${dealer.dealerCode}.`, data: dealer },
       { status: 201 },
     );
   } catch (error) {
     console.error("POST /api/dealers failed", error);
     return NextResponse.json(
-      { success: false, message: "Không tạo được hồ sơ đại lý. Số điện thoại hoặc mã hồ sơ có thể đã tồn tại." },
+      { success: false, message: "Không tạo được hồ sơ. Kiểm tra mã CRM và số điện thoại chưa được sử dụng." },
       { status: 500 },
     );
   }
@@ -182,7 +179,8 @@ export async function PATCH(request: NextRequest) {
         if (status === "APPROVED") {
           const phone = normalizePhone(updated.phone);
           const existing = await tx.user.findUnique({ where: { phone } });
-          if (existing && existing.role !== "DEALER") {
+          const accountRole = /ctv|collaborator|cộng tác/i.test(updated.registrationType || "") ? "CTV" : "DEALER";
+          if (existing && !["DEALER", "CTV"].includes(existing.role)) {
             throw new Error("PHONE_ROLE_CONFLICT");
           }
           if (!existing) {
@@ -192,7 +190,7 @@ export async function PATCH(request: NextRequest) {
                 phone,
                 password: hashPassword(initialPassword),
                 name: updated.representativeName || updated.name,
-                role: "DEALER",
+                role: accountRole,
                 dealerCode: updated.dealerCode,
                 active: true,
               },
@@ -200,12 +198,12 @@ export async function PATCH(request: NextRequest) {
           } else {
             await tx.user.update({
               where: { id: existing.id },
-              data: { dealerCode: updated.dealerCode, active: true, name: updated.representativeName || updated.name },
+              data: { role: accountRole, dealerCode: updated.dealerCode, active: true, name: updated.representativeName || updated.name },
             });
           }
         } else if (status === "SUSPENDED" || status === "REJECTED") {
           await tx.user.updateMany({
-            where: { dealerCode: updated.dealerCode, role: { in: ["DEALER", "KTV"] } },
+            where: { dealerCode: updated.dealerCode, role: { in: ["DEALER", "CTV", "KTV"] } },
             data: { active: false },
           });
         }
@@ -322,7 +320,7 @@ export async function DELETE(request: NextRequest) {
       await tx.serviceOrder.updateMany({ where: { dealerId: { in: dealerIds } }, data: { dealerId: null } });
       await tx.supportTicket.updateMany({ where: { dealerId: { in: dealerIds } }, data: { dealerId: null } });
       await tx.user.updateMany({
-        where: { dealerCode: { in: deletedCodes }, role: { in: ["DEALER", "KTV"] } },
+        where: { dealerCode: { in: deletedCodes }, role: { in: ["DEALER", "CTV", "KTV"] } },
         data: { active: false, dealerCode: null },
       });
       await tx.dealer.deleteMany({ where: { id: { in: dealerIds } } });
