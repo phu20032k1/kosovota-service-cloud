@@ -38,6 +38,7 @@
     "html5-qrcode": "^2.3.8",
     "leaflet": "^1.9.4",
     "next": "^16.2.9",
+    "nodemailer": "^9.0.3",
     "prisma": "6.9.0",
     "qrcode": "^1.5.4",
     "react": "^19.2.0",
@@ -48,6 +49,7 @@
   "devDependencies": {
     "@tailwindcss/postcss": "4.1.8",
     "@types/node": "22.15.29",
+    "@types/nodemailer": "^8.0.1",
     "@types/qrcode": "^1.5.6",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
