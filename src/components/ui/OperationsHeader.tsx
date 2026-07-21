@@ -16,7 +16,7 @@ const ADMIN_NAV: NavItem[] = [
   { href: "/admin/customers", label: "Khách hàng", icon: "users" },
   { href: "/admin/dealers", label: "Đại lý", icon: "store" },
   { href: "/admin/users", label: "Tài khoản", icon: "users" },
-  { href: "/admin/tickets", label: "Ticket", icon: "alert" },
+  { href: "/admin/tickets", label: "Yêu cầu", icon: "alert" },
   { href: "/admin/inventory", label: "Kho", icon: "package" },
   { href: "/admin/payments", label: "Đối soát", icon: "wallet" },
   { href: "/operations-map", label: "Điều phối", icon: "map" },
@@ -32,7 +32,7 @@ const ADMIN_NAV: NavItem[] = [
 const CSKH_NAV: NavItem[] = [
   { href: "/csos", label: "Công việc", icon: "calendar" },
   { href: "/cskh/customers", label: "Khách hàng", icon: "users" },
-  { href: "/cskh/tickets", label: "Hỗ trợ", icon: "alert" },
+  { href: "/cskh/tickets", label: "Yêu cầu", icon: "alert" },
   { href: "/operations-map", label: "Điều phối", icon: "map" },
   { href: "/customer-map", label: "Bản đồ máy", icon: "droplet" },
   { href: "/dealer-map", label: "Bản đồ đại lý", icon: "store" },

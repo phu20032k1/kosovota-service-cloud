@@ -29,7 +29,14 @@ type LeafletMap = {
   setView: (center: [number, number], zoom: number) => void;
   invalidateSize: () => void;
 };
-type LeafletMarker = { remove: () => void; on: (event: string, fn: () => void) => LeafletMarker; bindTooltip: (content: string, options?: unknown) => LeafletMarker; addTo: (map: LeafletMap) => LeafletMarker };
+
+type LeafletMarker = {
+  remove: () => void;
+  on: (event: string, fn: () => void) => LeafletMarker;
+  bindTooltip: (content: string, options?: unknown) => LeafletMarker;
+  addTo: (map: LeafletMap) => LeafletMarker;
+};
+
 type LeafletGlobal = {
   map: (element: HTMLElement, options?: unknown) => LeafletMap;
   tileLayer: (url: string, options?: unknown) => { addTo: (map: LeafletMap) => void };
@@ -38,12 +45,18 @@ type LeafletGlobal = {
   latLngBounds: (points: [number, number][]) => unknown;
 };
 
-type GoogleMapInstance = { fitBounds: (bounds: unknown, padding?: number) => void; setCenter: (center: { lat: number; lng: number }) => void; setZoom: (zoom: number) => void };
+type GoogleMapInstance = {
+  fitBounds: (bounds: unknown, padding?: number) => void;
+  setCenter: (center: { lat: number; lng: number }) => void;
+  setZoom: (zoom: number) => void;
+};
+
 type GoogleMarkerInstance = { setMap: (map: null) => void };
+
 type GoogleMapsGlobal = {
   Map: new (element: HTMLElement, options: unknown) => GoogleMapInstance;
   Marker: new (options: unknown) => GoogleMarkerInstance & { addListener: (event: string, fn: () => void) => void };
-  LatLngBounds: new () => { extend: (point: { lat: number; lng: number }) => void };
+  LatLngBounds: new (...args: unknown[]) => { extend: (point: { lat: number; lng: number }) => void };
   Size: new (width: number, height: number) => unknown;
   Point: new (x: number, y: number) => unknown;
 };
@@ -54,6 +67,19 @@ declare global {
     google?: { maps: GoogleMapsGlobal };
   }
 }
+
+const VIETNAM_CENTER = { lat: 16.3, lng: 106.8 };
+const VIETNAM_ZOOM = 6;
+const VIETNAM_BOUNDS = {
+  north: 23.55,
+  south: 8.18,
+  west: 102.1,
+  east: 109.7,
+};
+const VIETNAM_BOUNDS_POINTS: [number, number][] = [
+  [VIETNAM_BOUNDS.south, VIETNAM_BOUNDS.west],
+  [VIETNAM_BOUNDS.north, VIETNAM_BOUNDS.east],
+];
 
 let leafletPromise: Promise<LeafletGlobal> | null = null;
 let googlePromise: Promise<GoogleMapsGlobal> | null = null;
@@ -71,14 +97,14 @@ function loadLeaflet() {
     }
     const existing = document.querySelector<HTMLScriptElement>('script[data-kosovota-leaflet="true"]');
     if (existing) {
-      existing.addEventListener("load", () => window.L ? resolve(window.L) : reject(new Error("Leaflet không khởi tạo được.")), { once: true });
+      existing.addEventListener("load", () => (window.L ? resolve(window.L) : reject(new Error("Leaflet không khởi tạo được."))), { once: true });
       return;
     }
     const script = document.createElement("script");
     script.src = "https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js";
     script.async = true;
     script.dataset.kosovotaLeaflet = "true";
-    script.onload = () => window.L ? resolve(window.L) : reject(new Error("Leaflet không khởi tạo được."));
+    script.onload = () => (window.L ? resolve(window.L) : reject(new Error("Leaflet không khởi tạo được.")));
     script.onerror = () => reject(new Error("Không tải được thư viện bản đồ."));
     document.head.appendChild(script);
   });
@@ -134,7 +160,15 @@ function markerSvg(marker: MapMarker, active: boolean) {
   return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
 }
 
-export default function InteractiveMap({ markers, activeId, onSelect, className = "", height = 650, center = { lat: 16.05, lng: 107.85 }, zoom = 5 }: InteractiveMapProps) {
+export default function InteractiveMap({
+  markers,
+  activeId,
+  onSelect,
+  className = "",
+  height = 650,
+  center = VIETNAM_CENTER,
+  zoom = VIETNAM_ZOOM,
+}: InteractiveMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const leafletMapRef = useRef<LeafletMap | null>(null);
   const leafletMarkersRef = useRef<LeafletMarker[]>([]);
@@ -154,13 +188,29 @@ export default function InteractiveMap({ markers, activeId, onSelect, className 
     async function initialize() {
       if (!containerRef.current) return;
       setError("");
+      setReady(false);
       try {
         if (provider === "google" && googleKey) {
           const maps = await loadGoogleMaps(googleKey);
           if (cancelled || !containerRef.current) return;
           googleMapRef.current = new maps.Map(containerRef.current, {
-            center: { lat: centerLat, lng: centerLng }, zoom, mapTypeControl: false, streetViewControl: false, fullscreenControl: true,
-            clickableIcons: false, gestureHandling: "greedy",
+            center: { lat: centerLat, lng: centerLng },
+            zoom,
+            mapTypeControl: false,
+            streetViewControl: false,
+            fullscreenControl: true,
+            clickableIcons: false,
+            gestureHandling: "greedy",
+            restriction: {
+              latLngBounds: {
+                north: VIETNAM_BOUNDS.north,
+                south: VIETNAM_BOUNDS.south,
+                east: VIETNAM_BOUNDS.east,
+                west: VIETNAM_BOUNDS.west,
+              },
+              strictBounds: false,
+            },
+            minZoom: 5,
             styles: [
               { featureType: "poi", elementType: "labels", stylers: [{ visibility: "off" }] },
               { featureType: "transit", elementType: "labels", stylers: [{ visibility: "off" }] },
@@ -169,7 +219,14 @@ export default function InteractiveMap({ markers, activeId, onSelect, className 
         } else {
           const L = await loadLeaflet();
           if (cancelled || !containerRef.current) return;
-          const map = L.map(containerRef.current, { zoomControl: true, attributionControl: true, preferCanvas: true });
+          const map = L.map(containerRef.current, {
+            zoomControl: true,
+            attributionControl: true,
+            preferCanvas: true,
+            minZoom: 5,
+            maxBounds: VIETNAM_BOUNDS_POINTS,
+            maxBoundsViscosity: 0.95,
+          });
           map.setView([centerLat, centerLng], zoom);
           const tileUrl = maptilerKey
             ? `https://api.maptiler.com/maps/streets-v2/{z}/{x}/{y}.png?key=${encodeURIComponent(maptilerKey)}`
@@ -228,12 +285,17 @@ export default function InteractiveMap({ markers, activeId, onSelect, className 
 
       if (activeMarker) {
         googleMapRef.current.setCenter({ lat: activeMarker.lat, lng: activeMarker.lng });
-        googleMapRef.current.setZoom(16);
+        googleMapRef.current.setZoom(15);
       } else if (normalizedMarkers.length > 1) {
         googleMapRef.current.fitBounds(bounds, 72);
       } else if (normalizedMarkers.length === 1) {
         googleMapRef.current.setCenter({ lat: normalizedMarkers[0].lat, lng: normalizedMarkers[0].lng });
-        googleMapRef.current.setZoom(14);
+        googleMapRef.current.setZoom(13);
+      } else {
+        googleMapRef.current.fitBounds(new maps.LatLngBounds(
+          { lat: VIETNAM_BOUNDS.south, lng: VIETNAM_BOUNDS.west },
+          { lat: VIETNAM_BOUNDS.north, lng: VIETNAM_BOUNDS.east },
+        ), 40);
       }
     }
 
@@ -252,11 +314,13 @@ export default function InteractiveMap({ markers, activeId, onSelect, className 
       });
 
       if (activeMarker) {
-        leafletMapRef.current.setView([activeMarker.lat, activeMarker.lng], 16);
+        leafletMapRef.current.setView([activeMarker.lat, activeMarker.lng], 15);
       } else if (normalizedMarkers.length > 1) {
-        leafletMapRef.current.fitBounds(L.latLngBounds(normalizedMarkers.map((m) => [m.lat, m.lng])), { padding: [56, 56], maxZoom: 14 });
+        leafletMapRef.current.fitBounds(L.latLngBounds(normalizedMarkers.map((m) => [m.lat, m.lng])), { padding: [56, 56], maxZoom: 13 });
       } else if (normalizedMarkers.length === 1) {
-        leafletMapRef.current.setView([normalizedMarkers[0].lat, normalizedMarkers[0].lng], 14);
+        leafletMapRef.current.setView([normalizedMarkers[0].lat, normalizedMarkers[0].lng], 13);
+      } else {
+        leafletMapRef.current.fitBounds(L.latLngBounds(VIETNAM_BOUNDS_POINTS), { padding: [40, 40], maxZoom: VIETNAM_ZOOM });
       }
     }
   }, [normalizedMarkers, activeId, onSelect, ready]);
@@ -266,7 +330,7 @@ export default function InteractiveMap({ markers, activeId, onSelect, className 
       <div ref={containerRef} className="h-full w-full" aria-label="Bản đồ KOSOVOTA" />
       {!ready && !error && <div className="map-overlay"><span className="animate-spin"><Icon name="refresh" size={22}/></span><span>Đang tải bản đồ...</span></div>}
       {error && <div className="map-overlay map-error"><Icon name="alert" size={24}/><strong>{error}</strong><span>Kiểm tra Internet hoặc khóa API trong file .env.</span></div>}
-      <div className="map-provider-badge"><Icon name="map" size={14}/><span>{provider === "google" && googleKey ? "Google Maps" : maptilerKey ? "MapTiler" : "OpenStreetMap"}</span></div>
+      <div className="map-provider-badge"><Icon name="map" size={14}/><span>Việt Nam · {provider === "google" && googleKey ? "Google Maps" : maptilerKey ? "MapTiler" : "OpenStreetMap"}</span></div>
     </div>
   );
 }
