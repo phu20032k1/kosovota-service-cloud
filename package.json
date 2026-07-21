@@ -27,7 +27,7 @@
     "test:map": "tsx scripts/test-map.ts",
     "test:sms": "tsx scripts/test-notification.ts SMS",
     "test:zalo": "tsx scripts/test-notification.ts ZALO",
-    "vercel-build": "prisma generate && prisma migrate deploy && next build"
+    "vercel-build": "prisma generate && prisma db push --accept-data-loss && next build"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
