@@ -2,6 +2,8 @@ import Link from "next/link";
 import { CONSUMABLE_PRODUCTS, PRODUCTS } from "@/data/products";
 import { Brand } from "@/components/ui/Brand";
 import { Icon, type IconName } from "@/components/ui/Icon";
+import { PublicNavbar } from "@/components/PublicNavbar";
+import PublicNetworkMap from "@/components/PublicNetworkMap";
 
 const serviceLinks: { href: string; label: string; description: string; icon: IconName }[] = [
   { href: "/scan", label: "Quét QR thiết bị", description: "Mở camera hoặc chọn ảnh QR", icon: "camera" },
@@ -19,9 +21,7 @@ const operationCards: { href: string; title: string; text: string; icon: IconNam
 
 export default function HomePage() {
   return <main className="min-h-screen bg-[#f5f8f7] text-slate-950">
-    <header className="sticky top-0 z-40 border-b border-emerald-950/10 bg-white/90 backdrop-blur-xl">
-      <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6"><Brand/><nav className="hidden items-center gap-1 rounded-2xl bg-slate-100/80 p-1 text-sm font-bold text-slate-600 md:flex"><a href="#san-pham" className="rounded-xl px-4 py-2.5 hover:bg-white hover:text-emerald-700">Sản phẩm</a><a href="#dich-vu" className="rounded-xl px-4 py-2.5 hover:bg-white hover:text-emerald-700">Dịch vụ</a><Link href="/contact" className="rounded-xl px-4 py-2.5 hover:bg-white hover:text-emerald-700">Tư vấn</Link></nav><Link href="/login" className="btn-primary inline-flex items-center gap-2 px-4 py-2.5 text-sm font-extrabold text-white"><Icon name="lock" size={17}/> Đăng nhập</Link></div>
-    </header>
+    <PublicNavbar />
 
     <section className="relative isolate overflow-hidden bg-[linear-gradient(135deg,#041f19_0%,#064e3b_52%,#0f766e_100%)] text-white">
       <div className="absolute -left-32 top-24 h-72 w-72 rounded-full bg-emerald-400/15 blur-3xl"/><div className="absolute -right-20 -top-24 h-96 w-96 rounded-full bg-cyan-300/10 blur-3xl"/>
@@ -31,7 +31,12 @@ export default function HomePage() {
       </div>
     </section>
 
-    <section className="relative z-10 -mt-10 mx-auto max-w-7xl px-4 sm:px-6">
+    <section className="mx-auto max-w-7xl px-4 py-14 sm:px-6 sm:py-20">
+      <div className="mb-8 flex flex-col gap-5 md:flex-row md:items-end md:justify-between"><div className="max-w-3xl"><p className="text-xs font-extrabold uppercase tracking-[.22em] text-emerald-700">Bản đồ mạng lưới</p><h2 className="mt-3 text-3xl font-black tracking-[-.04em] sm:text-5xl">Máy và đại lý trên cùng một bản đồ</h2><p className="mt-4 leading-7 text-slate-600">Tổng hợp các vị trí đã được Admin nhập, giúp theo dõi độ phủ và khả năng phục vụ trên toàn hệ thống.</p></div><Link href="/map" className="btn-secondary self-start"><Icon name="map" size={18}/> Mở trang bản đồ</Link></div>
+      <PublicNetworkMap compact />
+    </section>
+
+    <section className="mx-auto max-w-7xl px-4 pb-16 sm:px-6 sm:pb-24">
       <div className="grid gap-4 rounded-[2rem] border border-slate-200 bg-white p-4 shadow-[0_20px_70px_rgba(15,23,42,.12)] md:grid-cols-4">
         {operationCards.map((item)=><Link key={item.href} href={item.href} className="group rounded-3xl border border-slate-100 bg-slate-50 p-5 hover:-translate-y-1 hover:border-emerald-200 hover:bg-emerald-50">
           <span className="grid h-12 w-12 place-items-center rounded-2xl bg-white text-emerald-700 shadow-sm"><Icon name={item.icon} size={23}/></span>

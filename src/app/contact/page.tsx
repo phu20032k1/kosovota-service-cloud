@@ -1,11 +1,13 @@
 import LeadForm from "@/components/LeadForm";
 import { SmartBackButton } from "@/components/ui/SmartBackButton";
+import { PublicNavbar } from "@/components/PublicNavbar";
 
 export default async function ContactPage({ searchParams }: { searchParams: Promise<{ product?: string }> }) {
   const { product } = await searchParams;
   return (
-    <main className="min-h-screen bg-slate-100 px-4 py-10 sm:py-16">
-      <div className="mx-auto max-w-3xl">
+    <main className="min-h-screen bg-slate-100">
+      <PublicNavbar />
+      <div className="mx-auto max-w-3xl px-4 py-10 sm:py-16">
         <SmartBackButton className="text-sm font-bold text-slate-500 hover:text-emerald-700" />
         <div className="mt-7 text-center">
           <p className="text-sm font-black uppercase tracking-[0.25em] text-emerald-700">KOSOVOTA</p>
