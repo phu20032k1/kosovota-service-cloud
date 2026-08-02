@@ -19,7 +19,12 @@ export function extractMachineIdFromQr(rawValue: string) {
     const parts = url.pathname.split("/").filter(Boolean);
     const qrIndex = parts.findIndex((part) => part.toLowerCase() === "qr");
     if (qrIndex >= 0 && parts[qrIndex + 1]) return decodeURIComponent(parts[qrIndex + 1]);
-    const machineId = url.searchParams.get("machineId");
+
+    const hashParts = url.hash.replace(/^#\/?/, "").split("/").filter(Boolean);
+    const hashQrIndex = hashParts.findIndex((part) => part.toLowerCase() === "qr");
+    if (hashQrIndex >= 0 && hashParts[hashQrIndex + 1]) return decodeURIComponent(hashParts[hashQrIndex + 1]);
+
+    const machineId = url.searchParams.get("machineId") ?? url.searchParams.get("id") ?? url.searchParams.get("qr");
     if (machineId?.trim()) return machineId.trim();
   } catch {
     // Không phải URL.

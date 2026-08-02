@@ -23,15 +23,6 @@ export async function POST(req: Request) {
     },
   });
 
-  // 3. tạo warranty record
-  await prisma.machine.update({
-  where: { id: machineId },
-  data: {
-  customerId: customerId || null,
-  status: "ACTIVE",
-},
-});
-
   return Response.json({
     success: true,
     machine: updated,

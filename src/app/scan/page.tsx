@@ -56,8 +56,15 @@ export default function ScanQrPage() {
     let cancelled = false;
     async function startScanner() {
       try {
-        const { Html5QrcodeScanner, Html5QrcodeScanType } = await import("html5-qrcode");
+        const html5qrcode = await import("html5-qrcode");
         if (cancelled) return;
+        const Html5QrcodeScanner = html5qrcode.Html5QrcodeScanner ?? html5qrcode.default?.Html5QrcodeScanner ?? html5qrcode.default;
+        const Html5QrcodeScanType = html5qrcode.Html5QrcodeScanType ?? html5qrcode.default?.Html5QrcodeScanType;
+
+        if (!Html5QrcodeScanner || !Html5QrcodeScanType) {
+          throw new Error("Không thể khởi tạo trình quét QR.");
+        }
+
         const scanner = new Html5QrcodeScanner("kosovota-qr-reader", {
           fps: 10,
           qrbox: { width: 250, height: 250 },
@@ -67,7 +74,9 @@ export default function ScanQrPage() {
         scannerRef.current = scanner;
         scanner.render(
           (decodedText) => openResult(decodedText),
-          () => undefined,
+          (error) => {
+            console.debug("QR scan warning:", error);
+          },
         );
         setMessage("Đưa QR vào giữa khung hoặc chọn ảnh QR từ máy.");
       } catch (value) {
