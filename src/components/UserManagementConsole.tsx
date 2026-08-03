@@ -17,6 +17,7 @@ type UserRow = {
   provinceScope?: string | null;
   active: boolean;
   createdAt: string;
+  updatedAt: string;
 };
 type DealerOption = {
   dealerCode: string;
@@ -61,6 +62,8 @@ export function UserManagementConsole({ mode }: { mode: Mode }) {
   const [editDealerCode, setEditDealerCode] = useState("");
   const [editPassword, setEditPassword] = useState("");
   const [editPasswordConfirm, setEditPasswordConfirm] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [generatedPassword, setGeneratedPassword] = useState("");
   const [saving, setSaving] = useState(false);
   const [roleFilter, setRoleFilter] = useState("ALL");
   const [statusFilter, setStatusFilter] = useState("ALL");
@@ -203,7 +206,8 @@ export function UserManagementConsole({ mode }: { mode: Mode }) {
     setError("");
     setMessage("");
     try {
-      await patchUser({ id: user.id, active: !user.active });
+      const result = await patchUser({ id: user.id, active: !user.active });
+      if (editingUser?.id === user.id && result.data) setEditingUser(result.data);
       setMessage(
         user.active ? `Đã khóa ${user.name}.` : `Đã mở lại ${user.name}.`,
       );
@@ -222,7 +226,11 @@ export function UserManagementConsole({ mode }: { mode: Mode }) {
     setMessage("");
     try {
       const result = await patchUser({ id: user.id, resetPassword: true });
-      setMessage(`Mật khẩu mới của ${user.name}: ${typeof result.initialPassword === "string" ? result.initialPassword : "(không nhận được)"}`);
+      const password = typeof result.initialPassword === "string" ? result.initialPassword : "";
+      setGeneratedPassword(password);
+      if (!editingUser || editingUser.id !== user.id) openEditModal(user);
+      setGeneratedPassword(password);
+      setMessage(password ? `Đã tạo mật khẩu mới cho ${user.name}. Hãy sao chép và gửi cho người dùng.` : `Đã đặt lại mật khẩu cho ${user.name}.`);
     } catch (caught) {
       setError(
         caught instanceof Error
@@ -243,12 +251,16 @@ export function UserManagementConsole({ mode }: { mode: Mode }) {
     setEditDealerCode(user.dealerCode || "");
     setEditPassword("");
     setEditPasswordConfirm("");
+    setShowPassword(false);
+    setGeneratedPassword("");
   }
 
   function closeEditModal() {
     setEditingUser(null);
     setEditPassword("");
     setEditPasswordConfirm("");
+    setShowPassword(false);
+    setGeneratedPassword("");
   }
 
   async function saveEdit() {
@@ -549,8 +561,8 @@ export function UserManagementConsole({ mode }: { mode: Mode }) {
               Đang hiển thị {filteredUsers.length}/{users.length} tài khoản.
             </p>
           </div>
-          <div className="overflow-x-auto">
-            <table className="min-w-[900px] w-full text-sm">
+          <div className="account-table-scroll overflow-auto">
+            <table className="min-w-[980px] w-full text-sm">
               <thead className="bg-slate-50 text-left text-xs uppercase tracking-wider text-slate-500">
                 <tr>
                   <th className="px-4 py-3">Vai trò</th>
@@ -596,17 +608,10 @@ export function UserManagementConsole({ mode }: { mode: Mode }) {
                         </button>
                         <button
                           type="button"
-                          onClick={() => resetPassword(user)}
-                          className="rounded-xl border border-slate-200 px-3 py-2 font-bold hover:bg-slate-50"
-                        >
-                          Đổi mật khẩu
-                        </button>
-                        <button
-                          type="button"
                           onClick={() => openEditModal(user)}
-                          className="rounded-xl border border-slate-200 px-3 py-2 font-bold hover:bg-slate-50"
+                          className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 font-bold text-emerald-800 hover:bg-emerald-100"
                         >
-                          Sửa
+                          Xem chi tiết
                         </button>
                         <button
                           type="button"
@@ -660,9 +665,9 @@ export function UserManagementConsole({ mode }: { mode: Mode }) {
             <header className="modal-header">
               <div className="min-w-0">
                 <p className="eyebrow">Quản lý tài khoản</p>
-                <h2 id="edit-user-title" className="mt-1 text-xl font-black">Sửa tài khoản</h2>
+                <h2 id="edit-user-title" className="mt-1 text-xl font-black">Chi tiết tài khoản</h2>
                 <p className="mt-2 text-sm leading-6 text-slate-500">
-                  Admin được đổi vai trò giữa CSKH, Đại lý, CTV và KTV.
+                  Xem thông tin, đổi tên, số điện thoại, vai trò, phạm vi, trạng thái và mật khẩu.
                 </p>
               </div>
               <button
@@ -679,7 +684,26 @@ export function UserManagementConsole({ mode }: { mode: Mode }) {
 
             <div className="modal-body">
               {error && <Notice kind="error">{error}</Notice>}
-              <div className={`grid gap-4 ${error ? "mt-4" : ""}`}>
+              <div className={`grid gap-3 sm:grid-cols-2 ${error ? "mt-4" : ""}`}>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <p className="text-xs font-black uppercase tracking-wide text-slate-500">ID tài khoản</p>
+                  <p className="mt-1 break-all text-sm font-bold text-slate-800">{editingUser.id}</p>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <p className="text-xs font-black uppercase tracking-wide text-slate-500">Trạng thái</p>
+                  <p className={`mt-1 text-sm font-black ${editingUser.active ? "text-emerald-700" : "text-rose-700"}`}>{editingUser.active ? "Đang hoạt động" : "Đã khóa"}</p>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <p className="text-xs font-black uppercase tracking-wide text-slate-500">Ngày tạo</p>
+                  <p className="mt-1 text-sm font-bold text-slate-800">{new Date(editingUser.createdAt).toLocaleString("vi-VN")}</p>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <p className="text-xs font-black uppercase tracking-wide text-slate-500">Cập nhật gần nhất</p>
+                  <p className="mt-1 text-sm font-bold text-slate-800">{editingUser.updatedAt ? new Date(editingUser.updatedAt).toLocaleString("vi-VN") : "—"}</p>
+                </div>
+              </div>
+
+              <div className="mt-5 grid gap-4">
                 <label className="block">
                   <span className="text-sm font-bold text-slate-700">Vai trò</span>
                   <select className="mt-2 w-full" value={editRole} onChange={(event) => setEditRole(event.target.value)}>
@@ -724,21 +748,45 @@ export function UserManagementConsole({ mode }: { mode: Mode }) {
                     Mã hiện tại: <strong>{editingUser.dealerCode || "—"}</strong>. Khi đổi tài khoản sang mã khác, hãy kiểm tra hồ sơ đại lý để tránh lệch dữ liệu.
                   </p>
                 )}
+                <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-black text-amber-900">Mật khẩu đăng nhập</p>
+                      <p className="mt-1 max-w-xl text-xs leading-5 text-amber-800">
+                        Mật khẩu hiện tại được lưu dạng băm nên không thể xem lại. Admin có thể đặt mật khẩu mới hoặc tạo mật khẩu ngẫu nhiên; mật khẩu mới chỉ hiển thị để sao chép sau khi tạo.
+                      </p>
+                    </div>
+                    <button type="button" onClick={() => resetPassword(editingUser)} className="rounded-xl border border-amber-300 bg-white px-3 py-2 text-xs font-black text-amber-900 hover:bg-amber-100">
+                      Tạo mật khẩu ngẫu nhiên
+                    </button>
+                  </div>
+                  {generatedPassword && (
+                    <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-emerald-200 bg-white p-3">
+                      <span className="text-xs font-bold text-slate-500">Mật khẩu vừa tạo:</span>
+                      <code className="font-black text-emerald-700">{showPassword ? generatedPassword : "••••••••••"}</code>
+                      <button type="button" className="rounded-lg border border-slate-200 px-2 py-1 text-xs font-bold" onClick={() => setShowPassword((value) => !value)}>{showPassword ? "Ẩn" : "Xem"}</button>
+                      <button type="button" className="rounded-lg border border-slate-200 px-2 py-1 text-xs font-bold" onClick={() => void navigator.clipboard.writeText(generatedPassword)}>Sao chép</button>
+                    </div>
+                  )}
+                </div>
                 <label className="block">
-                  <span className="text-sm font-bold text-slate-700">Mật khẩu mới</span>
-                  <input
-                    type="password"
-                    autoComplete="new-password"
-                    className="mt-2 w-full"
-                    value={editPassword}
-                    onChange={(event) => setEditPassword(event.target.value)}
-                    placeholder="Để trống nếu không đổi"
-                  />
+                  <span className="text-sm font-bold text-slate-700">Đặt mật khẩu mới</span>
+                  <div className="mt-2 flex gap-2">
+                    <input
+                      type={showPassword ? "text" : "password"}
+                      autoComplete="new-password"
+                      className="w-full"
+                      value={editPassword}
+                      onChange={(event) => setEditPassword(event.target.value)}
+                      placeholder="Tối thiểu 10 ký tự; để trống nếu không đổi"
+                    />
+                    <button type="button" onClick={() => setShowPassword((value) => !value)} className="shrink-0 rounded-xl border border-slate-200 px-3 text-xs font-black hover:bg-slate-50">{showPassword ? "Ẩn" : "Xem"}</button>
+                  </div>
                 </label>
                 <label className="block">
-                  <span className="text-sm font-bold text-slate-700">Xác nhận mật khẩu</span>
+                  <span className="text-sm font-bold text-slate-700">Xác nhận mật khẩu mới</span>
                   <input
-                    type="password"
+                    type={showPassword ? "text" : "password"}
                     autoComplete="new-password"
                     className="mt-2 w-full"
                     value={editPasswordConfirm}
@@ -749,6 +797,9 @@ export function UserManagementConsole({ mode }: { mode: Mode }) {
             </div>
 
             <footer className="modal-footer">
+              <button type="button" onClick={() => void toggleUser(editingUser)} disabled={saving} className={`mr-auto px-5 py-3 font-bold ${editingUser.active ? "ghost-danger" : "btn-secondary"}`}>
+                {editingUser.active ? "Khóa tài khoản" : "Mở tài khoản"}
+              </button>
               <button type="button" onClick={closeEditModal} disabled={saving} className="btn-secondary px-5 py-3 font-bold disabled:opacity-50">
                 Hủy
               </button>
