@@ -31,9 +31,20 @@ export async function issueOtp(options: {
   if (process.env.NODE_ENV === "production" && process.env.OTP_FIXED_CODE) {
     throw new Error("Không được cấu hình OTP_FIXED_CODE trong production");
   }
-  const code = process.env.NODE_ENV !== "production" && process.env.OTP_FIXED_CODE
-    ? process.env.OTP_FIXED_CODE
-    : String(randomInt(100000, 1000000));
+  const demoPhone = normalizePhone(process.env.DEMO_CUSTOMER_PHONE || "");
+  const demoOtp = (process.env.DEMO_CUSTOMER_OTP || "").trim();
+
+  const isDemoCustomer =
+    process.env.DEMO_LOGIN_ENABLED === "true" &&
+    options.purpose === "CUSTOMER_LOGIN" &&
+    phone === demoPhone &&
+    /^\d{6}$/.test(demoOtp);
+
+  const code = isDemoCustomer
+    ? demoOtp
+    : process.env.NODE_ENV !== "production" && process.env.OTP_FIXED_CODE
+      ? process.env.OTP_FIXED_CODE
+      : String(randomInt(100000, 1000000));
   const expiresAt = new Date(Date.now() + OTP_TTL_MINUTES * 60_000);
   const channel = resolveOtpChannel(options.channel);
   const content = options.message(code);
