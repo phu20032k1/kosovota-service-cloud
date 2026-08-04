@@ -132,6 +132,25 @@ export async function POST(request: NextRequest, { params }: Params) {
       if (order.maintenanceScheduleId) {
         await tx.maintenanceSchedule.update({ where: { id: order.maintenanceScheduleId }, data: { status: "COMPLETED" } });
       }
+
+      const linkedTicket = await tx.supportTicket.findUnique({ where: { serviceOrderId: order.id } });
+      if (linkedTicket) {
+        const resolvedAt = new Date();
+        await tx.supportTicket.update({
+          where: { id: linkedTicket.id },
+          data: { status: "RESOLVED", resolvedAt },
+        });
+        await tx.ticketMessage.create({
+          data: {
+            ticketId: linkedTicket.id,
+            authorId: auth.user.id,
+            authorName: auth.user.name,
+            message: `Đã sửa xong. Báo cáo hoàn thành lệnh ${order.orderCode} đã được ghi nhận.`,
+            isInternal: false,
+          },
+        });
+      }
+
       return { report, movements: createdMovements };
     });
 
@@ -154,8 +173,8 @@ export async function POST(request: NextRequest, { params }: Params) {
     return NextResponse.json({
       success: true,
       message: materials.length
-        ? `Đã hoàn thành lệnh và xuất ${materials.length} loại vật tư khỏi kho.`
-        : "Đã gửi báo cáo và hoàn thành lệnh.",
+        ? `Đã hoàn thành lệnh, cập nhật yêu cầu thành “Đã sửa” và xuất ${materials.length} loại vật tư khỏi kho.`
+        : "Đã gửi báo cáo, hoàn thành lệnh và cập nhật yêu cầu thành “Đã sửa”.",
       data: result,
     });
   } catch (error) {
