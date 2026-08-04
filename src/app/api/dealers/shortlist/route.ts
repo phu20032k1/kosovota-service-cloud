@@ -10,12 +10,23 @@ function distanceKm(lat1: number, lng1: number, lat2: number, lng2: number) {
   return radius * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+const STOP_WORDS = new Set(["kiem", "tra", "may", "dich", "vu", "va", "cho", "can", "lam"]);
+function normalize(value: string) {
+  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+}
+function serviceScore(serviceType: string, services?: string | null) {
+  if (!serviceType) return 0;
+  const haystack = normalize(services || "");
+  const tokens = normalize(serviceType).split(/[^a-z0-9]+/).filter((token) => token.length >= 3 && !STOP_WORDS.has(token));
+  return tokens.reduce((score, token) => score + (haystack.includes(token) ? 1 : 0), 0);
+}
+
 export async function POST(request: NextRequest) {
   const auth = await hasRole(request, ["ADMIN", "CSKH"]);
   if (!auth) return NextResponse.json({ success: false, message: "Chưa được cấp quyền." }, { status: 401 });
   const body = await request.json();
   const limit = Math.min(30, Math.max(5, Number(body.limit) || 10));
-  const serviceType = typeof body.serviceType === "string" ? body.serviceType.trim().toLowerCase() : "";
+  const serviceType = typeof body.serviceType === "string" ? body.serviceType.trim() : "";
   const machine = await prisma.machine.findUnique({ where: { id: body.machineId } });
   if (!machine || machine.lat === null || machine.lng === null) return NextResponse.json({ success: false, message: "Máy chưa có tọa độ GPS." }, { status: 404 });
   const scopes = auth.user.provinceScope?.split(",").map((value: string) => value.trim()).filter(Boolean) || [];
@@ -24,11 +35,13 @@ export async function POST(request: NextRequest) {
   }
 
   const dealers = await prisma.dealer.findMany({ where: { status: "APPROVED", lat: { not: null }, lng: { not: null } } });
-  const tokens: string[] = serviceType.split(/\s+/).filter((token: string) => token.length > 3);
   const shortlist = dealers
-    .filter((dealer: { services?: string | null }) => !tokens.length || tokens.some((token: string) => (dealer.services || "").toLowerCase().includes(token)))
-    .map((dealer: { lat: number | null; lng: number | null; [key: string]: unknown }) => ({ ...dealer, distanceKm: Number(distanceKm(machine.lat!, machine.lng!, dealer.lat!, dealer.lng!).toFixed(2)) }))
-    .sort((a: { distanceKm: number }, b: { distanceKm: number }) => a.distanceKm - b.distanceKm)
+    .map((dealer) => ({
+      ...dealer,
+      serviceMatchScore: serviceScore(serviceType, dealer.services),
+      distanceKm: Number(distanceKm(machine.lat!, machine.lng!, dealer.lat!, dealer.lng!).toFixed(2)),
+    }))
+    .sort((a, b) => b.serviceMatchScore - a.serviceMatchScore || a.distanceKm - b.distanceKm)
     .slice(0, limit);
   return NextResponse.json({ success: true, data: shortlist });
 }
