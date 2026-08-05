@@ -10,7 +10,7 @@ const tools: Array<{ href: string; title: string; description: string; icon: Ico
     icon: "file",
   },
   {
-    href: "/csos",
+    href: "/cskh/dispatch",
     title: "Điều phối CSOS",
     description: "Theo dõi lịch chăm sóc, SOS, lệnh dịch vụ và giao đại lý.",
     icon: "route",
@@ -53,7 +53,7 @@ export default function CustomerCareWorkspacePage() {
               href={tool.href}
               className="group rounded-3xl border border-slate-200 bg-white p-6 shadow-sm transition hover:-translate-y-1 hover:border-emerald-200 hover:shadow-xl"
             >
-              <span className="grid h-13 w-13 place-items-center rounded-2xl bg-emerald-50 text-emerald-700">
+              <span className="grid h-14 w-14 place-items-center rounded-2xl bg-emerald-50 text-emerald-700">
                 <Icon name={tool.icon} size={24} />
               </span>
               <h2 className="mt-5 text-xl font-black text-slate-950">{tool.title}</h2>
