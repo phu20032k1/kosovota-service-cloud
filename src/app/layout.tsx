@@ -1,4 +1,5 @@
 import "./globals.css";
+import "./admin-scroll.css";
 import KosovotaAiChat from "@/components/KosovotaAiChat";
 
 export default function RootLayout({
