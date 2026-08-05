@@ -51,12 +51,18 @@ export async function DELETE(request: NextRequest) {
     if (!auth) return NextResponse.json({ success: false, message: "Chỉ Admin được xóa khách hàng." }, { status: 403 });
 
     const body = await request.json().catch(() => ({}));
-    const rawIds = Array.isArray(body.customerIds)
+    const rawIds: unknown[] = Array.isArray(body.customerIds)
       ? body.customerIds
       : typeof body.customerId === "string"
         ? [body.customerId]
         : [];
-    const customerIds = [...new Set(rawIds.map((value: unknown) => String(value || "").trim()).filter(Boolean))].slice(0, 1000);
+    const customerIds: string[] = Array.from(
+      new Set<string>(
+        rawIds
+          .map((value: unknown): string => String(value ?? "").trim())
+          .filter((value: string): boolean => value.length > 0),
+      ),
+    ).slice(0, 1000);
 
     if (!customerIds.length) {
       return NextResponse.json({ success: false, message: "Chưa chọn khách hàng cần xóa." }, { status: 400 });
