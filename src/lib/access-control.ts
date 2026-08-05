@@ -4,7 +4,7 @@ export type InternalRole = (typeof INTERNAL_ROLES)[number];
 export const ROLE_HOME: Record<InternalRole, string> = {
   SUPER_ADMIN: "/super-admin",
   ADMIN: "/admin/executive",
-  CSKH: "/csos",
+  CSKH: "/cskh",
   DEALER: "/agent-portal",
   CTV: "/agent-portal",
   KTV: "/technician-portal",
@@ -21,9 +21,9 @@ export const ROLE_LABEL: Record<InternalRole, string> = {
 
 export const PROTECTED_ROUTE_RULES: Array<{ prefix: string; roles: InternalRole[] }> = [
   { prefix: "/super-admin", roles: ["SUPER_ADMIN"] },
-  { prefix: "/admin", roles: ["ADMIN"] },
   { prefix: "/cskh", roles: ["CSKH"] },
   { prefix: "/csos", roles: ["CSKH"] },
+  { prefix: "/admin", roles: ["ADMIN"] },
   { prefix: "/agent-portal", roles: ["DEALER", "CTV"] },
   { prefix: "/technician-portal", roles: ["KTV"] },
   { prefix: "/activate", roles: ["DEALER", "CTV", "KTV"] },
