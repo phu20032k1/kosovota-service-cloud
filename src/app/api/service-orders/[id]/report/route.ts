@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { hasRole } from "@/lib/auth";
 import { createMovementCode } from "@/lib/enterprise-codes";
@@ -24,6 +25,28 @@ function parseMaterials(value: unknown): MaterialInput[] {
   return [...quantities].map(([itemId, quantity]) => ({ itemId, quantity }));
 }
 
+function prismaCode(error: unknown) {
+  return error && typeof error === "object" && "code" in error
+    ? String((error as { code?: unknown }).code || "")
+    : "";
+}
+
+async function serializableTransaction<T>(
+  operation: (tx: Prisma.TransactionClient) => Promise<T>,
+): Promise<T> {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return await prisma.$transaction(operation, {
+        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+      });
+    } catch (error) {
+      if (prismaCode(error) === "P2034" && attempt < 2) continue;
+      throw error;
+    }
+  }
+  throw new Error("Kho đang có giao dịch đồng thời. Vui lòng thử lại.");
+}
+
 export async function POST(request: NextRequest, { params }: Params) {
   const auth = await hasRole(request, ["ADMIN", "DEALER", "CTV", "KTV"]);
   if (!auth) return NextResponse.json({ success: false, message: "Chưa được cấp quyền." }, { status: 401 });
@@ -34,7 +57,11 @@ export async function POST(request: NextRequest, { params }: Params) {
     const materials = parseMaterials(body.materials);
     const order = await prisma.serviceOrder.findUnique({
       where: { id },
-      include: { dealer: true, machine: { include: { customer: true } }, reports: { select: { id: true }, take: 1 } },
+      include: {
+        dealer: true,
+        machine: { include: { customer: true } },
+        reports: { select: { id: true }, take: 1 },
+      },
     });
     if (!order) return NextResponse.json({ success: false, message: "Không tìm thấy lệnh dịch vụ." }, { status: 404 });
     if (["DEALER", "CTV"].includes(auth.user.role) && order.dealer?.dealerCode !== auth.user.dealerCode) {
@@ -61,15 +88,34 @@ export async function POST(request: NextRequest, { params }: Params) {
     }
 
     const movementCodes: string[] = [];
-    for (let index = 0; index < materials.length; index += 1) movementCodes.push(await createMovementCode());
+    for (let index = 0; index < materials.length; index += 1) {
+      movementCodes.push(await createMovementCode());
+    }
 
-    const result = await prisma.$transaction(async (tx) => {
+    const result = await serializableTransaction(async (tx) => {
+      const currentOrder = await tx.serviceOrder.findUnique({
+        where: { id },
+        select: {
+          status: true,
+          reports: { select: { id: true }, take: 1 },
+        },
+      });
+      if (!currentOrder) throw new Error("Không tìm thấy lệnh dịch vụ.");
+      if (currentOrder.status === "COMPLETED" || currentOrder.reports.length) {
+        throw new Error("Lệnh này đã có báo cáo hoàn thành.");
+      }
+      if (!["ACCEPTED", "IN_PROGRESS"].includes(currentOrder.status)) {
+        throw new Error("Cần nhận và bắt đầu lệnh trước khi báo cáo.");
+      }
+
       let materialSummary = "";
       const createdMovements: { movementCode: string; itemName: string; quantity: number; unitCost: number }[] = [];
 
       if (materials.length) {
         const warehouse = await tx.warehouse.findUnique({ where: { dealerId: order.dealerId! } });
-        if (!warehouse) throw new Error("Đại lý chưa có kho vật tư. Vui lòng liên hệ Admin tạo kho trước.");
+        if (!warehouse || !warehouse.active) {
+          throw new Error("Đại lý chưa có kho vật tư đang hoạt động. Vui lòng liên hệ Admin tạo hoặc mở kho trước.");
+        }
 
         const items = await tx.inventoryItem.findMany({
           where: { id: { in: materials.map((row) => row.itemId) }, active: true },
@@ -83,8 +129,9 @@ export async function POST(request: NextRequest, { params }: Params) {
           const balance = await tx.stockBalance.findUnique({
             where: { warehouseId_itemId: { warehouseId: warehouse.id, itemId: item.id } },
           });
-          if (!balance || balance.quantity - balance.reserved < material.quantity) {
-            throw new Error(`Tồn khả dụng của “${item.name}” không đủ. Hiện còn ${Math.max(0, (balance?.quantity || 0) - (balance?.reserved || 0))} ${item.unit}.`);
+          const available = Math.max(0, (balance?.quantity || 0) - (balance?.reserved || 0));
+          if (!balance || available < material.quantity) {
+            throw new Error(`Tồn khả dụng của “${item.name}” không đủ. Hiện còn ${available} ${item.unit}.`);
           }
           await tx.stockBalance.update({
             where: { id: balance.id },
@@ -103,7 +150,12 @@ export async function POST(request: NextRequest, { params }: Params) {
               createdById: auth.user.id,
             },
           });
-          createdMovements.push({ movementCode: movementCodes[index], itemName: item.name, quantity: material.quantity, unitCost: item.costPrice });
+          createdMovements.push({
+            movementCode: movementCodes[index],
+            itemName: item.name,
+            quantity: material.quantity,
+            unitCost: item.costPrice,
+          });
         }
         materialSummary = materials.map((row) => {
           const item = itemMap.get(row.itemId)!;
@@ -130,7 +182,10 @@ export async function POST(request: NextRequest, { params }: Params) {
       });
       await tx.serviceOrder.update({ where: { id }, data: { status: "COMPLETED" } });
       if (order.maintenanceScheduleId) {
-        await tx.maintenanceSchedule.update({ where: { id: order.maintenanceScheduleId }, data: { status: "COMPLETED" } });
+        await tx.maintenanceSchedule.update({
+          where: { id: order.maintenanceScheduleId },
+          data: { status: "COMPLETED" },
+        });
       }
 
       const linkedTicket = await tx.supportTicket.findUnique({ where: { serviceOrderId: order.id } });
@@ -180,7 +235,11 @@ export async function POST(request: NextRequest, { params }: Params) {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Không gửi được báo cáo dịch vụ.";
     console.error("POST report failed", error);
-    const isBusinessError = /không đủ|chưa có kho|không tồn tại|ngừng sử dụng/i.test(message);
-    return NextResponse.json({ success: false, message }, { status: isBusinessError ? 400 : 500 });
+    const isConflict = /đã có báo cáo|giao dịch đồng thời/i.test(message);
+    const isBusinessError = /không đủ|chưa có kho|không tồn tại|ngừng sử dụng|cần nhận|đang hoạt động/i.test(message);
+    return NextResponse.json(
+      { success: false, message },
+      { status: isConflict ? 409 : isBusinessError ? 400 : 500 },
+    );
   }
 }
