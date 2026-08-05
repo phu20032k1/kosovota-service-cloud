@@ -1,40 +1,550 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { OperationsHeader } from "@/components/ui/OperationsHeader";
 import { MetricCard } from "@/components/ui/MetricCard";
 import { Notice } from "@/components/ui/Notice";
 import { LoadingState } from "@/components/ui/LoadingState";
 import { Icon } from "@/components/ui/Icon";
 import { StatusBadge } from "@/components/ui/StatusBadge";
+import { readApiResponse } from "@/lib/client-api";
 
-type Item = { id: string; sku: string; name: string; category: string; unit: string; minStock: number; costPrice: number; salePrice: number };
+type Item = {
+  id: string;
+  sku: string;
+  name: string;
+  category: string;
+  unit: string;
+  minStock: number;
+  costPrice: number;
+  salePrice: number;
+};
 type Balance = { id: string; quantity: number; reserved: number; item: Item };
-type Warehouse = { id: string; code: string; name: string; type: string; balances: Balance[]; dealer?: { dealerCode: string; name: string } | null };
+type Warehouse = {
+  id: string;
+  code: string;
+  name: string;
+  type: string;
+  balances: Balance[];
+  dealer?: { dealerCode: string; name: string } | null;
+};
 type DealerOption = { id: string; dealerCode: string; name: string; province?: string | null };
-type Movement = { id: string; movementCode: string; type: string; quantity: number; unitCost: number; createdAt: string; item: Item; fromWarehouse?: { name: string } | null; toWarehouse?: { name: string } | null; note?: string | null };
-type Data = { items: Item[]; warehouses: Warehouse[]; movements: Movement[]; dealers: DealerOption[]; totals: { quantity: number; reserved: number; value: number; lowStock: number } };
-const money = (v=0) => new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND", maximumFractionDigits: 0 }).format(v);
-const date = (v:string) => new Intl.DateTimeFormat("vi-VN", { dateStyle: "short", timeStyle: "short" }).format(new Date(v));
+type Movement = {
+  id: string;
+  movementCode: string;
+  type: string;
+  quantity: number;
+  unitCost: number;
+  createdAt: string;
+  item: Item;
+  fromWarehouse?: { name: string } | null;
+  toWarehouse?: { name: string } | null;
+  note?: string | null;
+};
+type Data = {
+  items: Item[];
+  warehouses: Warehouse[];
+  movements: Movement[];
+  dealers: DealerOption[];
+  totals: { quantity: number; reserved: number; value: number; lowStock: number };
+};
+type Modal = "ITEM" | "WAREHOUSE" | "MOVE" | null;
+type MoveType = "IN" | "OUT" | "TRANSFER" | "ADJUST_IN" | "ADJUST_OUT";
+
+type ApiData = Data;
+
+const money = (value = 0) =>
+  new Intl.NumberFormat("vi-VN", {
+    style: "currency",
+    currency: "VND",
+    maximumFractionDigits: 0,
+  }).format(value);
+const date = (value: string) =>
+  new Intl.DateTimeFormat("vi-VN", { dateStyle: "short", timeStyle: "short" }).format(new Date(value));
+
+const initialItemForm = {
+  sku: "",
+  name: "",
+  category: "Lõi lọc",
+  unit: "cái",
+  minStock: "5",
+  costPrice: "0",
+  salePrice: "0",
+};
+const initialWarehouseForm = {
+  code: "",
+  name: "",
+  type: "CENTRAL",
+  dealerId: "",
+  province: "",
+  address: "",
+};
+const initialMoveForm: {
+  type: MoveType;
+  itemId: string;
+  fromWarehouseId: string;
+  toWarehouseId: string;
+  quantity: string;
+  unitCost: string;
+  note: string;
+} = {
+  type: "IN",
+  itemId: "",
+  fromWarehouseId: "",
+  toWarehouseId: "",
+  quantity: "1",
+  unitCost: "0",
+  note: "",
+};
 
 export default function InventoryPage() {
-  const [data, setData] = useState<Data | null>(null); const [message,setMessage]=useState(""); const [error,setError]=useState(""); const [loading,setLoading]=useState(true); const [modal,setModal]=useState<"ITEM"|"WAREHOUSE"|"MOVE"|null>(null);
-  const [itemForm,setItemForm]=useState({sku:"",name:"",category:"Lõi lọc",unit:"cái",minStock:"5",costPrice:"0",salePrice:"0"});
-  const [moveForm,setMoveForm]=useState({type:"IN",itemId:"",fromWarehouseId:"",toWarehouseId:"",quantity:"1",unitCost:"0",note:""});
-  const [warehouseForm,setWarehouseForm]=useState({code:"",name:"",type:"CENTRAL",dealerId:"",province:"",address:""});
-  const load=useCallback(async()=>{setLoading(true);setError("");try{const r=await fetch("/api/inventory",{cache:"no-store"});const j=await r.json();if(!r.ok||!j.success)throw new Error(j.message);setData(j.data);if(!moveForm.itemId&&j.data.items[0])setMoveForm(c=>({...c,itemId:j.data.items[0].id}));}catch(e){setError(e instanceof Error?e.message:"Không tải được kho");}finally{setLoading(false);}},[moveForm.itemId]);
-  useEffect(()=>{void load();},[load]);
-  const allBalances=useMemo(()=>data?.warehouses.flatMap(w=>w.balances.map(b=>({...b,warehouse:w})))||[],[data]);
-  async function submit(action:string,payload:Record<string,unknown>){setError("");const r=await fetch("/api/inventory",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action,...payload})});const j=await r.json();if(!r.ok||!j.success)throw new Error(j.message||"Thao tác thất bại");setMessage(j.message);setModal(null);await load();}
-  return <main className="min-h-screen"><OperationsHeader title="Kho vật tư" subtitle="Quản lý tồn kho tổng, kho đại lý và lịch sử nhập xuất" actions={<button type="button" onClick={load} className="icon-button"><Icon name="refresh" size={18}/></button>}/><div className="page-container space-y-6">
-    {message&&<Notice kind="success">{message}</Notice>}{error&&<Notice kind="error">{error}</Notice>}
-    {loading&&!data?<LoadingState label="Đang tải dữ liệu kho..."/>:data&&<>
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><MetricCard label="Tổng tồn" value={data.totals.quantity} icon="package" tone="emerald"/><MetricCard label="Đang giữ chỗ" value={data.totals.reserved} icon="lock" tone="blue"/><MetricCard label="Giá trị tồn" value={money(data.totals.value)} icon="wallet" tone="violet"/><MetricCard label="Cảnh báo thấp" value={data.totals.lowStock} icon="alert" tone="rose"/></section>
-      <section className="surface-card"><div className="data-toolbar"><div><h2 className="page-section-title">Tồn kho hiện tại</h2><p className="page-section-subtitle">Theo từng kho và mã vật tư</p></div><div className="flex flex-wrap gap-2"><button type="button" onClick={()=>setModal("ITEM")} className="btn-secondary"><Icon name="plus" size={16}/>Thêm vật tư</button><button type="button" onClick={()=>setModal("WAREHOUSE")} className="btn-secondary"><Icon name="store" size={16}/>Tạo kho</button><button type="button" onClick={()=>setModal("MOVE")} className="btn-primary inline-flex items-center gap-2 px-4 py-3 font-bold text-white"><Icon name="route" size={16}/>Lập phiếu kho</button></div></div><div className="overflow-x-auto"><table className="min-w-full text-sm"><thead><tr>{["Kho","Mã vật tư","Tên vật tư","Nhóm","Tồn","Giữ chỗ","Khả dụng","Ngưỡng"].map(h=><th key={h} className="p-3 text-left">{h}</th>)}</tr></thead><tbody>{allBalances.map(row=><tr key={row.id}><td className="p-3"><strong>{row.warehouse.name}</strong><div className="text-xs text-slate-500">{row.warehouse.code}</div></td><td className="p-3 font-black">{row.item.sku}</td><td className="p-3">{row.item.name}</td><td className="p-3">{row.item.category}</td><td className="p-3 font-black">{row.quantity}</td><td className="p-3">{row.reserved}</td><td className="p-3 font-bold text-emerald-700">{row.quantity-row.reserved}</td><td className="p-3"><StatusBadge value={row.quantity<=row.item.minStock?"HIGH":"ACTIVE"}/></td></tr>)}{!allBalances.length&&<tr><td colSpan={8} className="p-10 text-center text-slate-500">Chưa có tồn kho. Hãy lập phiếu nhập đầu tiên.</td></tr>}</tbody></table></div></section>
-      <section className="surface-card"><div className="data-toolbar"><div><h2 className="page-section-title">100 giao dịch gần nhất</h2><p className="page-section-subtitle">Nhập, xuất, điều chuyển và sử dụng cho dịch vụ</p></div></div><div className="overflow-x-auto"><table className="min-w-full text-sm"><thead><tr>{["Mã phiếu","Loại","Vật tư","Từ kho","Đến kho","Số lượng","Đơn giá","Thời gian"].map(h=><th key={h} className="p-3 text-left">{h}</th>)}</tr></thead><tbody>{data.movements.map(m=><tr key={m.id}><td className="p-3 font-black">{m.movementCode}</td><td className="p-3"><StatusBadge value={m.type}/></td><td className="p-3">{m.item.name}<div className="text-xs text-slate-500">{m.item.sku}</div></td><td className="p-3">{m.fromWarehouse?.name||"—"}</td><td className="p-3">{m.toWarehouse?.name||"—"}</td><td className="p-3 font-black">{m.quantity}</td><td className="p-3">{money(m.unitCost)}</td><td className="p-3">{date(m.createdAt)}</td></tr>)}</tbody></table></div></section>
-    </>}
-  </div>
-  {modal&&<div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4"><div className="w-full max-w-2xl rounded-3xl bg-white p-6 shadow-2xl"><div className="mb-5 flex items-center justify-between"><h3 className="text-xl font-black">{modal==="ITEM"?"Thêm vật tư":modal==="WAREHOUSE"?"Tạo kho mới":"Lập phiếu kho"}</h3><button type="button" onClick={()=>setModal(null)} className="icon-button"><Icon name="x" size={18}/></button></div>{modal==="ITEM"?<form onSubmit={(e:FormEvent)=>{e.preventDefault();submit("CREATE_ITEM",itemForm).catch(e=>setError(e.message));}} className="form-grid"><Field label="Mã vật tư" className="span-4"><input value={itemForm.sku} onChange={e=>setItemForm({...itemForm,sku:e.target.value})}/></Field><Field label="Tên vật tư" className="span-8"><input value={itemForm.name} onChange={e=>setItemForm({...itemForm,name:e.target.value})}/></Field><Field label="Nhóm" className="span-4"><input value={itemForm.category} onChange={e=>setItemForm({...itemForm,category:e.target.value})}/></Field><Field label="Đơn vị" className="span-4"><input value={itemForm.unit} onChange={e=>setItemForm({...itemForm,unit:e.target.value})}/></Field><Field label="Tồn tối thiểu" className="span-4"><input type="number" value={itemForm.minStock} onChange={e=>setItemForm({...itemForm,minStock:e.target.value})}/></Field><Field label="Giá vốn" className="span-6"><input type="number" value={itemForm.costPrice} onChange={e=>setItemForm({...itemForm,costPrice:e.target.value})}/></Field><Field label="Giá bán" className="span-6"><input type="number" value={itemForm.salePrice} onChange={e=>setItemForm({...itemForm,salePrice:e.target.value})}/></Field><button className="btn-primary col-span-12 p-3 font-black text-white">Lưu vật tư</button></form>:modal==="WAREHOUSE"?<form onSubmit={(e:FormEvent)=>{e.preventDefault();submit("CREATE_WAREHOUSE",warehouseForm).catch(e=>setError(e.message));}} className="form-grid"><Field label="Mã kho" className="span-4"><input value={warehouseForm.code} onChange={e=>setWarehouseForm({...warehouseForm,code:e.target.value})} placeholder="KHO-HN-01"/></Field><Field label="Tên kho" className="span-8"><input value={warehouseForm.name} onChange={e=>setWarehouseForm({...warehouseForm,name:e.target.value})} placeholder="Kho tổng Hà Nội"/></Field><Field label="Loại kho" className="span-4"><select value={warehouseForm.type} onChange={e=>setWarehouseForm({...warehouseForm,type:e.target.value,dealerId:e.target.value==="DEALER"?warehouseForm.dealerId:""})}><option value="CENTRAL">Kho tổng</option><option value="REGIONAL">Kho khu vực</option><option value="DEALER">Kho đại lý</option></select></Field><Field label="Đại lý sở hữu" className="span-8"><select disabled={warehouseForm.type!=="DEALER"} value={warehouseForm.dealerId} onChange={e=>{const dealer=data?.dealers.find(d=>d.id===e.target.value);setWarehouseForm({...warehouseForm,dealerId:e.target.value,province:dealer?.province||warehouseForm.province})}}><option value="">{warehouseForm.type==="DEALER"?"Chọn đại lý":"Không áp dụng"}</option>{data?.dealers.filter(d=>!data.warehouses.some(w=>w.dealer?.dealerCode===d.dealerCode)).map(d=><option key={d.id} value={d.id}>{d.dealerCode} · {d.name}</option>)}</select></Field><Field label="Tỉnh/thành" className="span-4"><input value={warehouseForm.province} onChange={e=>setWarehouseForm({...warehouseForm,province:e.target.value})}/></Field><Field label="Địa chỉ kho" className="span-8"><input value={warehouseForm.address} onChange={e=>setWarehouseForm({...warehouseForm,address:e.target.value})}/></Field><button className="btn-primary col-span-12 p-3 font-black text-white">Tạo kho</button></form>:<form onSubmit={(e:FormEvent)=>{e.preventDefault();submit("MOVE_STOCK",moveForm).catch(e=>setError(e.message));}} className="form-grid"><Field label="Loại phiếu" className="span-4"><select value={moveForm.type} onChange={e=>setMoveForm({...moveForm,type:e.target.value})}><option value="IN">Nhập kho</option><option value="OUT">Xuất kho</option><option value="TRANSFER">Điều chuyển</option><option value="ADJUST_IN">Điều chỉnh tăng</option><option value="ADJUST_OUT">Điều chỉnh giảm</option><option value="SERVICE_USE">Dùng cho dịch vụ</option></select></Field><Field label="Vật tư" className="span-8"><select value={moveForm.itemId} onChange={e=>setMoveForm({...moveForm,itemId:e.target.value})}>{data?.items.map(i=><option key={i.id} value={i.id}>{i.sku} · {i.name}</option>)}</select></Field><Field label="Kho xuất" className="span-6"><select value={moveForm.fromWarehouseId} onChange={e=>setMoveForm({...moveForm,fromWarehouseId:e.target.value})}><option value="">Không áp dụng</option>{data?.warehouses.map(w=><option key={w.id} value={w.id}>{w.code} · {w.name}</option>)}</select></Field><Field label="Kho nhận" className="span-6"><select value={moveForm.toWarehouseId} onChange={e=>setMoveForm({...moveForm,toWarehouseId:e.target.value})}><option value="">Không áp dụng</option>{data?.warehouses.map(w=><option key={w.id} value={w.id}>{w.code} · {w.name}</option>)}</select></Field><Field label="Số lượng" className="span-4"><input type="number" min="1" value={moveForm.quantity} onChange={e=>setMoveForm({...moveForm,quantity:e.target.value})}/></Field><Field label="Đơn giá" className="span-4"><input type="number" min="0" value={moveForm.unitCost} onChange={e=>setMoveForm({...moveForm,unitCost:e.target.value})}/></Field><Field label="Ghi chú" className="span-4"><input value={moveForm.note} onChange={e=>setMoveForm({...moveForm,note:e.target.value})}/></Field><button className="btn-primary col-span-12 p-3 font-black text-white">Ghi nhận phiếu</button></form>}</div></div>}
-  </main>;
+  const [data, setData] = useState<Data | null>(null);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [modal, setModal] = useState<Modal>(null);
+  const [itemForm, setItemForm] = useState(initialItemForm);
+  const [moveForm, setMoveForm] = useState(initialMoveForm);
+  const [warehouseForm, setWarehouseForm] = useState(initialWarehouseForm);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const response = await fetch("/api/inventory", { cache: "no-store" });
+      const result = await readApiResponse<ApiData>(response);
+      if (!response.ok || !result.success || !result.data) {
+        throw new Error(result.message || "Không tải được kho");
+      }
+      setData(result.data);
+      setMoveForm((current) =>
+        current.itemId || !result.data?.items[0]
+          ? current
+          : { ...current, itemId: result.data.items[0].id },
+      );
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Không tải được kho");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const allBalances = useMemo(
+    () => data?.warehouses.flatMap((warehouse) => warehouse.balances.map((balance) => ({ ...balance, warehouse }))) || [],
+    [data],
+  );
+
+  const needsFrom = ["OUT", "TRANSFER", "ADJUST_OUT"].includes(moveForm.type);
+  const needsTo = ["IN", "TRANSFER", "ADJUST_IN"].includes(moveForm.type);
+  const selectedSource = allBalances.find(
+    (balance) => balance.warehouse.id === moveForm.fromWarehouseId && balance.item.id === moveForm.itemId,
+  );
+  const selectedAvailable = selectedSource
+    ? Math.max(0, selectedSource.quantity - selectedSource.reserved)
+    : 0;
+  const requestedQuantity = Math.round(Number(moveForm.quantity));
+  const insufficientStock = needsFrom && requestedQuantity > selectedAvailable;
+
+  function openModal(next: Exclude<Modal, null>) {
+    setError("");
+    setMessage("");
+    setModal(next);
+  }
+
+  function closeModal() {
+    if (busy) return;
+    setModal(null);
+    setError("");
+  }
+
+  function changeMoveType(type: MoveType) {
+    setMoveForm((current) => ({
+      ...current,
+      type,
+      fromWarehouseId: ["IN", "ADJUST_IN"].includes(type) ? "" : current.fromWarehouseId,
+      toWarehouseId: ["OUT", "ADJUST_OUT"].includes(type) ? "" : current.toWarehouseId,
+    }));
+  }
+
+  async function submit(action: string, payload: Record<string, unknown>) {
+    if (busy) return;
+    setBusy(true);
+    setError("");
+    setMessage("");
+    try {
+      const response = await fetch("/api/inventory", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, ...payload }),
+      });
+      const result = await readApiResponse(response);
+      if (!response.ok || !result.success) {
+        throw new Error(result.message || "Thao tác thất bại");
+      }
+      setMessage(result.message || "Đã cập nhật kho.");
+      setModal(null);
+      if (action === "CREATE_ITEM") setItemForm(initialItemForm);
+      if (action === "CREATE_WAREHOUSE") setWarehouseForm(initialWarehouseForm);
+      if (action === "MOVE_STOCK") {
+        setMoveForm((current) => ({ ...initialMoveForm, itemId: current.itemId }));
+      }
+      await load();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Thao tác thất bại");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <main className="min-h-screen">
+      <OperationsHeader
+        title="Kho vật tư"
+        subtitle="Quản lý tồn kho tổng, kho đại lý và lịch sử nhập xuất"
+        actions={
+          <button type="button" onClick={() => void load()} disabled={loading || busy} className="icon-button" title="Tải lại">
+            <Icon name="refresh" size={18} />
+          </button>
+        }
+      />
+      <div className="page-container space-y-6">
+        {message && <Notice kind="success">{message}</Notice>}
+        {error && !modal && <Notice kind="error">{error}</Notice>}
+
+        {loading && !data ? (
+          <LoadingState label="Đang tải dữ liệu kho..." />
+        ) : data ? (
+          <>
+            <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <MetricCard label="Tổng tồn" value={data.totals.quantity} icon="package" tone="emerald" />
+              <MetricCard label="Đang giữ chỗ" value={data.totals.reserved} icon="lock" tone="blue" />
+              <MetricCard label="Giá trị tồn" value={money(data.totals.value)} icon="wallet" tone="violet" />
+              <MetricCard label="Cảnh báo thấp" value={data.totals.lowStock} icon="alert" tone="rose" />
+            </section>
+
+            <section className="surface-card">
+              <div className="data-toolbar">
+                <div>
+                  <h2 className="page-section-title">Tồn kho hiện tại</h2>
+                  <p className="page-section-subtitle">Theo từng kho và mã vật tư</p>
+                </div>
+                <div className="mobile-stack-actions flex flex-wrap gap-2">
+                  <button type="button" onClick={() => openModal("ITEM")} className="btn-secondary">
+                    <Icon name="plus" size={16} /> Thêm vật tư
+                  </button>
+                  <button type="button" onClick={() => openModal("WAREHOUSE")} className="btn-secondary">
+                    <Icon name="store" size={16} /> Tạo kho
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openModal("MOVE")}
+                    disabled={!data.items.length || !data.warehouses.length}
+                    className="btn-primary inline-flex items-center justify-center gap-2 px-4 py-3 font-bold text-white disabled:opacity-50"
+                  >
+                    <Icon name="route" size={16} /> Lập phiếu kho
+                  </button>
+                </div>
+              </div>
+              <div className="admin-data-scroll overflow-auto">
+                <table className="min-w-[820px] w-full text-sm">
+                  <thead>
+                    <tr>
+                      {["Kho", "Mã vật tư", "Tên vật tư", "Nhóm", "Tồn", "Giữ chỗ", "Khả dụng", "Ngưỡng"].map((header) => (
+                        <th key={header} className="p-3 text-left">{header}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {allBalances.map((row) => (
+                      <tr key={row.id}>
+                        <td className="p-3">
+                          <strong>{row.warehouse.name}</strong>
+                          <div className="text-xs text-slate-500">{row.warehouse.code}</div>
+                        </td>
+                        <td className="p-3 font-black">{row.item.sku}</td>
+                        <td className="p-3">{row.item.name}</td>
+                        <td className="p-3">{row.item.category}</td>
+                        <td className="p-3 font-black">{row.quantity}</td>
+                        <td className="p-3">{row.reserved}</td>
+                        <td className="p-3 font-bold text-emerald-700">{row.quantity - row.reserved}</td>
+                        <td className="p-3"><StatusBadge value={row.quantity <= row.item.minStock ? "HIGH" : "ACTIVE"} /></td>
+                      </tr>
+                    ))}
+                    {!allBalances.length && (
+                      <tr>
+                        <td colSpan={8} className="p-10 text-center text-slate-500">
+                          Chưa có tồn kho. Hãy tạo vật tư, tạo kho và lập phiếu nhập đầu tiên.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <section className="surface-card">
+              <div className="data-toolbar">
+                <div>
+                  <h2 className="page-section-title">100 giao dịch gần nhất</h2>
+                  <p className="page-section-subtitle">Nhập, xuất, điều chuyển và sử dụng cho dịch vụ</p>
+                </div>
+              </div>
+              <div className="admin-data-scroll overflow-auto">
+                <table className="min-w-[920px] w-full text-sm">
+                  <thead>
+                    <tr>
+                      {["Mã phiếu", "Loại", "Vật tư", "Từ kho", "Đến kho", "Số lượng", "Đơn giá", "Thời gian"].map((header) => (
+                        <th key={header} className="p-3 text-left">{header}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.movements.map((movement) => (
+                      <tr key={movement.id}>
+                        <td className="p-3 font-black">{movement.movementCode}</td>
+                        <td className="p-3"><StatusBadge value={movement.type} /></td>
+                        <td className="p-3">
+                          {movement.item.name}
+                          <div className="text-xs text-slate-500">{movement.item.sku}</div>
+                        </td>
+                        <td className="p-3">{movement.fromWarehouse?.name || "—"}</td>
+                        <td className="p-3">{movement.toWarehouse?.name || "—"}</td>
+                        <td className="p-3 font-black">{movement.quantity}</td>
+                        <td className="p-3">{money(movement.unitCost)}</td>
+                        <td className="p-3">{date(movement.createdAt)}</td>
+                      </tr>
+                    ))}
+                    {!data.movements.length && (
+                      <tr><td colSpan={8} className="p-10 text-center text-slate-500">Chưa có giao dịch kho.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </>
+        ) : null}
+      </div>
+
+      {modal && data && (
+        <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && closeModal()}>
+          <div className="modal-panel max-w-2xl" role="dialog" aria-modal="true" aria-labelledby="inventory-modal-title">
+            <div className="modal-header">
+              <div>
+                <p className="section-kicker">Quản lý kho</p>
+                <h3 id="inventory-modal-title" className="mt-1 text-xl font-black">
+                  {modal === "ITEM" ? "Thêm vật tư" : modal === "WAREHOUSE" ? "Tạo kho mới" : "Lập phiếu kho"}
+                </h3>
+              </div>
+              <button type="button" onClick={closeModal} disabled={busy} className="icon-button" aria-label="Đóng">
+                <Icon name="x" size={18} />
+              </button>
+            </div>
+
+            <div className="modal-body">
+              {error && <Notice kind="error">{error}</Notice>}
+
+              {modal === "ITEM" ? (
+                <form
+                  id="inventory-item-form"
+                  onSubmit={(event: FormEvent) => {
+                    event.preventDefault();
+                    void submit("CREATE_ITEM", itemForm);
+                  }}
+                  className={`form-grid ${error ? "mt-4" : ""}`}
+                >
+                  <Field label="Mã vật tư" className="span-4">
+                    <input required value={itemForm.sku} onChange={(event) => setItemForm({ ...itemForm, sku: event.target.value })} />
+                  </Field>
+                  <Field label="Tên vật tư" className="span-8">
+                    <input required value={itemForm.name} onChange={(event) => setItemForm({ ...itemForm, name: event.target.value })} />
+                  </Field>
+                  <Field label="Nhóm" className="span-4">
+                    <input required value={itemForm.category} onChange={(event) => setItemForm({ ...itemForm, category: event.target.value })} />
+                  </Field>
+                  <Field label="Đơn vị" className="span-4">
+                    <input required value={itemForm.unit} onChange={(event) => setItemForm({ ...itemForm, unit: event.target.value })} />
+                  </Field>
+                  <Field label="Tồn tối thiểu" className="span-4">
+                    <input type="number" min="0" required value={itemForm.minStock} onChange={(event) => setItemForm({ ...itemForm, minStock: event.target.value })} />
+                  </Field>
+                  <Field label="Giá vốn" className="span-6">
+                    <input type="number" min="0" required value={itemForm.costPrice} onChange={(event) => setItemForm({ ...itemForm, costPrice: event.target.value })} />
+                  </Field>
+                  <Field label="Giá bán" className="span-6">
+                    <input type="number" min="0" required value={itemForm.salePrice} onChange={(event) => setItemForm({ ...itemForm, salePrice: event.target.value })} />
+                  </Field>
+                </form>
+              ) : modal === "WAREHOUSE" ? (
+                <form
+                  id="inventory-warehouse-form"
+                  onSubmit={(event: FormEvent) => {
+                    event.preventDefault();
+                    void submit("CREATE_WAREHOUSE", warehouseForm);
+                  }}
+                  className={`form-grid ${error ? "mt-4" : ""}`}
+                >
+                  <Field label="Mã kho" className="span-4">
+                    <input required value={warehouseForm.code} onChange={(event) => setWarehouseForm({ ...warehouseForm, code: event.target.value })} placeholder="KHO-HN-01" />
+                  </Field>
+                  <Field label="Tên kho" className="span-8">
+                    <input required value={warehouseForm.name} onChange={(event) => setWarehouseForm({ ...warehouseForm, name: event.target.value })} placeholder="Kho tổng Hà Nội" />
+                  </Field>
+                  <Field label="Loại kho" className="span-4">
+                    <select
+                      value={warehouseForm.type}
+                      onChange={(event) => setWarehouseForm({
+                        ...warehouseForm,
+                        type: event.target.value,
+                        dealerId: event.target.value === "DEALER" ? warehouseForm.dealerId : "",
+                      })}
+                    >
+                      <option value="CENTRAL">Kho tổng</option>
+                      <option value="REGIONAL">Kho khu vực</option>
+                      <option value="DEALER">Kho đại lý</option>
+                    </select>
+                  </Field>
+                  <Field label="Đại lý sở hữu" className="span-8">
+                    <select
+                      required={warehouseForm.type === "DEALER"}
+                      disabled={warehouseForm.type !== "DEALER"}
+                      value={warehouseForm.dealerId}
+                      onChange={(event) => {
+                        const dealer = data.dealers.find((item) => item.id === event.target.value);
+                        setWarehouseForm({
+                          ...warehouseForm,
+                          dealerId: event.target.value,
+                          province: dealer?.province || warehouseForm.province,
+                        });
+                      }}
+                    >
+                      <option value="">{warehouseForm.type === "DEALER" ? "Chọn đại lý" : "Không áp dụng"}</option>
+                      {data.dealers
+                        .filter((dealer) => !data.warehouses.some((warehouse) => warehouse.dealer?.dealerCode === dealer.dealerCode))
+                        .map((dealer) => (
+                          <option key={dealer.id} value={dealer.id}>{dealer.dealerCode} · {dealer.name}</option>
+                        ))}
+                    </select>
+                  </Field>
+                  <Field label="Tỉnh/thành" className="span-4">
+                    <input value={warehouseForm.province} onChange={(event) => setWarehouseForm({ ...warehouseForm, province: event.target.value })} />
+                  </Field>
+                  <Field label="Địa chỉ kho" className="span-8">
+                    <input value={warehouseForm.address} onChange={(event) => setWarehouseForm({ ...warehouseForm, address: event.target.value })} />
+                  </Field>
+                </form>
+              ) : (
+                <form
+                  id="inventory-movement-form"
+                  onSubmit={(event: FormEvent) => {
+                    event.preventDefault();
+                    if (insufficientStock) {
+                      setError(`Tồn khả dụng chỉ còn ${selectedAvailable}.`);
+                      return;
+                    }
+                    void submit("MOVE_STOCK", moveForm);
+                  }}
+                  className={`form-grid ${error ? "mt-4" : ""}`}
+                >
+                  <Field label="Loại phiếu" className="span-4">
+                    <select value={moveForm.type} onChange={(event) => changeMoveType(event.target.value as MoveType)}>
+                      <option value="IN">Nhập kho</option>
+                      <option value="OUT">Xuất kho</option>
+                      <option value="TRANSFER">Điều chuyển</option>
+                      <option value="ADJUST_IN">Điều chỉnh tăng</option>
+                      <option value="ADJUST_OUT">Điều chỉnh giảm</option>
+                    </select>
+                  </Field>
+                  <Field label="Vật tư" className="span-8">
+                    <select required value={moveForm.itemId} onChange={(event) => setMoveForm({ ...moveForm, itemId: event.target.value })}>
+                      {data.items.map((item) => (
+                        <option key={item.id} value={item.id}>{item.sku} · {item.name}</option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field label="Kho xuất" className="span-6">
+                    <select
+                      required={needsFrom}
+                      disabled={!needsFrom}
+                      value={moveForm.fromWarehouseId}
+                      onChange={(event) => setMoveForm({ ...moveForm, fromWarehouseId: event.target.value })}
+                    >
+                      <option value="">{needsFrom ? "Chọn kho xuất" : "Không áp dụng"}</option>
+                      {data.warehouses.map((warehouse) => (
+                        <option key={warehouse.id} value={warehouse.id}>{warehouse.code} · {warehouse.name}</option>
+                      ))}
+                    </select>
+                    {needsFrom && moveForm.fromWarehouseId && (
+                      <p className={`mt-1 text-xs font-bold ${insufficientStock ? "text-rose-600" : "text-slate-500"}`}>
+                        Tồn khả dụng của vật tư tại kho này: {selectedAvailable}
+                      </p>
+                    )}
+                  </Field>
+                  <Field label="Kho nhận" className="span-6">
+                    <select
+                      required={needsTo}
+                      disabled={!needsTo}
+                      value={moveForm.toWarehouseId}
+                      onChange={(event) => setMoveForm({ ...moveForm, toWarehouseId: event.target.value })}
+                    >
+                      <option value="">{needsTo ? "Chọn kho nhận" : "Không áp dụng"}</option>
+                      {data.warehouses
+                        .filter((warehouse) => warehouse.id !== moveForm.fromWarehouseId)
+                        .map((warehouse) => (
+                          <option key={warehouse.id} value={warehouse.id}>{warehouse.code} · {warehouse.name}</option>
+                        ))}
+                    </select>
+                  </Field>
+                  <Field label="Số lượng" className="span-4">
+                    <input
+                      type="number"
+                      min="1"
+                      max={needsFrom && selectedSource ? selectedAvailable : undefined}
+                      required
+                      value={moveForm.quantity}
+                      onChange={(event) => setMoveForm({ ...moveForm, quantity: event.target.value })}
+                    />
+                  </Field>
+                  <Field label="Đơn giá" className="span-4">
+                    <input type="number" min="0" required value={moveForm.unitCost} onChange={(event) => setMoveForm({ ...moveForm, unitCost: event.target.value })} />
+                  </Field>
+                  <Field label="Ghi chú" className="span-4">
+                    <input value={moveForm.note} onChange={(event) => setMoveForm({ ...moveForm, note: event.target.value })} />
+                  </Field>
+                  <div className="span-12 rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm leading-6 text-blue-900">
+                    Vật tư dùng cho dịch vụ được trừ tự động khi KTV hoặc đại lý hoàn thành báo cáo lệnh; không cần lập phiếu thủ công tại đây.
+                  </div>
+                </form>
+              )}
+            </div>
+
+            <div className="modal-footer">
+              <button type="button" onClick={closeModal} disabled={busy} className="btn-secondary">Hủy</button>
+              <button
+                type="submit"
+                form={modal === "ITEM" ? "inventory-item-form" : modal === "WAREHOUSE" ? "inventory-warehouse-form" : "inventory-movement-form"}
+                disabled={busy || (modal === "MOVE" && insufficientStock)}
+                className="btn-primary px-5 py-3 font-black text-white disabled:opacity-50"
+              >
+                {busy ? "Đang lưu..." : modal === "ITEM" ? "Lưu vật tư" : modal === "WAREHOUSE" ? "Tạo kho" : "Ghi nhận phiếu"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </main>
+  );
 }
-function Field({label,className="",children}:{label:string;className?:string;children:React.ReactNode}){return <label className={className}><span className="mb-1 block text-sm font-bold">{label}</span>{children}</label>}
+
+function Field({ label, className = "", children }: { label: string; className?: string; children: ReactNode }) {
+  return (
+    <label className={className}>
+      <span className="mb-1 block text-sm font-bold">{label}</span>
+      {children}
+    </label>
+  );
+}
