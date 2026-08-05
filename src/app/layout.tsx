@@ -1,6 +1,15 @@
+import type { Viewport } from "next";
 import "./globals.css";
 import "./admin-scroll.css";
 import KosovotaAiChat from "@/components/KosovotaAiChat";
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 5,
+  viewportFit: "cover",
+  themeColor: "#047857",
+};
 
 export default function RootLayout({
   children,
@@ -16,7 +25,6 @@ export default function RootLayout({
           href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800;900&display=swap"
           rel="stylesheet"
         />
-        <meta name="theme-color" content="#047857" />
       </head>
 
       <body className="min-h-full">
