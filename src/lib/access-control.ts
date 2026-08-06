@@ -23,6 +23,7 @@ export const PROTECTED_ROUTE_RULES: Array<{ prefix: string; roles: InternalRole[
   { prefix: "/super-admin", roles: ["SUPER_ADMIN"] },
   { prefix: "/cskh", roles: ["CSKH"] },
   { prefix: "/csos", roles: ["CSKH"] },
+  { prefix: "/admin/inventory", roles: ["SUPER_ADMIN", "ADMIN"] },
   { prefix: "/admin", roles: ["ADMIN"] },
   { prefix: "/agent-portal", roles: ["DEALER", "CTV"] },
   { prefix: "/technician-portal", roles: ["KTV"] },
