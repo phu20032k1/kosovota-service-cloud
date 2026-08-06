@@ -20,6 +20,7 @@ type MoveType = "IN" | "OUT" | "TRANSFER" | "ADJUST_IN" | "ADJUST_OUT";
 
 const money = (value = 0) => new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND", maximumFractionDigits: 0 }).format(value);
 const date = (value: string) => new Intl.DateTimeFormat("vi-VN", { dateStyle: "short", timeStyle: "short" }).format(new Date(value));
+const warehouseType = (value: string) => value === "CENTRAL" ? "Kho tổng" : value === "REGIONAL" ? "Kho khu vực" : value === "DEALER" ? "Kho đại lý" : value;
 
 const initialItemForm = { sku: "", name: "", category: "Lõi lọc", unit: "cái", minStock: "5", costPrice: "0", salePrice: "0" };
 const initialWarehouseForm = { code: "", name: "", type: "CENTRAL", dealerId: "", province: "", address: "" };
@@ -135,6 +136,14 @@ export default function InventoryPage() {
     }
   }
 
+  async function deleteCatalog(action: "DELETE_ITEM" | "DELETE_WAREHOUSE", id: string, label: string) {
+    if (busy) return;
+    const confirmed = window.confirm(`Xóa “${label}”? Nếu đã có lịch sử giao dịch, hệ thống sẽ ngừng sử dụng thay vì xóa lịch sử.`);
+    if (!confirmed) return;
+    const payload = action === "DELETE_ITEM" ? { itemId: id } : { warehouseId: id };
+    await submit(action, payload);
+  }
+
   function submitMovement(event: FormEvent) {
     event.preventDefault();
     if (!moveForm.itemId) return setError("Chưa có vật tư để lập phiếu.");
@@ -148,7 +157,7 @@ export default function InventoryPage() {
 
   return (
     <main className="min-h-screen">
-      <OperationsHeader title="Kho vật tư" subtitle="Quản lý tồn kho tổng, kho đại lý và lịch sử nhập xuất" actions={<button type="button" onClick={() => void load()} disabled={loading || busy} className="icon-button" title="Tải lại"><Icon name="refresh" size={18}/></button>} />
+      <OperationsHeader title="Kho vật tư" subtitle="Quản lý danh mục vật tư, kho, tồn và lịch sử nhập xuất" actions={<button type="button" onClick={() => void load()} disabled={loading || busy} className="icon-button" title="Tải lại"><Icon name="refresh" size={18}/></button>} />
       <div className="page-container space-y-6">
         {message && <Notice kind="success">{message}</Notice>}
         {error && !modal && <Notice kind="error">{error}</Notice>}
@@ -160,12 +169,53 @@ export default function InventoryPage() {
             <MetricCard label="Cảnh báo thấp" value={data.totals.lowStock} icon="alert" tone="rose"/>
           </section>
 
+          <section className="grid gap-6 xl:grid-cols-2">
+            <article className="surface-card overflow-hidden">
+              <div className="data-toolbar">
+                <div><h2 className="page-section-title">Danh mục vật tư</h2><p className="page-section-subtitle">Tất cả vật tư đã tạo · {data.items.length} mục</p></div>
+                <button type="button" onClick={() => openModal("ITEM")} className="btn-secondary"><Icon name="plus" size={16}/>Thêm vật tư</button>
+              </div>
+              <div className="admin-data-scroll overflow-auto">
+                <table className="min-w-[760px] w-full text-sm">
+                  <thead><tr>{["Mã","Tên vật tư","Nhóm","Đơn vị","Giá vốn","Giá bán","Tồn tối thiểu","Thao tác"].map((header)=><th key={header} className="p-3 text-left">{header}</th>)}</tr></thead>
+                  <tbody>
+                    {data.items.map((item)=><tr key={item.id}>
+                      <td className="p-3 font-black">{item.sku}</td><td className="p-3 font-bold">{item.name}</td><td className="p-3">{item.category}</td><td className="p-3">{item.unit}</td><td className="p-3">{money(item.costPrice)}</td><td className="p-3">{money(item.salePrice)}</td><td className="p-3">{item.minStock}</td>
+                      <td className="p-3"><button type="button" disabled={busy} onClick={() => void deleteCatalog("DELETE_ITEM", item.id, `${item.sku} · ${item.name}`)} className="ghost-danger disabled:opacity-50">Xóa</button></td>
+                    </tr>)}
+                    {!data.items.length&&<tr><td colSpan={8} className="p-8 text-center text-slate-500">Chưa có vật tư. Bấm “Thêm vật tư” để tạo mục đầu tiên.</td></tr>}
+                  </tbody>
+                </table>
+              </div>
+            </article>
+
+            <article className="surface-card overflow-hidden">
+              <div className="data-toolbar">
+                <div><h2 className="page-section-title">Danh sách kho</h2><p className="page-section-subtitle">Các kho đã tạo · {data.warehouses.length} kho</p></div>
+                <button type="button" onClick={() => openModal("WAREHOUSE")} className="btn-secondary"><Icon name="store" size={16}/>Tạo kho</button>
+              </div>
+              <div className="admin-data-scroll overflow-auto">
+                <table className="min-w-[720px] w-full text-sm">
+                  <thead><tr>{["Mã kho","Tên kho","Loại","Đại lý","Số mặt hàng","Tổng tồn","Thao tác"].map((header)=><th key={header} className="p-3 text-left">{header}</th>)}</tr></thead>
+                  <tbody>
+                    {data.warehouses.map((warehouse)=>{
+                      const total = warehouse.balances.reduce((sum, row) => sum + row.quantity, 0);
+                      return <tr key={warehouse.id}>
+                        <td className="p-3 font-black">{warehouse.code}</td><td className="p-3 font-bold">{warehouse.name}</td><td className="p-3">{warehouseType(warehouse.type)}</td><td className="p-3">{warehouse.dealer ? `${warehouse.dealer.dealerCode} · ${warehouse.dealer.name}` : "—"}</td><td className="p-3">{warehouse.balances.length}</td><td className="p-3 font-black">{total}</td>
+                        <td className="p-3"><button type="button" disabled={busy} onClick={() => void deleteCatalog("DELETE_WAREHOUSE", warehouse.id, `${warehouse.code} · ${warehouse.name}`)} className="ghost-danger disabled:opacity-50">Xóa</button></td>
+                      </tr>;
+                    })}
+                    {!data.warehouses.length&&<tr><td colSpan={7} className="p-8 text-center text-slate-500">Chưa có kho. Tạo kho tổng trước để bắt đầu nhập hàng.</td></tr>}
+                  </tbody>
+                </table>
+              </div>
+            </article>
+          </section>
+
           <section className="surface-card">
             <div className="data-toolbar">
               <div><h2 className="page-section-title">Tồn kho hiện tại</h2><p className="page-section-subtitle">Theo từng kho và mã vật tư</p></div>
               <div className="mobile-stack-actions flex flex-wrap gap-2">
-                <button type="button" onClick={() => openModal("ITEM")} className="btn-secondary"><Icon name="plus" size={16}/>Thêm vật tư</button>
-                <button type="button" onClick={() => openModal("WAREHOUSE")} className="btn-secondary"><Icon name="store" size={16}/>Tạo kho</button>
                 <button type="button" onClick={() => openModal("MOVE")} disabled={!data.items.length || !data.warehouses.length} className="btn-primary inline-flex items-center justify-center gap-2 px-4 py-3 font-bold text-white disabled:opacity-50"><Icon name="route" size={16}/>Lập phiếu kho</button>
               </div>
             </div>
