@@ -20,13 +20,9 @@ type MoveType = "IN" | "OUT" | "TRANSFER" | "ADJUST_IN" | "ADJUST_OUT";
 
 const money = (value = 0) => new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND", maximumFractionDigits: 0 }).format(value);
 const date = (value: string) => new Intl.DateTimeFormat("vi-VN", { dateStyle: "short", timeStyle: "short" }).format(new Date(value));
-const warehouseType = (value: string) => value === "CENTRAL" ? "Kho tổng" : value === "REGIONAL" ? "Kho khu vực" : value === "DEALER" ? "Kho đại lý" : value;
-
 const initialItemForm = { sku: "", name: "", category: "Lõi lọc", unit: "cái", minStock: "5", costPrice: "0", salePrice: "0" };
 const initialWarehouseForm = { code: "", name: "", type: "CENTRAL", dealerId: "", province: "", address: "" };
-const initialMoveForm: { type: MoveType; itemId: string; fromWarehouseId: string; toWarehouseId: string; quantity: string; unitCost: string; note: string } = {
-  type: "IN", itemId: "", fromWarehouseId: "", toWarehouseId: "", quantity: "1", unitCost: "0", note: "",
-};
+const initialMoveForm: { type: MoveType; itemId: string; fromWarehouseId: string; toWarehouseId: string; quantity: string; unitCost: string; note: string } = { type: "IN", itemId: "", fromWarehouseId: "", toWarehouseId: "", quantity: "1", unitCost: "0", note: "" };
 
 export default function InventoryPage() {
   const [data, setData] = useState<Data | null>(null);
@@ -38,21 +34,21 @@ export default function InventoryPage() {
   const [itemForm, setItemForm] = useState(initialItemForm);
   const [warehouseForm, setWarehouseForm] = useState(initialWarehouseForm);
   const [moveForm, setMoveForm] = useState(initialMoveForm);
+  const [selectedItems, setSelectedItems] = useState<string[]>([]);
+  const [selectedWarehouses, setSelectedWarehouses] = useState<string[]>([]);
 
   const load = useCallback(async () => {
-    setLoading(true);
-    setError("");
+    setLoading(true); setError("");
     try {
       const response = await fetch("/api/inventory", { cache: "no-store" });
       const result = await readApiResponse<Data>(response);
       if (!response.ok || !result.success || !result.data) throw new Error(result.message || "Không tải được kho.");
       setData(result.data);
+      setSelectedItems((current) => current.filter((id) => result.data!.items.some((item) => item.id === id)));
+      setSelectedWarehouses((current) => current.filter((id) => result.data!.warehouses.some((warehouse) => warehouse.id === id)));
       setMoveForm((current) => current.itemId || !result.data?.items[0] ? current : { ...current, itemId: result.data.items[0].id });
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Không tải được kho.");
-    } finally {
-      setLoading(false);
-    }
+    } catch (caught) { setError(caught instanceof Error ? caught.message : "Không tải được kho."); }
+    finally { setLoading(false); }
   }, []);
 
   useEffect(() => { void load(); }, [load]);
@@ -60,7 +56,6 @@ export default function InventoryPage() {
   const balances = useMemo(() => data?.warehouses.flatMap((warehouse) => warehouse.balances.map((balance) => ({ ...balance, warehouse }))) || [], [data]);
   const needsFrom = ["OUT", "TRANSFER", "ADJUST_OUT"].includes(moveForm.type);
   const needsTo = ["IN", "TRANSFER", "ADJUST_IN"].includes(moveForm.type);
-
   const sourceWarehouses = useMemo(() => {
     if (!data || !moveForm.itemId) return [];
     return data.warehouses.filter((warehouse) => {
@@ -68,7 +63,6 @@ export default function InventoryPage() {
       return Boolean(balance && balance.quantity - balance.reserved > 0);
     });
   }, [data, moveForm.itemId]);
-
   const selectedSource = balances.find((balance) => balance.warehouse.id === moveForm.fromWarehouseId && balance.item.id === moveForm.itemId);
   const selectedAvailable = selectedSource ? Math.max(0, selectedSource.quantity - selectedSource.reserved) : 0;
   const quantity = Math.round(Number(moveForm.quantity));
@@ -78,36 +72,19 @@ export default function InventoryPage() {
 
   useEffect(() => {
     if (!needsFrom || !moveForm.fromWarehouseId) return;
-    if (!sourceWarehouses.some((warehouse) => warehouse.id === moveForm.fromWarehouseId)) {
-      setMoveForm((current) => ({ ...current, fromWarehouseId: "" }));
-    }
+    if (!sourceWarehouses.some((warehouse) => warehouse.id === moveForm.fromWarehouseId)) setMoveForm((current) => ({ ...current, fromWarehouseId: "" }));
   }, [needsFrom, moveForm.fromWarehouseId, sourceWarehouses]);
 
   function openModal(next: Exclude<Modal, null>) {
-    setError("");
-    setMessage("");
-    if (next === "MOVE" && data) {
-      setMoveForm((current) => ({ ...current, itemId: current.itemId || data.items[0]?.id || "" }));
-    }
+    setError(""); setMessage("");
+    if (next === "MOVE" && data) setMoveForm((current) => ({ ...current, itemId: current.itemId || data.items[0]?.id || "" }));
     setModal(next);
   }
-
-  function closeModal() {
-    if (busy) return;
-    setModal(null);
-    setError("");
-  }
-
+  function closeModal() { if (!busy) { setModal(null); setError(""); } }
   function changeMoveType(type: MoveType) {
     setError("");
-    setMoveForm((current) => ({
-      ...current,
-      type,
-      fromWarehouseId: ["IN", "ADJUST_IN"].includes(type) ? "" : current.fromWarehouseId,
-      toWarehouseId: ["OUT", "ADJUST_OUT"].includes(type) ? "" : current.toWarehouseId,
-    }));
+    setMoveForm((current) => ({ ...current, type, fromWarehouseId: ["IN", "ADJUST_IN"].includes(type) ? "" : current.fromWarehouseId, toWarehouseId: ["OUT", "ADJUST_OUT"].includes(type) ? "" : current.toWarehouseId }));
   }
-
   function changeItem(itemId: string) {
     const item = data?.items.find((row) => row.id === itemId);
     setMoveForm((current) => ({ ...current, itemId, fromWarehouseId: "", unitCost: current.type === "IN" && item ? String(item.costPrice || 0) : current.unitCost }));
@@ -116,9 +93,7 @@ export default function InventoryPage() {
 
   async function submit(action: string, payload: Record<string, unknown>) {
     if (busy) return;
-    setBusy(true);
-    setError("");
-    setMessage("");
+    setBusy(true); setError(""); setMessage("");
     try {
       const response = await fetch("/api/inventory", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, ...payload }) });
       const result = await readApiResponse(response);
@@ -128,20 +103,11 @@ export default function InventoryPage() {
       if (action === "CREATE_ITEM") setItemForm(initialItemForm);
       if (action === "CREATE_WAREHOUSE") setWarehouseForm(initialWarehouseForm);
       if (action === "MOVE_STOCK") setMoveForm((current) => ({ ...initialMoveForm, itemId: current.itemId }));
+      if (action.includes("ITEM")) setSelectedItems([]);
+      if (action.includes("WAREHOUSE")) setSelectedWarehouses([]);
       await load();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Thao tác kho thất bại.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function deleteCatalog(action: "DELETE_ITEM" | "DELETE_WAREHOUSE", id: string, label: string) {
-    if (busy) return;
-    const confirmed = window.confirm(`Xóa “${label}”? Nếu đã có lịch sử giao dịch, hệ thống sẽ ngừng sử dụng thay vì xóa lịch sử.`);
-    if (!confirmed) return;
-    const payload = action === "DELETE_ITEM" ? { itemId: id } : { warehouseId: id };
-    await submit(action, payload);
+    } catch (caught) { setError(caught instanceof Error ? caught.message : "Thao tác kho thất bại."); }
+    finally { setBusy(false); }
   }
 
   function submitMovement(event: FormEvent) {
@@ -155,123 +121,72 @@ export default function InventoryPage() {
     void submit("MOVE_STOCK", moveForm);
   }
 
-  return (
-    <main className="min-h-screen">
-      <OperationsHeader title="Kho vật tư" subtitle="Quản lý danh mục vật tư, kho, tồn và lịch sử nhập xuất" actions={<button type="button" onClick={() => void load()} disabled={loading || busy} className="icon-button" title="Tải lại"><Icon name="refresh" size={18}/></button>} />
-      <div className="page-container space-y-6">
-        {message && <Notice kind="success">{message}</Notice>}
-        {error && !modal && <Notice kind="error">{error}</Notice>}
-        {loading && !data ? <LoadingState label="Đang tải dữ liệu kho..."/> : data && <>
-          <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <MetricCard label="Tổng tồn" value={data.totals.quantity} icon="package" tone="emerald"/>
-            <MetricCard label="Đang giữ chỗ" value={data.totals.reserved} icon="lock" tone="blue"/>
-            <MetricCard label="Giá trị tồn" value={money(data.totals.value)} icon="wallet" tone="violet"/>
-            <MetricCard label="Cảnh báo thấp" value={data.totals.lowStock} icon="alert" tone="rose"/>
-          </section>
+  async function deleteItems(itemIds: string[]) {
+    if (!itemIds.length || !confirm(`Xử lý ${itemIds.length} vật tư đã chọn? Vật tư còn tồn sẽ được giữ lại.`)) return;
+    await submit(itemIds.length === 1 ? "DELETE_ITEM" : "DELETE_ITEMS_BULK", itemIds.length === 1 ? { itemId: itemIds[0] } : { itemIds });
+  }
+  async function deleteWarehouses(warehouseIds: string[]) {
+    if (!warehouseIds.length || !confirm(`Xử lý ${warehouseIds.length} kho đã chọn? Kho còn tồn sẽ được giữ lại.`)) return;
+    await submit(warehouseIds.length === 1 ? "DELETE_WAREHOUSE" : "DELETE_WAREHOUSES_BULK", warehouseIds.length === 1 ? { warehouseId: warehouseIds[0] } : { warehouseIds });
+  }
 
-          <section className="grid gap-6 xl:grid-cols-2">
-            <article className="surface-card overflow-hidden">
-              <div className="data-toolbar">
-                <div><h2 className="page-section-title">Danh mục vật tư</h2><p className="page-section-subtitle">Tất cả vật tư đã tạo · {data.items.length} mục</p></div>
-                <button type="button" onClick={() => openModal("ITEM")} className="btn-secondary"><Icon name="plus" size={16}/>Thêm vật tư</button>
-              </div>
-              <div className="admin-data-scroll overflow-auto">
-                <table className="min-w-[760px] w-full text-sm">
-                  <thead><tr>{["Mã","Tên vật tư","Nhóm","Đơn vị","Giá vốn","Giá bán","Tồn tối thiểu","Thao tác"].map((header)=><th key={header} className="p-3 text-left">{header}</th>)}</tr></thead>
-                  <tbody>
-                    {data.items.map((item)=><tr key={item.id}>
-                      <td className="p-3 font-black">{item.sku}</td><td className="p-3 font-bold">{item.name}</td><td className="p-3">{item.category}</td><td className="p-3">{item.unit}</td><td className="p-3">{money(item.costPrice)}</td><td className="p-3">{money(item.salePrice)}</td><td className="p-3">{item.minStock}</td>
-                      <td className="p-3"><button type="button" disabled={busy} onClick={() => void deleteCatalog("DELETE_ITEM", item.id, `${item.sku} · ${item.name}`)} className="ghost-danger disabled:opacity-50">Xóa</button></td>
-                    </tr>)}
-                    {!data.items.length&&<tr><td colSpan={8} className="p-8 text-center text-slate-500">Chưa có vật tư. Bấm “Thêm vật tư” để tạo mục đầu tiên.</td></tr>}
-                  </tbody>
-                </table>
-              </div>
-            </article>
+  return <main className="min-h-screen">
+    <OperationsHeader title="Kho vật tư" subtitle="Danh mục → Kho → Tồn → Giao dịch" actions={<button type="button" onClick={() => void load()} disabled={loading || busy} className="icon-button" title="Tải lại"><Icon name="refresh" size={18}/></button>} />
+    <div className="page-container space-y-5">
+      {message && <Notice kind="success">{message}</Notice>}{error && !modal && <Notice kind="error">{error}</Notice>}
+      {loading && !data ? <LoadingState label="Đang tải dữ liệu kho..."/> : data && <>
+        <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <MetricCard label="Tổng tồn" value={data.totals.quantity} icon="package" tone="emerald"/><MetricCard label="Đang giữ chỗ" value={data.totals.reserved} icon="lock" tone="blue"/><MetricCard label="Giá trị tồn" value={money(data.totals.value)} icon="wallet" tone="violet"/><MetricCard label="Cảnh báo thấp" value={data.totals.lowStock} icon="alert" tone="rose"/>
+        </section>
 
-            <article className="surface-card overflow-hidden">
-              <div className="data-toolbar">
-                <div><h2 className="page-section-title">Danh sách kho</h2><p className="page-section-subtitle">Các kho đã tạo · {data.warehouses.length} kho</p></div>
-                <button type="button" onClick={() => openModal("WAREHOUSE")} className="btn-secondary"><Icon name="store" size={16}/>Tạo kho</button>
-              </div>
-              <div className="admin-data-scroll overflow-auto">
-                <table className="min-w-[720px] w-full text-sm">
-                  <thead><tr>{["Mã kho","Tên kho","Loại","Đại lý","Số mặt hàng","Tổng tồn","Thao tác"].map((header)=><th key={header} className="p-3 text-left">{header}</th>)}</tr></thead>
-                  <tbody>
-                    {data.warehouses.map((warehouse)=>{
-                      const total = warehouse.balances.reduce((sum, row) => sum + row.quantity, 0);
-                      return <tr key={warehouse.id}>
-                        <td className="p-3 font-black">{warehouse.code}</td><td className="p-3 font-bold">{warehouse.name}</td><td className="p-3">{warehouseType(warehouse.type)}</td><td className="p-3">{warehouse.dealer ? `${warehouse.dealer.dealerCode} · ${warehouse.dealer.name}` : "—"}</td><td className="p-3">{warehouse.balances.length}</td><td className="p-3 font-black">{total}</td>
-                        <td className="p-3"><button type="button" disabled={busy} onClick={() => void deleteCatalog("DELETE_WAREHOUSE", warehouse.id, `${warehouse.code} · ${warehouse.name}`)} className="ghost-danger disabled:opacity-50">Xóa</button></td>
-                      </tr>;
-                    })}
-                    {!data.warehouses.length&&<tr><td colSpan={7} className="p-8 text-center text-slate-500">Chưa có kho. Tạo kho tổng trước để bắt đầu nhập hàng.</td></tr>}
-                  </tbody>
-                </table>
-              </div>
-            </article>
-          </section>
-
-          <section className="surface-card">
-            <div className="data-toolbar">
-              <div><h2 className="page-section-title">Tồn kho hiện tại</h2><p className="page-section-subtitle">Theo từng kho và mã vật tư</p></div>
-              <div className="mobile-stack-actions flex flex-wrap gap-2">
-                <button type="button" onClick={() => openModal("MOVE")} disabled={!data.items.length || !data.warehouses.length} className="btn-primary inline-flex items-center justify-center gap-2 px-4 py-3 font-bold text-white disabled:opacity-50"><Icon name="route" size={16}/>Lập phiếu kho</button>
-              </div>
-            </div>
-            <div className="admin-data-scroll overflow-auto">
-              <table className="min-w-[820px] w-full text-sm"><thead><tr>{["Kho","Mã vật tư","Tên vật tư","Nhóm","Tồn","Giữ chỗ","Khả dụng","Ngưỡng"].map((header)=><th key={header} className="p-3 text-left">{header}</th>)}</tr></thead><tbody>
-                {balances.map((row)=><tr key={row.id}><td className="p-3"><strong>{row.warehouse.name}</strong><div className="text-xs text-slate-500">{row.warehouse.code}</div></td><td className="p-3 font-black">{row.item.sku}</td><td className="p-3">{row.item.name}</td><td className="p-3">{row.item.category}</td><td className="p-3 font-black">{row.quantity}</td><td className="p-3">{row.reserved}</td><td className="p-3 font-bold text-emerald-700">{Math.max(0,row.quantity-row.reserved)}</td><td className="p-3"><StatusBadge value={row.quantity<=row.item.minStock?"HIGH":"ACTIVE"}/></td></tr>)}
-                {!balances.length&&<tr><td colSpan={8} className="p-10 text-center text-slate-500">Chưa có tồn kho. Hãy tạo vật tư, tạo kho và lập phiếu nhập đầu tiên.</td></tr>}
-              </tbody></table>
-            </div>
-          </section>
-
-          <section className="surface-card">
-            <div className="data-toolbar"><div><h2 className="page-section-title">100 giao dịch gần nhất</h2><p className="page-section-subtitle">Nhập, xuất, điều chuyển và sử dụng cho dịch vụ</p></div></div>
-            <div className="admin-data-scroll overflow-auto"><table className="min-w-[920px] w-full text-sm"><thead><tr>{["Mã phiếu","Loại","Vật tư","Từ kho","Đến kho","Số lượng","Đơn giá","Thời gian"].map((header)=><th key={header} className="p-3 text-left">{header}</th>)}</tr></thead><tbody>
-              {data.movements.map((movement)=><tr key={movement.id}><td className="p-3 font-black">{movement.movementCode}</td><td className="p-3"><StatusBadge value={movement.type}/></td><td className="p-3">{movement.item.name}<div className="text-xs text-slate-500">{movement.item.sku}</div></td><td className="p-3">{movement.fromWarehouse?.name||"—"}</td><td className="p-3">{movement.toWarehouse?.name||"—"}</td><td className="p-3 font-black">{movement.quantity}</td><td className="p-3">{money(movement.unitCost)}</td><td className="p-3">{date(movement.createdAt)}</td></tr>)}
-              {!data.movements.length&&<tr><td colSpan={8} className="p-10 text-center text-slate-500">Chưa có giao dịch kho.</td></tr>}
+        <section className="grid gap-5 xl:grid-cols-2">
+          <article className="surface-card overflow-hidden">
+            <div className="data-toolbar"><div><h2 className="page-section-title">1. Danh mục vật tư</h2><p className="page-section-subtitle">Tạo và quản lý các mã vật tư trước khi nhập kho</p></div><button type="button" onClick={() => openModal("ITEM")} className="btn-secondary"><Icon name="plus" size={16}/>Thêm vật tư</button></div>
+            <BulkBar count={selectedItems.length} total={data.items.length} allSelected={Boolean(data.items.length) && selectedItems.length === data.items.length} onSelectAll={() => setSelectedItems(selectedItems.length === data.items.length ? [] : data.items.map((item) => item.id))} onDelete={() => void deleteItems(selectedItems)} busy={busy}/>
+            <div className="max-h-[360px] overflow-auto overscroll-contain"><table className="min-w-[760px] w-full text-sm"><thead className="sticky top-0 z-10 bg-white"><tr><th className="p-3"></th>{["Mã","Tên vật tư","Nhóm","Đơn vị","Giá vốn","Giá bán","Tồn tối thiểu","Thao tác"].map((h)=><th key={h} className="p-3 text-left">{h}</th>)}</tr></thead><tbody>
+              {data.items.map((item)=><tr key={item.id}><td className="p-3"><input type="checkbox" checked={selectedItems.includes(item.id)} onChange={() => setSelectedItems((current) => current.includes(item.id) ? current.filter((id) => id !== item.id) : [...current, item.id])}/></td><td className="p-3 font-black">{item.sku}</td><td className="p-3">{item.name}</td><td className="p-3">{item.category}</td><td className="p-3">{item.unit}</td><td className="p-3">{money(item.costPrice)}</td><td className="p-3">{money(item.salePrice)}</td><td className="p-3">{item.minStock}</td><td className="p-3"><button type="button" disabled={busy} onClick={() => void deleteItems([item.id])} className="rounded-xl bg-rose-50 px-3 py-2 font-bold text-rose-700 disabled:opacity-50">Xóa</button></td></tr>)}
+              {!data.items.length&&<tr><td colSpan={9} className="p-8 text-center text-slate-500">Chưa có vật tư.</td></tr>}
             </tbody></table></div>
-          </section>
-        </>}
+          </article>
+
+          <article className="surface-card overflow-hidden">
+            <div className="data-toolbar"><div><h2 className="page-section-title">2. Danh sách kho</h2><p className="page-section-subtitle">Kho tổng, kho khu vực và kho của đại lý</p></div><button type="button" onClick={() => openModal("WAREHOUSE")} className="btn-secondary"><Icon name="store" size={16}/>Tạo kho</button></div>
+            <BulkBar count={selectedWarehouses.length} total={data.warehouses.length} allSelected={Boolean(data.warehouses.length) && selectedWarehouses.length === data.warehouses.length} onSelectAll={() => setSelectedWarehouses(selectedWarehouses.length === data.warehouses.length ? [] : data.warehouses.map((warehouse) => warehouse.id))} onDelete={() => void deleteWarehouses(selectedWarehouses)} busy={busy}/>
+            <div className="max-h-[360px] overflow-auto overscroll-contain"><table className="min-w-[760px] w-full text-sm"><thead className="sticky top-0 z-10 bg-white"><tr><th className="p-3"></th>{["Mã kho","Tên kho","Loại","Đại lý","Mặt hàng","Tổng tồn","Thao tác"].map((h)=><th key={h} className="p-3 text-left">{h}</th>)}</tr></thead><tbody>
+              {data.warehouses.map((warehouse)=>{const total=warehouse.balances.reduce((sum,b)=>sum+b.quantity,0);return <tr key={warehouse.id}><td className="p-3"><input type="checkbox" checked={selectedWarehouses.includes(warehouse.id)} onChange={() => setSelectedWarehouses((current) => current.includes(warehouse.id) ? current.filter((id) => id !== warehouse.id) : [...current, warehouse.id])}/></td><td className="p-3 font-black">{warehouse.code}</td><td className="p-3">{warehouse.name}</td><td className="p-3"><StatusBadge value={warehouse.type}/></td><td className="p-3">{warehouse.dealer ? `${warehouse.dealer.dealerCode} · ${warehouse.dealer.name}` : "—"}</td><td className="p-3">{warehouse.balances.length}</td><td className="p-3 font-black">{total}</td><td className="p-3"><button type="button" disabled={busy} onClick={() => void deleteWarehouses([warehouse.id])} className="rounded-xl bg-rose-50 px-3 py-2 font-bold text-rose-700 disabled:opacity-50">Xóa</button></td></tr>})}
+              {!data.warehouses.length&&<tr><td colSpan={8} className="p-8 text-center text-slate-500">Chưa có kho.</td></tr>}
+            </tbody></table></div>
+          </article>
+        </section>
+
+        <section className="surface-card overflow-hidden">
+          <div className="data-toolbar"><div><h2 className="page-section-title">3. Tồn kho hiện tại</h2><p className="page-section-subtitle">Theo từng kho và từng mã vật tư</p></div><button type="button" onClick={() => openModal("MOVE")} disabled={!data.items.length || !data.warehouses.length} className="btn-primary inline-flex items-center justify-center gap-2 px-4 py-3 font-bold text-white disabled:opacity-50"><Icon name="route" size={16}/>Lập phiếu kho</button></div>
+          <div className="max-h-[440px] overflow-auto overscroll-contain"><table className="min-w-[860px] w-full text-sm"><thead className="sticky top-0 z-10 bg-white"><tr>{["Kho","Mã vật tư","Tên vật tư","Nhóm","Tồn","Giữ chỗ","Khả dụng","Ngưỡng"].map((h)=><th key={h} className="p-3 text-left">{h}</th>)}</tr></thead><tbody>
+            {balances.map((row)=><tr key={row.id}><td className="p-3"><strong>{row.warehouse.name}</strong><div className="text-xs text-slate-500">{row.warehouse.code}</div></td><td className="p-3 font-black">{row.item.sku}</td><td className="p-3">{row.item.name}</td><td className="p-3">{row.item.category}</td><td className="p-3 font-black">{row.quantity}</td><td className="p-3">{row.reserved}</td><td className="p-3 font-bold text-emerald-700">{Math.max(0,row.quantity-row.reserved)}</td><td className="p-3"><StatusBadge value={row.quantity<=row.item.minStock?"HIGH":"ACTIVE"}/></td></tr>)}
+            {!balances.length&&<tr><td colSpan={8} className="p-10 text-center text-slate-500">Chưa có tồn kho. Tạo vật tư + kho, sau đó lập phiếu nhập.</td></tr>}
+          </tbody></table></div>
+        </section>
+
+        <section className="surface-card overflow-hidden"><div className="data-toolbar"><div><h2 className="page-section-title">4. 100 giao dịch gần nhất</h2><p className="page-section-subtitle">Nhập, xuất, điều chuyển và sử dụng cho dịch vụ</p></div></div><div className="max-h-[440px] overflow-auto overscroll-contain"><table className="min-w-[920px] w-full text-sm"><thead className="sticky top-0 z-10 bg-white"><tr>{["Mã phiếu","Loại","Vật tư","Từ kho","Đến kho","Số lượng","Đơn giá","Thời gian"].map((h)=><th key={h} className="p-3 text-left">{h}</th>)}</tr></thead><tbody>
+          {data.movements.map((movement)=><tr key={movement.id}><td className="p-3 font-black">{movement.movementCode}</td><td className="p-3"><StatusBadge value={movement.type}/></td><td className="p-3">{movement.item.name}<div className="text-xs text-slate-500">{movement.item.sku}</div></td><td className="p-3">{movement.fromWarehouse?.name||"—"}</td><td className="p-3">{movement.toWarehouse?.name||"—"}</td><td className="p-3 font-black">{movement.quantity}</td><td className="p-3">{money(movement.unitCost)}</td><td className="p-3">{date(movement.createdAt)}</td></tr>)}
+          {!data.movements.length&&<tr><td colSpan={8} className="p-10 text-center text-slate-500">Chưa có giao dịch kho.</td></tr>}
+        </tbody></table></div></section>
+      </>}
+    </div>
+
+    {modal && data && <div className="modal-backdrop" role="presentation" onMouseDown={(event)=>event.target===event.currentTarget&&closeModal()}><div className="modal-panel max-w-2xl" role="dialog" aria-modal="true">
+      <div className="modal-header"><div><p className="section-kicker">Quản lý kho</p><h3 className="mt-1 text-xl font-black">{modal==="ITEM"?"Thêm vật tư":modal==="WAREHOUSE"?"Tạo kho mới":"Lập phiếu kho"}</h3></div><button type="button" onClick={closeModal} disabled={busy} className="icon-button"><Icon name="x" size={18}/></button></div>
+      <div className="modal-body">{error&&<Notice kind="error">{error}</Notice>}
+        {modal==="ITEM"?<form id="inventory-item-form" onSubmit={(event)=>{event.preventDefault();void submit("CREATE_ITEM",itemForm);}} className="form-grid"><Field label="Mã vật tư" className="span-4"><input required value={itemForm.sku} onChange={(e)=>setItemForm({...itemForm,sku:e.target.value})}/></Field><Field label="Tên vật tư" className="span-8"><input required value={itemForm.name} onChange={(e)=>setItemForm({...itemForm,name:e.target.value})}/></Field><Field label="Nhóm" className="span-4"><input required value={itemForm.category} onChange={(e)=>setItemForm({...itemForm,category:e.target.value})}/></Field><Field label="Đơn vị" className="span-4"><input required value={itemForm.unit} onChange={(e)=>setItemForm({...itemForm,unit:e.target.value})}/></Field><Field label="Tồn tối thiểu" className="span-4"><input type="number" min="0" required value={itemForm.minStock} onChange={(e)=>setItemForm({...itemForm,minStock:e.target.value})}/></Field><Field label="Giá vốn" className="span-6"><input type="number" min="0" required value={itemForm.costPrice} onChange={(e)=>setItemForm({...itemForm,costPrice:e.target.value})}/></Field><Field label="Giá bán" className="span-6"><input type="number" min="0" required value={itemForm.salePrice} onChange={(e)=>setItemForm({...itemForm,salePrice:e.target.value})}/></Field></form>
+        :modal==="WAREHOUSE"?<form id="inventory-warehouse-form" onSubmit={(event)=>{event.preventDefault();void submit("CREATE_WAREHOUSE",warehouseForm);}} className="form-grid"><Field label="Mã kho" className="span-4"><input required value={warehouseForm.code} onChange={(e)=>setWarehouseForm({...warehouseForm,code:e.target.value})}/></Field><Field label="Tên kho" className="span-8"><input required value={warehouseForm.name} onChange={(e)=>setWarehouseForm({...warehouseForm,name:e.target.value})}/></Field><Field label="Loại kho" className="span-4"><select value={warehouseForm.type} onChange={(e)=>setWarehouseForm({...warehouseForm,type:e.target.value,dealerId:e.target.value==="DEALER"?warehouseForm.dealerId:""})}><option value="CENTRAL">Kho tổng</option><option value="REGIONAL">Kho khu vực</option><option value="DEALER">Kho đại lý</option></select></Field><Field label="Đại lý sở hữu" className="span-8"><select required={warehouseForm.type==="DEALER"} disabled={warehouseForm.type!=="DEALER"} value={warehouseForm.dealerId} onChange={(e)=>{const dealer=data.dealers.find((row)=>row.id===e.target.value);setWarehouseForm({...warehouseForm,dealerId:e.target.value,province:dealer?.province||warehouseForm.province});}}><option value="">{warehouseForm.type==="DEALER"?"Chọn đại lý":"Không áp dụng"}</option>{data.dealers.filter((dealer)=>!data.warehouses.some((warehouse)=>warehouse.dealer?.dealerCode===dealer.dealerCode)).map((dealer)=><option key={dealer.id} value={dealer.id}>{dealer.dealerCode} · {dealer.name}</option>)}</select></Field><Field label="Tỉnh/thành" className="span-4"><input value={warehouseForm.province} onChange={(e)=>setWarehouseForm({...warehouseForm,province:e.target.value})}/></Field><Field label="Địa chỉ kho" className="span-8"><input value={warehouseForm.address} onChange={(e)=>setWarehouseForm({...warehouseForm,address:e.target.value})}/></Field></form>
+        :<form id="inventory-movement-form" onSubmit={submitMovement} className="form-grid"><Field label="Loại phiếu" className="span-4"><select value={moveForm.type} onChange={(e)=>changeMoveType(e.target.value as MoveType)}><option value="IN">Nhập kho</option><option value="OUT">Xuất kho</option><option value="TRANSFER">Điều chuyển</option><option value="ADJUST_IN">Điều chỉnh tăng</option><option value="ADJUST_OUT">Điều chỉnh giảm</option></select></Field><Field label="Vật tư" className="span-8"><select required value={moveForm.itemId} onChange={(e)=>changeItem(e.target.value)}>{data.items.map((item)=><option key={item.id} value={item.id}>{item.sku} · {item.name}</option>)}</select></Field><Field label="Kho xuất" className="span-6"><select required={needsFrom} disabled={!needsFrom} value={moveForm.fromWarehouseId} onChange={(e)=>setMoveForm({...moveForm,fromWarehouseId:e.target.value,toWarehouseId:moveForm.toWarehouseId===e.target.value?"":moveForm.toWarehouseId})}><option value="">{needsFrom?(sourceWarehouses.length?"Chọn kho xuất":"Không có kho đủ tồn"):"Không áp dụng"}</option>{sourceWarehouses.map((warehouse)=><option key={warehouse.id} value={warehouse.id}>{warehouse.code} · {warehouse.name}</option>)}</select>{needsFrom&&moveForm.fromWarehouseId&&<p className={`mt-1 text-xs font-bold ${insufficient?"text-rose-600":"text-slate-500"}`}>Khả dụng: {selectedAvailable}</p>}</Field><Field label="Kho nhận" className="span-6"><select required={needsTo} disabled={!needsTo} value={moveForm.toWarehouseId} onChange={(e)=>setMoveForm({...moveForm,toWarehouseId:e.target.value})}><option value="">{needsTo?"Chọn kho nhận":"Không áp dụng"}</option>{data.warehouses.filter((warehouse)=>warehouse.id!==moveForm.fromWarehouseId).map((warehouse)=><option key={warehouse.id} value={warehouse.id}>{warehouse.code} · {warehouse.name}</option>)}</select></Field><Field label="Số lượng" className="span-4"><input type="number" min="1" max={needsFrom&&selectedSource?selectedAvailable:undefined} required value={moveForm.quantity} onChange={(e)=>setMoveForm({...moveForm,quantity:e.target.value})}/></Field><Field label="Đơn giá" className="span-4"><input type="number" min="0" required value={moveForm.unitCost} onChange={(e)=>setMoveForm({...moveForm,unitCost:e.target.value})}/></Field><Field label="Ghi chú" className="span-4"><input value={moveForm.note} onChange={(e)=>setMoveForm({...moveForm,note:e.target.value})}/></Field>{needsFrom&&!sourceWarehouses.length&&<div className="span-12"><Notice kind="warning">Vật tư này chưa có tồn khả dụng. Hãy nhập kho trước.</Notice></div>}</form>}
       </div>
-
-      {modal && data && <div className="modal-backdrop" role="presentation" onMouseDown={(event)=>event.target===event.currentTarget&&closeModal()}><div className="modal-panel max-w-2xl" role="dialog" aria-modal="true">
-        <div className="modal-header"><div><p className="section-kicker">Quản lý kho</p><h3 className="mt-1 text-xl font-black">{modal==="ITEM"?"Thêm vật tư":modal==="WAREHOUSE"?"Tạo kho mới":"Lập phiếu kho"}</h3></div><button type="button" onClick={closeModal} disabled={busy} className="icon-button"><Icon name="x" size={18}/></button></div>
-        <div className="modal-body">{error&&<Notice kind="error">{error}</Notice>}
-          {modal==="ITEM"?<form id="inventory-item-form" onSubmit={(event)=>{event.preventDefault();void submit("CREATE_ITEM",itemForm);}} className="form-grid">
-            <Field label="Mã vật tư" className="span-4"><input required value={itemForm.sku} onChange={(e)=>setItemForm({...itemForm,sku:e.target.value})}/></Field>
-            <Field label="Tên vật tư" className="span-8"><input required value={itemForm.name} onChange={(e)=>setItemForm({...itemForm,name:e.target.value})}/></Field>
-            <Field label="Nhóm" className="span-4"><input required value={itemForm.category} onChange={(e)=>setItemForm({...itemForm,category:e.target.value})}/></Field>
-            <Field label="Đơn vị" className="span-4"><input required value={itemForm.unit} onChange={(e)=>setItemForm({...itemForm,unit:e.target.value})}/></Field>
-            <Field label="Tồn tối thiểu" className="span-4"><input type="number" min="0" required value={itemForm.minStock} onChange={(e)=>setItemForm({...itemForm,minStock:e.target.value})}/></Field>
-            <Field label="Giá vốn" className="span-6"><input type="number" min="0" required value={itemForm.costPrice} onChange={(e)=>setItemForm({...itemForm,costPrice:e.target.value})}/></Field>
-            <Field label="Giá bán" className="span-6"><input type="number" min="0" required value={itemForm.salePrice} onChange={(e)=>setItemForm({...itemForm,salePrice:e.target.value})}/></Field>
-          </form>:modal==="WAREHOUSE"?<form id="inventory-warehouse-form" onSubmit={(event)=>{event.preventDefault();void submit("CREATE_WAREHOUSE",warehouseForm);}} className="form-grid">
-            <Field label="Mã kho" className="span-4"><input required value={warehouseForm.code} onChange={(e)=>setWarehouseForm({...warehouseForm,code:e.target.value})}/></Field>
-            <Field label="Tên kho" className="span-8"><input required value={warehouseForm.name} onChange={(e)=>setWarehouseForm({...warehouseForm,name:e.target.value})}/></Field>
-            <Field label="Loại kho" className="span-4"><select value={warehouseForm.type} onChange={(e)=>setWarehouseForm({...warehouseForm,type:e.target.value,dealerId:e.target.value==="DEALER"?warehouseForm.dealerId:""})}><option value="CENTRAL">Kho tổng</option><option value="REGIONAL">Kho khu vực</option><option value="DEALER">Kho đại lý</option></select></Field>
-            <Field label="Đại lý sở hữu" className="span-8"><select required={warehouseForm.type==="DEALER"} disabled={warehouseForm.type!=="DEALER"} value={warehouseForm.dealerId} onChange={(e)=>{const dealer=data.dealers.find((row)=>row.id===e.target.value);setWarehouseForm({...warehouseForm,dealerId:e.target.value,province:dealer?.province||warehouseForm.province});}}><option value="">{warehouseForm.type==="DEALER"?"Chọn đại lý":"Không áp dụng"}</option>{data.dealers.filter((dealer)=>!data.warehouses.some((warehouse)=>warehouse.dealer?.dealerCode===dealer.dealerCode)).map((dealer)=><option key={dealer.id} value={dealer.id}>{dealer.dealerCode} · {dealer.name}</option>)}</select></Field>
-            <Field label="Tỉnh/thành" className="span-4"><input value={warehouseForm.province} onChange={(e)=>setWarehouseForm({...warehouseForm,province:e.target.value})}/></Field>
-            <Field label="Địa chỉ kho" className="span-8"><input value={warehouseForm.address} onChange={(e)=>setWarehouseForm({...warehouseForm,address:e.target.value})}/></Field>
-          </form>:<form id="inventory-movement-form" onSubmit={submitMovement} className="form-grid">
-            <Field label="Loại phiếu" className="span-4"><select value={moveForm.type} onChange={(e)=>changeMoveType(e.target.value as MoveType)}><option value="IN">Nhập kho</option><option value="OUT">Xuất kho</option><option value="TRANSFER">Điều chuyển</option><option value="ADJUST_IN">Điều chỉnh tăng</option><option value="ADJUST_OUT">Điều chỉnh giảm</option></select></Field>
-            <Field label="Vật tư" className="span-8"><select required value={moveForm.itemId} onChange={(e)=>changeItem(e.target.value)}>{data.items.map((item)=><option key={item.id} value={item.id}>{item.sku} · {item.name}</option>)}</select></Field>
-            <Field label="Kho xuất" className="span-6"><select required={needsFrom} disabled={!needsFrom} value={moveForm.fromWarehouseId} onChange={(e)=>setMoveForm({...moveForm,fromWarehouseId:e.target.value,toWarehouseId:moveForm.toWarehouseId===e.target.value?"":moveForm.toWarehouseId})}><option value="">{needsFrom?(sourceWarehouses.length?"Chọn kho xuất":"Không có kho đủ tồn"):"Không áp dụng"}</option>{sourceWarehouses.map((warehouse)=><option key={warehouse.id} value={warehouse.id}>{warehouse.code} · {warehouse.name}</option>)}</select>{needsFrom&&moveForm.fromWarehouseId&&<p className={`mt-1 text-xs font-bold ${insufficient?"text-rose-600":"text-slate-500"}`}>Khả dụng: {selectedAvailable}</p>}</Field>
-            <Field label="Kho nhận" className="span-6"><select required={needsTo} disabled={!needsTo} value={moveForm.toWarehouseId} onChange={(e)=>setMoveForm({...moveForm,toWarehouseId:e.target.value})}><option value="">{needsTo?"Chọn kho nhận":"Không áp dụng"}</option>{data.warehouses.filter((warehouse)=>warehouse.id!==moveForm.fromWarehouseId).map((warehouse)=><option key={warehouse.id} value={warehouse.id}>{warehouse.code} · {warehouse.name}</option>)}</select></Field>
-            <Field label="Số lượng" className="span-4"><input type="number" min="1" max={needsFrom&&selectedSource?selectedAvailable:undefined} required value={moveForm.quantity} onChange={(e)=>setMoveForm({...moveForm,quantity:e.target.value})}/></Field>
-            <Field label="Đơn giá" className="span-4"><input type="number" min="0" required value={moveForm.unitCost} onChange={(e)=>setMoveForm({...moveForm,unitCost:e.target.value})}/></Field>
-            <Field label="Ghi chú" className="span-4"><input value={moveForm.note} onChange={(e)=>setMoveForm({...moveForm,note:e.target.value})}/></Field>
-            {needsFrom&&!sourceWarehouses.length&&<div className="span-12"><Notice kind="warning">Vật tư này chưa có tồn khả dụng ở bất kỳ kho nào. Hãy nhập kho trước.</Notice></div>}
-          </form>}
-        </div>
-        <div className="modal-footer"><button type="button" onClick={closeModal} disabled={busy} className="btn-secondary">Hủy</button><button type="submit" form={modal==="ITEM"?"inventory-item-form":modal==="WAREHOUSE"?"inventory-warehouse-form":"inventory-movement-form"} disabled={busy||(modal==="MOVE"&&(quantityInvalid||insufficient||sameWarehouse||(needsFrom&&!moveForm.fromWarehouseId)||(needsTo&&!moveForm.toWarehouseId)))} className="btn-primary px-5 py-3 font-black text-white disabled:opacity-50">{busy?"Đang lưu...":modal==="ITEM"?"Lưu vật tư":modal==="WAREHOUSE"?"Tạo kho":"Ghi nhận phiếu"}</button></div>
-      </div></div>}
-    </main>
-  );
+      <div className="modal-footer"><button type="button" onClick={closeModal} disabled={busy} className="btn-secondary">Hủy</button><button type="submit" form={modal==="ITEM"?"inventory-item-form":modal==="WAREHOUSE"?"inventory-warehouse-form":"inventory-movement-form"} disabled={busy||(modal==="MOVE"&&(quantityInvalid||insufficient||sameWarehouse||(needsFrom&&!moveForm.fromWarehouseId)||(needsTo&&!moveForm.toWarehouseId)))} className="btn-primary px-5 py-3 font-black text-white disabled:opacity-50">{busy?"Đang lưu...":modal==="ITEM"?"Lưu vật tư":modal==="WAREHOUSE"?"Tạo kho":"Ghi nhận phiếu"}</button></div>
+    </div></div>}
+  </main>;
 }
 
-function Field({ label, className = "", children }: { label: string; className?: string; children: ReactNode }) {
-  return <label className={className}><span className="mb-1 block text-sm font-bold">{label}</span>{children}</label>;
+function BulkBar({ count, total, allSelected, onSelectAll, onDelete, busy }: { count:number; total:number; allSelected:boolean; onSelectAll:()=>void; onDelete:()=>void; busy:boolean }) {
+  return <div className="flex flex-col gap-2 border-y border-slate-100 bg-slate-50/70 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"><label className="inline-flex items-center gap-2 text-sm font-bold text-slate-700"><input type="checkbox" checked={allSelected} disabled={!total} onChange={onSelectAll}/>Chọn tất cả ({total})</label><div className="flex items-center gap-2"><span className="text-sm text-slate-500">Đã chọn {count}</span><button type="button" disabled={!count||busy} onClick={onDelete} className="rounded-xl bg-rose-600 px-3 py-2 text-sm font-black text-white disabled:opacity-40">Xóa đã chọn</button></div></div>;
 }
+function Field({ label, className = "", children }: { label: string; className?: string; children: ReactNode }) { return <label className={className}><span className="mb-1 block text-sm font-bold">{label}</span>{children}</label>; }
