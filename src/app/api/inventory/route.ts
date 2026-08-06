@@ -60,8 +60,8 @@ export async function GET(request: NextRequest) {
 
     const dealerCode = auth.user.dealerCode || "__NONE__";
     const warehouseWhere = auth.user.role === "DEALER"
-      ? { dealer: { dealerCode } }
-      : {};
+      ? { active: true, dealer: { dealerCode } }
+      : { active: true };
 
     const [items, warehouses, movements, dealers] = await Promise.all([
       prisma.inventoryItem.findMany({
@@ -189,6 +189,67 @@ export async function POST(request: NextRequest) {
 
       await writeAudit({ request, userId: auth.user.id, action: "CREATE_WAREHOUSE", target: warehouse.code, detail: warehouse });
       return NextResponse.json({ success: true, message: "Đã tạo kho.", data: warehouse }, { status: 201 });
+    }
+
+    if (action === "DELETE_ITEM") {
+      const itemId = text(body.itemId);
+      if (!itemId) throw new InventoryError("Thiếu vật tư cần xóa.");
+
+      const item = await prisma.inventoryItem.findUnique({
+        where: { id: itemId },
+        include: {
+          balances: { select: { id: true, quantity: true, reserved: true } },
+          _count: { select: { movements: true } },
+        },
+      });
+      if (!item) throw new InventoryError("Không tìm thấy vật tư.", 404);
+
+      const hasStock = item.balances.some((balance) => balance.quantity !== 0 || balance.reserved !== 0);
+      if (hasStock) throw new InventoryError("Vật tư vẫn còn tồn hoặc đang giữ chỗ. Hãy đưa tồn về 0 trước khi xóa.", 409);
+
+      if (item._count.movements > 0) {
+        await prisma.$transaction([
+          prisma.stockBalance.deleteMany({ where: { itemId } }),
+          prisma.inventoryItem.update({ where: { id: itemId }, data: { active: false } }),
+        ]);
+        await writeAudit({ request, userId: auth.user.id, action: "DEACTIVATE_INVENTORY_ITEM", target: item.sku, detail: { itemId } });
+        return NextResponse.json({ success: true, message: "Vật tư đã có lịch sử giao dịch nên được ngừng sử dụng và ẩn khỏi danh mục." });
+      }
+
+      await prisma.inventoryItem.delete({ where: { id: itemId } });
+      await writeAudit({ request, userId: auth.user.id, action: "DELETE_INVENTORY_ITEM", target: item.sku, detail: { itemId } });
+      return NextResponse.json({ success: true, message: "Đã xóa vật tư." });
+    }
+
+    if (action === "DELETE_WAREHOUSE") {
+      const warehouseId = text(body.warehouseId);
+      if (!warehouseId) throw new InventoryError("Thiếu kho cần xóa.");
+
+      const warehouse = await prisma.warehouse.findUnique({
+        where: { id: warehouseId },
+        include: {
+          balances: { select: { id: true, quantity: true, reserved: true } },
+          _count: { select: { outgoingMovements: true, incomingMovements: true } },
+        },
+      });
+      if (!warehouse) throw new InventoryError("Không tìm thấy kho.", 404);
+
+      const hasStock = warehouse.balances.some((balance) => balance.quantity !== 0 || balance.reserved !== 0);
+      if (hasStock) throw new InventoryError("Kho vẫn còn tồn hoặc đang giữ chỗ. Hãy xuất hoặc điều chuyển hết hàng trước khi xóa.", 409);
+
+      const movementCount = warehouse._count.outgoingMovements + warehouse._count.incomingMovements;
+      if (movementCount > 0) {
+        await prisma.$transaction([
+          prisma.stockBalance.deleteMany({ where: { warehouseId } }),
+          prisma.warehouse.update({ where: { id: warehouseId }, data: { active: false } }),
+        ]);
+        await writeAudit({ request, userId: auth.user.id, action: "DEACTIVATE_WAREHOUSE", target: warehouse.code, detail: { warehouseId } });
+        return NextResponse.json({ success: true, message: "Kho đã có lịch sử giao dịch nên được ngừng hoạt động và ẩn khỏi danh sách." });
+      }
+
+      await prisma.warehouse.delete({ where: { id: warehouseId } });
+      await writeAudit({ request, userId: auth.user.id, action: "DELETE_WAREHOUSE", target: warehouse.code, detail: { warehouseId } });
+      return NextResponse.json({ success: true, message: "Đã xóa kho." });
     }
 
     if (action === "MOVE_STOCK") {
