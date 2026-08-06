@@ -55,7 +55,7 @@ async function serializableTransaction<T>(
 
 export async function GET(request: NextRequest) {
   try {
-    const auth = await hasRole(request, ["ADMIN", "DEALER"]);
+    const auth = await hasRole(request, ["SUPER_ADMIN", "ADMIN", "DEALER"]);
     if (!auth) return NextResponse.json({ success: false, message: "Chưa được cấp quyền." }, { status: 401 });
 
     const dealerCode = auth.user.dealerCode || "__NONE__";
@@ -94,7 +94,7 @@ export async function GET(request: NextRequest) {
         orderBy: { createdAt: "desc" },
         take: 100,
       }),
-      auth.user.role === "ADMIN"
+      ["SUPER_ADMIN", "ADMIN"].includes(auth.user.role)
         ? prisma.dealer.findMany({
             where: { status: "APPROVED" },
             select: { id: true, dealerCode: true, name: true, province: true },
@@ -127,8 +127,8 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const auth = await hasRole(request, ["ADMIN"]);
-  if (!auth) return NextResponse.json({ success: false, message: "Chỉ Admin được thay đổi kho." }, { status: 403 });
+  const auth = await hasRole(request, ["SUPER_ADMIN", "ADMIN"]);
+  if (!auth) return NextResponse.json({ success: false, message: "Chỉ Admin hoặc Super Admin được thay đổi kho." }, { status: 403 });
 
   try {
     const body = await request.json().catch(() => ({}));
@@ -140,9 +140,7 @@ export async function POST(request: NextRequest) {
       const category = text(body.category);
       const unit = text(body.unit) || "cái";
 
-      if (!sku || !name || !category) {
-        throw new InventoryError("Thiếu mã, tên hoặc nhóm vật tư.");
-      }
+      if (!sku || !name || !category) throw new InventoryError("Thiếu mã, tên hoặc nhóm vật tư.");
 
       const item = await prisma.inventoryItem.create({
         data: {
@@ -156,14 +154,7 @@ export async function POST(request: NextRequest) {
         },
       });
 
-      await writeAudit({
-        request,
-        userId: auth.user.id,
-        action: "CREATE_INVENTORY_ITEM",
-        target: item.sku,
-        detail: item,
-      });
-
+      await writeAudit({ request, userId: auth.user.id, action: "CREATE_INVENTORY_ITEM", target: item.sku, detail: item });
       return NextResponse.json({ success: true, message: "Đã thêm vật tư.", data: item }, { status: 201 });
     }
 
@@ -196,14 +187,7 @@ export async function POST(request: NextRequest) {
         },
       });
 
-      await writeAudit({
-        request,
-        userId: auth.user.id,
-        action: "CREATE_WAREHOUSE",
-        target: warehouse.code,
-        detail: warehouse,
-      });
-
+      await writeAudit({ request, userId: auth.user.id, action: "CREATE_WAREHOUSE", target: warehouse.code, detail: warehouse });
       return NextResponse.json({ success: true, message: "Đã tạo kho.", data: warehouse }, { status: 201 });
     }
 
@@ -216,9 +200,7 @@ export async function POST(request: NextRequest) {
       const quantity = number(body.quantity);
       const unitCost = Math.max(0, number(body.unitCost));
 
-      if (!MOVEMENT_TYPES.has(type) || !itemId || quantity <= 0) {
-        throw new InventoryError("Thông tin phiếu kho không hợp lệ.");
-      }
+      if (!MOVEMENT_TYPES.has(type) || !itemId || quantity <= 0) throw new InventoryError("Thông tin phiếu kho không hợp lệ.");
 
       if (INBOUND_TYPES.has(type)) {
         if (!toWarehouseId) throw new InventoryError("Phiếu nhập cần chọn kho nhận.");
@@ -227,17 +209,11 @@ export async function POST(request: NextRequest) {
         if (!fromWarehouseId) throw new InventoryError("Phiếu xuất cần chọn kho xuất.");
         if (toWarehouseId) throw new InventoryError("Phiếu xuất không được chọn kho nhận.");
       } else if (type === "TRANSFER") {
-        if (!fromWarehouseId || !toWarehouseId) {
-          throw new InventoryError("Phiếu điều chuyển cần chọn cả kho xuất và kho nhận.");
-        }
-        if (fromWarehouseId === toWarehouseId) {
-          throw new InventoryError("Kho xuất và kho nhận phải khác nhau.");
-        }
+        if (!fromWarehouseId || !toWarehouseId) throw new InventoryError("Phiếu điều chuyển cần chọn cả kho xuất và kho nhận.");
+        if (fromWarehouseId === toWarehouseId) throw new InventoryError("Kho xuất và kho nhận phải khác nhau.");
       }
 
-      if (type === "SERVICE_USE" && !serviceOrderId) {
-        throw new InventoryError("Xuất dùng cho dịch vụ phải gắn với một lệnh dịch vụ.");
-      }
+      if (type === "SERVICE_USE" && !serviceOrderId) throw new InventoryError("Xuất dùng cho dịch vụ phải gắn với một lệnh dịch vụ.");
 
       const warehouseIds = [...new Set([fromWarehouseId, toWarehouseId].filter((value): value is string => Boolean(value)))];
       const [item, warehouses, serviceOrder] = await Promise.all([
@@ -261,9 +237,7 @@ export async function POST(request: NextRequest) {
             where: { warehouseId_itemId: { warehouseId: fromWarehouseId, itemId } },
           });
           const available = Math.max(0, (source?.quantity || 0) - (source?.reserved || 0));
-          if (!source || available < quantity) {
-            throw new InventoryError(`Tồn khả dụng không đủ để xuất. Hiện còn ${available} ${item.unit}.`, 409);
-          }
+          if (!source || available < quantity) throw new InventoryError(`Tồn khả dụng không đủ để xuất. Hiện còn ${available} ${item.unit}.`, 409);
 
           await tx.stockBalance.update({
             where: { id: source.id },
