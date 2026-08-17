@@ -19,6 +19,23 @@ required("NEXT_PUBLIC_APP_URL");
 if (value("NEXT_PUBLIC_APP_URL") && !value("NEXT_PUBLIC_APP_URL").startsWith("https://")) errors.push("NEXT_PUBLIC_APP_URL production phải dùng https://");
 if (value("OTP_FIXED_CODE")) errors.push("Phải xóa OTP_FIXED_CODE khỏi production");
 if (value("OTP_DEBUG") !== "false") errors.push('OTP_DEBUG phải là "false"');
+
+const redisPairs = [
+  ["STORAGE_KV_REST_API_URL", "STORAGE_KV_REST_API_TOKEN"],
+  ["KV_REST_API_URL", "KV_REST_API_TOKEN"],
+  ["STORAGE_UPSTASH_REDIS_REST_URL", "STORAGE_UPSTASH_REDIS_REST_TOKEN"],
+  ["UPSTASH_REDIS_REST_URL", "UPSTASH_REDIS_REST_TOKEN"],
+];
+const redisConfigured = redisPairs.some(([urlName, tokenName]) => value(urlName) && value(tokenName));
+if (!redisConfigured) {
+  errors.push("Thiếu Redis: cần một cặp URL + TOKEN của Upstash/KV. Với Vercel Custom Prefix=STORAGE, dùng STORAGE_KV_REST_API_URL và STORAGE_KV_REST_API_TOKEN.");
+}
+for (const [urlName, tokenName] of redisPairs) {
+  if (Boolean(value(urlName)) !== Boolean(value(tokenName))) {
+    warnings.push(`Redis cấu hình chưa đủ cặp: ${urlName} / ${tokenName}`);
+  }
+}
+
 if (value("NOTIFICATION_DRY_RUN") !== "false") warnings.push('NOTIFICATION_DRY_RUN chưa là "false": hệ thống sẽ không gửi SMS/Zalo/Email thật.');
 if (value("NOTIFICATION_DRY_RUN") === "false") {
   required("GMAIL_USER");
