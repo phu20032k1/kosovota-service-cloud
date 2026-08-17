@@ -4,11 +4,31 @@ let redis: Redis | null | undefined;
 
 const DEALER_CACHE_VERSION_KEY = "kosovota:cache:dealers:version";
 
+function redisUrl() {
+  return (
+    process.env.STORAGE_KV_REST_API_URL ||
+    process.env.KV_REST_API_URL ||
+    process.env.STORAGE_UPSTASH_REDIS_REST_URL ||
+    process.env.UPSTASH_REDIS_REST_URL ||
+    ""
+  ).trim();
+}
+
+function redisToken() {
+  return (
+    process.env.STORAGE_KV_REST_API_TOKEN ||
+    process.env.KV_REST_API_TOKEN ||
+    process.env.STORAGE_UPSTASH_REDIS_REST_TOKEN ||
+    process.env.UPSTASH_REDIS_REST_TOKEN ||
+    ""
+  ).trim();
+}
+
 export function getRedis() {
   if (redis !== undefined) return redis;
 
-  const url = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
-  const token = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
+  const url = redisUrl();
+  const token = redisToken();
 
   if (!url || !token) {
     redis = null;
@@ -17,6 +37,10 @@ export function getRedis() {
 
   redis = new Redis({ url, token });
   return redis;
+}
+
+export function redisConfigured() {
+  return Boolean(redisUrl() && redisToken());
 }
 
 export async function redisGet<T>(key: string): Promise<T | null> {
