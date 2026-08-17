@@ -12,13 +12,21 @@ function distanceKm(lat1: number, lng1: number, lat2: number, lng2: number) {
 
 const STOP_WORDS = new Set(["kiem", "tra", "may", "dich", "vu", "va", "cho", "can", "lam"]);
 function normalize(value: string) {
-  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d").toLowerCase();
 }
 function serviceScore(serviceType: string, services?: string | null) {
   if (!serviceType) return 0;
   const haystack = normalize(services || "");
   const tokens = normalize(serviceType).split(/[^a-z0-9]+/).filter((token) => token.length >= 3 && !STOP_WORDS.has(token));
   return tokens.reduce((score, token) => score + (haystack.includes(token) ? 1 : 0), 0);
+}
+
+function isTechnicalDealer(dealer: { dealerCode: string; registrationType?: string | null; technicianCount?: number | null }) {
+  const registration = normalize(dealer.registrationType || "");
+  if (/commercial|thuong mai/.test(registration)) return false;
+  if (/service|dich vu|collaborator|cong tac|freelancer|ctv/.test(registration)) return true;
+  if (/ctv/.test(normalize(dealer.dealerCode))) return true;
+  return (dealer.technicianCount || 0) > 0;
 }
 
 export async function POST(request: NextRequest) {
@@ -36,12 +44,19 @@ export async function POST(request: NextRequest) {
 
   const dealers = await prisma.dealer.findMany({ where: { status: "APPROVED", lat: { not: null }, lng: { not: null } } });
   const shortlist = dealers
-    .map((dealer) => ({
-      ...dealer,
-      serviceMatchScore: serviceScore(serviceType, dealer.services),
-      distanceKm: Number(distanceKm(machine.lat!, machine.lng!, dealer.lat!, dealer.lng!).toFixed(2)),
-    }))
+    .filter(isTechnicalDealer)
+    .map((dealer) => {
+      const matchScore = serviceScore(serviceType, dealer.services);
+      return {
+        ...dealer,
+        serviceMatchScore: matchScore,
+        capabilityMatched: serviceType ? matchScore > 0 : true,
+        distanceKm: Number(distanceKm(machine.lat!, machine.lng!, dealer.lat!, dealer.lng!).toFixed(2)),
+      };
+    })
     .sort((a, b) => b.serviceMatchScore - a.serviceMatchScore || a.distanceKm - b.distanceKm)
-    .slice(0, limit);
+    .slice(0, limit)
+    .map((dealer, index) => ({ ...dealer, rank: index + 1 }));
+
   return NextResponse.json({ success: true, data: shortlist });
 }
