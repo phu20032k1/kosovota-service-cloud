@@ -85,6 +85,7 @@ export default function AdminMachineDetailPage() {
             </div>
             <div className="flex flex-wrap gap-2">
               <Link href="/admin/reports" className="btn-secondary"><Icon name="database" size={18}/> Danh sách máy</Link>
+              <Link href="/maintenance-plans" className="btn-secondary"><Icon name="clock" size={18}/> 4 bảng lịch thay lõi</Link>
               <Link href={`/qr/${encodeURIComponent(machine.id)}`} className="btn-secondary"><Icon name="qr" size={18}/> In QR</Link>
               <Link href={`/service-report/${encodeURIComponent(machine.id)}`} className="btn-primary px-4 py-3 font-bold text-white"><Icon name="wrench" size={18}/> Tạo báo cáo dịch vụ</Link>
             </div>
