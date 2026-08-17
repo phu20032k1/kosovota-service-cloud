@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { hasRole } from "@/lib/auth";
+import { protectServiceOrderCustomerData } from "@/lib/service-order-privacy";
 
 export async function GET(request: NextRequest) {
   const auth = await hasRole(request, ["DEALER", "CTV", "KTV"]);
@@ -24,7 +25,9 @@ export async function GET(request: NextRequest) {
     const completed = orders.filter((order) => order.status === "COMPLETED");
     const revenue = ["DEALER", "CTV"].includes(auth.user.role) ? completed.reduce((sum, order) => sum + (order.serviceFee || 0), 0) : 0;
     const paid = ["DEALER", "CTV"].includes(auth.user.role) ? completed.filter((order) => order.paymentStatus === "PAID").reduce((sum, order) => sum + (order.serviceFee || 0), 0) : 0;
-    return NextResponse.json({ success: true, dealer, data: orders, summary: { revenue, paid, pending: revenue - paid }, scope: auth.user.role });
+    const protectedOrders = orders.map((order) => protectServiceOrderCustomerData(order, auth.user.role));
+
+    return NextResponse.json({ success: true, dealer, data: protectedOrders, summary: { revenue, paid, pending: revenue - paid }, scope: auth.user.role });
   } catch (error) {
     console.error("agent orders failed", error);
     return NextResponse.json({ success: false, message: "Không tải được lệnh dịch vụ." }, { status: 500 });
