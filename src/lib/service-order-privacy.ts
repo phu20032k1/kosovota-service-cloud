@@ -6,15 +6,15 @@ type ProtectableOrder = {
   customerName?: string;
   customerPhone?: string;
   address?: string | null;
-  machine?: ({ customer?: unknown } & Record<string, unknown>) | null;
+  machine?: unknown;
 };
 
 export function protectServiceOrderCustomerData<T extends ProtectableOrder>(order: T, role: string): T {
   if (!FIELD_ROLES.has(role) || !LOCKED_STATUSES.has(order.status || "")) return order;
 
-  const machine = order.machine
+  const machine = order.machine && typeof order.machine === "object"
     ? {
-        ...order.machine,
+        ...(order.machine as Record<string, unknown>),
         customer: null,
         sharedPhones: null,
       }
