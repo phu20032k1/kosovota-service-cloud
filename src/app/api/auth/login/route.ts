@@ -5,13 +5,21 @@ import { hashPassword, verifyPassword } from "@/lib/password";
 import { createSessionToken } from "@/lib/session-token";
 import { SESSION_COOKIE } from "@/lib/auth";
 import { canRoleAccessPath, homeForRole, isInternalRole } from "@/lib/access-control";
-import { checkRateLimit } from "@/lib/rate-limit";
+import { checkDistributedRateLimit } from "@/lib/rate-limit";
 
 export async function POST(request: NextRequest) {
-  const rate = checkRateLimit(request, { namespace: "auth-login", limit: 12, windowMs: 10 * 60 * 1000 });
+  const rate = await checkDistributedRateLimit(request, {
+    namespace: "auth-login",
+    limit: 12,
+    windowMs: 10 * 60 * 1000,
+  });
   if (!rate.allowed) {
-    return NextResponse.json({ success: false, message: "Đăng nhập quá nhiều lần. Vui lòng thử lại sau." }, { status: 429, headers: { "Retry-After": String(rate.retryAfterSeconds) } });
+    return NextResponse.json(
+      { success: false, message: "Đăng nhập quá nhiều lần. Vui lòng thử lại sau." },
+      { status: 429, headers: { "Retry-After": String(rate.retryAfterSeconds) } },
+    );
   }
+
   try {
     const body = await request.json();
     const phone = normalizePhone(body.phone);
