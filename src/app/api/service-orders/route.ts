@@ -5,6 +5,7 @@ import { normalizePhone } from "@/lib/phone";
 import { createOrderCode } from "@/lib/order-code";
 import { queueServiceOrderCreatedNotifications } from "@/lib/notifications/events";
 import { databaseErrorMessage } from "@/lib/database-errors";
+import { protectServiceOrderCustomerData } from "@/lib/service-order-privacy";
 
 const ORDER_INCLUDE = {
   machine: { include: { customer: true } },
@@ -38,7 +39,8 @@ export async function GET(request: NextRequest) {
       orderBy: [{ dueDate: "asc" }, { createdAt: "desc" }],
     });
 
-    return NextResponse.json({ success: true, data: orders });
+    const data = orders.map((order) => protectServiceOrderCustomerData(order, auth.user.role));
+    return NextResponse.json({ success: true, data });
   } catch (error) {
     console.error("GET /api/service-orders failed", error);
     return NextResponse.json({ success: false, message: databaseErrorMessage(error, "Không tải được danh sách lệnh.") }, { status: 500 });
