@@ -1,7 +1,9 @@
 import type { Viewport } from "next";
 import "./globals.css";
 import "./admin-scroll.css";
+import "./ux-fixes.css";
 import KosovotaAiChat from "@/components/KosovotaAiChat";
+import GlobalDeleteGuard from "@/components/GlobalDeleteGuard";
 
 export const viewport: Viewport = {
   width: "device-width",
@@ -29,6 +31,7 @@ export default function RootLayout({
 
       <body className="min-h-full">
         {children}
+        <GlobalDeleteGuard />
         <KosovotaAiChat />
       </body>
     </html>
