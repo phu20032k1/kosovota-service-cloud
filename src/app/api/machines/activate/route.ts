@@ -1,12 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { hasRole } from "@/lib/auth";
 import { checkDistributedRateLimit } from "@/lib/rate-limit";
 
 export async function POST(request: NextRequest) {
+  const auth = await hasRole(request, ["DEALER", "CTV", "KTV"]);
+  if (!auth) {
+    return NextResponse.json(
+      { success: false, message: "Cần đăng nhập tài khoản Đại lý/CTV/KTV để kích hoạt máy." },
+      { status: 401 },
+    );
+  }
+
   const rate = await checkDistributedRateLimit(request, {
     namespace: "machine-activate",
     limit: 30,
     windowMs: 5 * 60 * 1000,
+    identifier: `${auth.user.id}:${auth.user.phone}`,
   });
   if (!rate.allowed) {
     return NextResponse.json(
