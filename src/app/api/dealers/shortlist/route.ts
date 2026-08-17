@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { hasRole } from "@/lib/auth";
-import { cachePart, getDealerCacheVersion, getRedis, redisGet, redisSet } from "@/lib/redis";
+import { cachePart, getRedis, redisGet, redisSet } from "@/lib/redis";
+import { getDealerCacheFingerprint } from "@/lib/dealer-cache";
 
 function distanceKm(lat1: number, lng1: number, lat2: number, lng2: number) {
   const radius = 6371;
@@ -30,8 +31,8 @@ function isTechnicalDealer(dealer: { dealerCode: string; registrationType?: stri
   return (dealer.technicianCount || 0) > 0;
 }
 
-function cacheKey(version: number, machineId: string, machineUpdatedAt: Date, serviceType: string, limit: number) {
-  return `kosovota:dealer-shortlist:v${version}:${machineId}:${machineUpdatedAt.getTime()}:${cachePart(serviceType)}:${limit}`;
+function cacheKey(fingerprint: string, machineId: string, machineUpdatedAt: Date, serviceType: string, limit: number) {
+  return `kosovota:dealer-shortlist:${fingerprint}:${machineId}:${machineUpdatedAt.getTime()}:${cachePart(serviceType)}:${limit}`;
 }
 
 export async function POST(request: NextRequest) {
@@ -60,11 +61,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, message: "Máy nằm ngoài phạm vi được phân công." }, { status: 403 });
   }
 
-  const version = await getDealerCacheVersion();
-  const key = cacheKey(version, machineId, machine.updatedAt, serviceType, limit);
+  const fingerprint = await getDealerCacheFingerprint();
+  const key = cacheKey(fingerprint, machineId, machine.updatedAt, serviceType, limit);
   const cached = await redisGet<unknown[]>(key);
   if (Array.isArray(cached)) {
-    return NextResponse.json({ success: true, data: cached, cache: "HIT", cacheVersion: version });
+    return NextResponse.json({ success: true, data: cached, cache: "HIT", cacheFingerprint: fingerprint });
   }
 
   const dealers = await prisma.dealer.findMany({
@@ -106,6 +107,6 @@ export async function POST(request: NextRequest) {
     success: true,
     data: shortlist,
     cache: getRedis() ? (cachedSuccessfully ? "MISS" : "ERROR") : "DISABLED",
-    cacheVersion: version,
+    cacheFingerprint: fingerprint,
   });
 }
