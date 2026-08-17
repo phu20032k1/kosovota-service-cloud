@@ -34,6 +34,7 @@
   },
   "dependencies": {
     "@prisma/client": "6.9.0",
+    "@upstash/redis": "^1.38.1",
     "dotenv": "17.2.3",
     "html5-qrcode": "^2.3.8",
     "leaflet": "^1.9.4",
