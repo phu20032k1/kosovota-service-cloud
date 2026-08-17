@@ -21,7 +21,6 @@ type Dealer = {
   registrationType?: string | null;
   lat?: number | null;
   lng?: number | null;
-  portraitPhoto?: string | null;
   storePhoto?: string | null;
   warehousePhoto?: string | null;
   status: string;
@@ -85,15 +84,17 @@ export default function DealerMapPage() {
   const [capability, setCapability] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [cacheState, setCacheState] = useState<string>("");
 
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      const response = await fetch("/api/dealers", { cache: "no-store" });
+      const response = await fetch("/api/dealers/map", { cache: "no-store" });
       const result = await response.json();
       if (!response.ok || !result.success) throw new Error(result.message || "Không tải được đại lý.");
-      setDealers((result.data || []).filter((dealer: Dealer) => dealer.status === "APPROVED"));
+      setDealers(result.data || []);
+      setCacheState(result.cache || "");
     } catch (value) {
       setError(value instanceof Error ? value.message : "Không tải được dữ liệu.");
     } finally {
@@ -205,6 +206,11 @@ export default function DealerMapPage() {
           </button>
         </div>
 
+        <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
+          <span>{filtered.length} đại lý phù hợp · {located.length} có GPS</span>
+          {cacheState && <span>Redis: {cacheState}</span>}
+        </div>
+
         <div className="grid gap-3 sm:grid-cols-3">
           {(Object.keys(META) as DealerType[]).map((key) => (
             <button
@@ -278,14 +284,13 @@ function DealerDetail({ dealer, onClose }: { dealer: Dealer; onClose: () => void
         <Info icon="star" label="Đánh giá" value={`${dealer.rating ?? 5}/5`} />
         <Info icon="wrench" label="Năng lực" value={dealer.services || "Không làm dịch vụ kỹ thuật"} />
       </div>
-      <div className="mt-5 grid grid-cols-3 gap-2">
+      <div className="mt-5 grid grid-cols-2 gap-2">
         {[
-          [dealer.portraitPhoto, "Chân dung"],
           [dealer.storePhoto, "Cửa hàng"],
           [dealer.warehousePhoto, "Kho"],
         ].map(([url, label]) =>
           url ? (
-            <a key={label} href={url as string} target="_blank" className="btn-secondary px-2 text-xs">
+            <a key={label} href={url as string} target="_blank" rel="noreferrer" className="btn-secondary px-2 text-xs">
               <Icon name="camera" size={15} />
               {label}
             </a>
