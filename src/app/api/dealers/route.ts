@@ -2,19 +2,15 @@ import { randomBytes } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { hasRole } from "@/lib/auth";
-import { normalizePhone, isValidVietnamPhone } from "@/lib/phone";
+import { normalizePhone } from "@/lib/phone";
 import { hashPassword } from "@/lib/password";
+import { POST as registerDealer } from "@/app/api/dealers/register/route";
 
 const DEALER_STATUSES = ["PENDING", "APPROVED", "REJECTED", "SUSPENDED"] as const;
 type DealerStatus = (typeof DEALER_STATUSES)[number];
 
 function text(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
-}
-
-function numberOrNull(value: unknown) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function uniqueStrings(values: unknown[]) {
@@ -52,101 +48,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  try {
-    const body = await request.json();
-    const extra = typeof body.extra === "object" && body.extra ? body.extra : {};
-    const representativeName = text(body.representativeName || body.name);
-    const companyName = text(extra.companyName || body.companyName);
-    const phone = normalizePhone(body.phone);
-    const province = text(body.province);
-    const registrationType = text(extra.registrationType || body.registrationType) || "DEALER";
-    const dealerCode = text(body.dealerCode || body.crmCustomerCode || body.crmCode).toUpperCase();
-    const services = Array.isArray(body.services)
-      ? body.services.map(text).filter(Boolean).join(", ")
-      : text(body.services);
-
-    if (!dealerCode) {
-      return NextResponse.json(
-        { success: false, message: "Bắt buộc nhập Mã khách hàng/Mã đại lý trên CRM. Hệ thống không tự sinh mã." },
-        { status: 400 },
-      );
-    }
-    if (!/^[A-Z0-9][A-Z0-9._/-]{2,39}$/.test(dealerCode)) {
-      return NextResponse.json(
-        { success: false, message: "Mã CRM chỉ gồm chữ in hoa, số, dấu chấm, gạch ngang, gạch dưới hoặc dấu /." },
-        { status: 400 },
-      );
-    }
-    if (!representativeName || !isValidVietnamPhone(phone) || !province || !services) {
-      return NextResponse.json(
-        { success: false, message: "Vui lòng nhập đủ mã CRM, họ tên, số điện thoại hợp lệ, tỉnh và năng lực dịch vụ." },
-        { status: 400 },
-      );
-    }
-    if (!text(extra.citizenId || body.citizenId) || !text(extra.bankAccount || body.bankAccount)) {
-      return NextResponse.json(
-        { success: false, message: "CCCD và số tài khoản là thông tin bắt buộc." },
-        { status: 400 },
-      );
-    }
-
-    const [codeExists, phoneExists] = await Promise.all([
-      prisma.dealer.findUnique({ where: { dealerCode }, select: { id: true } }),
-      prisma.dealer.findFirst({ where: { phone }, select: { dealerCode: true } }),
-    ]);
-    if (codeExists) return NextResponse.json({ success: false, message: `Mã CRM ${dealerCode} đã tồn tại.` }, { status: 409 });
-    if (phoneExists) return NextResponse.json({ success: false, message: `Số điện thoại đã thuộc hồ sơ ${phoneExists.dealerCode}.` }, { status: 409 });
-
-    const dealer = await prisma.dealer.create({
-      data: {
-        dealerCode,
-        name: companyName || representativeName,
-        phone,
-        province,
-        address: text(body.address) || null,
-        lat: numberOrNull(body.lat),
-        lng: numberOrNull(body.lng),
-        services,
-        technicianCount: numberOrNull(body.technicianCount),
-        status: "PENDING",
-        representativeName,
-        registrationType,
-        companyName: companyName || null,
-        birthDate: text(extra.birthDate || body.birthDate) ? new Date(text(extra.birthDate || body.birthDate)) : null,
-        locationType: text(extra.locationType || body.locationType) || null,
-        serviceArea: text(extra.serviceArea || body.serviceArea) || null,
-        taxCode: text(extra.taxCode || body.taxCode) || null,
-        citizenId: text(extra.citizenId || body.citizenId),
-        bankAccount: text(extra.bankAccount || body.bankAccount),
-        accountHolder: text(extra.accountHolder || body.accountHolder) || null,
-        bankName: text(extra.bankName || body.bankName) || null,
-        portraitPhoto: text(extra.portraitPhoto || body.portraitPhoto) || null,
-        storePhoto: text(extra.storePhoto || body.storePhoto) || null,
-        warehousePhoto: text(extra.warehousePhoto || body.warehousePhoto) || null,
-        videoName: text(extra.videoName || body.videoName) || null,
-      },
-    });
-
-    await prisma.notification.create({
-      data: {
-        phone,
-        channel: "SMS",
-        kind: "DEALER_REGISTRATION",
-        content: `KOSOVOTA đã nhận đăng ký ${dealer.dealerCode}. Mã hồ sơ đồng bộ theo CRM và đang chờ duyệt.`,
-      },
-    });
-
-    return NextResponse.json(
-      { success: true, message: `Đăng ký thành công. Mã hồ sơ CRM: ${dealer.dealerCode}.`, data: dealer },
-      { status: 201 },
-    );
-  } catch (error) {
-    console.error("POST /api/dealers failed", error);
-    return NextResponse.json(
-      { success: false, message: "Không tạo được hồ sơ. Kiểm tra mã CRM và số điện thoại chưa được sử dụng." },
-      { status: 500 },
-    );
-  }
+  return registerDealer(request);
 }
 
 export async function PATCH(request: NextRequest) {
