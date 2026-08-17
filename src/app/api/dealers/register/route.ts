@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { normalizePhone, isValidVietnamPhone } from "@/lib/phone";
+import { bumpDealerCacheVersion } from "@/lib/redis";
+import { checkDistributedRateLimit } from "@/lib/rate-limit";
 
 const REGISTRATION_TYPES = ["commercial", "service", "collaborator"] as const;
 type RegistrationType = (typeof REGISTRATION_TYPES)[number];
@@ -60,6 +62,18 @@ async function nextDealerCode(provinceCode: string, ward: string) {
 }
 
 export async function POST(request: NextRequest) {
+  const rate = await checkDistributedRateLimit(request, {
+    namespace: "dealer-register",
+    limit: 8,
+    windowMs: 15 * 60 * 1000,
+  });
+  if (!rate.allowed) {
+    return NextResponse.json(
+      { success: false, message: "Gửi đăng ký quá nhiều lần. Vui lòng thử lại sau." },
+      { status: 429, headers: { "Retry-After": String(rate.retryAfterSeconds) } },
+    );
+  }
+
   try {
     const body = await request.json();
     const extra = typeof body.extra === "object" && body.extra ? (body.extra as Record<string, unknown>) : {};
@@ -174,11 +188,21 @@ export async function POST(request: NextRequest) {
       },
     });
 
+    await bumpDealerCacheVersion();
+
     return NextResponse.json(
       {
         success: true,
         message: `Đăng ký thành công. Mã đại lý tự động: ${createdDealer.dealerCode}.`,
-        data: createdDealer,
+        data: {
+          id: createdDealer.id,
+          dealerCode: createdDealer.dealerCode,
+          name: createdDealer.name,
+          phone: createdDealer.phone,
+          province: createdDealer.province,
+          registrationType: createdDealer.registrationType,
+          status: createdDealer.status,
+        },
       },
       { status: 201 },
     );
