@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { hasRole } from "@/lib/auth";
-import { getRedis } from "@/lib/redis";
+import { cachePart, getDealerCacheVersion, getRedis, redisGet, redisSet } from "@/lib/redis";
 
 function distanceKm(lat1: number, lng1: number, lat2: number, lng2: number) {
   const radius = 6371;
@@ -30,9 +30,8 @@ function isTechnicalDealer(dealer: { dealerCode: string; registrationType?: stri
   return (dealer.technicianCount || 0) > 0;
 }
 
-function cacheKey(machineId: string, serviceType: string, limit: number) {
-  const service = normalize(serviceType).replace(/[^a-z0-9]+/g, "-").slice(0, 80) || "all";
-  return `kosovota:dealer-shortlist:${machineId}:${service}:${limit}`;
+function cacheKey(version: number, machineId: string, machineUpdatedAt: Date, serviceType: string, limit: number) {
+  return `kosovota:dealer-shortlist:v${version}:${machineId}:${machineUpdatedAt.getTime()}:${cachePart(serviceType)}:${limit}`;
 }
 
 export async function POST(request: NextRequest) {
@@ -48,7 +47,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, message: "Thiếu ID máy." }, { status: 400 });
   }
 
-  const machine = await prisma.machine.findUnique({ where: { id: machineId } });
+  const machine = await prisma.machine.findUnique({
+    where: { id: machineId },
+    select: { id: true, lat: true, lng: true, provinceCode: true, updatedAt: true },
+  });
   if (!machine || machine.lat === null || machine.lng === null) {
     return NextResponse.json({ success: false, message: "Máy chưa có tọa độ GPS." }, { status: 404 });
   }
@@ -58,21 +60,32 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, message: "Máy nằm ngoài phạm vi được phân công." }, { status: 403 });
   }
 
-  const redis = getRedis();
-  const key = cacheKey(machineId, serviceType, limit);
-
-  if (redis) {
-    try {
-      const cached = await redis.get<unknown[]>(key);
-      if (Array.isArray(cached)) {
-        return NextResponse.json({ success: true, data: cached, cache: "HIT" });
-      }
-    } catch (error) {
-      console.warn("Redis shortlist read failed", error);
-    }
+  const version = await getDealerCacheVersion();
+  const key = cacheKey(version, machineId, machine.updatedAt, serviceType, limit);
+  const cached = await redisGet<unknown[]>(key);
+  if (Array.isArray(cached)) {
+    return NextResponse.json({ success: true, data: cached, cache: "HIT", cacheVersion: version });
   }
 
-  const dealers = await prisma.dealer.findMany({ where: { status: "APPROVED", lat: { not: null }, lng: { not: null } } });
+  const dealers = await prisma.dealer.findMany({
+    where: { status: "APPROVED", lat: { not: null }, lng: { not: null } },
+    select: {
+      id: true,
+      dealerCode: true,
+      name: true,
+      phone: true,
+      province: true,
+      address: true,
+      lat: true,
+      lng: true,
+      services: true,
+      technicianCount: true,
+      rating: true,
+      registrationType: true,
+      status: true,
+    },
+  });
+
   const shortlist = dealers
     .filter(isTechnicalDealer)
     .map((dealer) => {
@@ -88,13 +101,11 @@ export async function POST(request: NextRequest) {
     .slice(0, limit)
     .map((dealer, index) => ({ ...dealer, rank: index + 1 }));
 
-  if (redis) {
-    try {
-      await redis.set(key, shortlist, { ex: 60 });
-    } catch (error) {
-      console.warn("Redis shortlist write failed", error);
-    }
-  }
-
-  return NextResponse.json({ success: true, data: shortlist, cache: redis ? "MISS" : "DISABLED" });
+  const cachedSuccessfully = await redisSet(key, shortlist, 60);
+  return NextResponse.json({
+    success: true,
+    data: shortlist,
+    cache: getRedis() ? (cachedSuccessfully ? "MISS" : "ERROR") : "DISABLED",
+    cacheVersion: version,
+  });
 }
