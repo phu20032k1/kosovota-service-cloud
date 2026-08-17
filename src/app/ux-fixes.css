@@ -1,0 +1,32 @@
+/* Desktop density: the old UI felt too zoomed-in on 1366px+ screens. */
+@media (min-width: 1280px) {
+  html { font-size: 15px; }
+}
+
+/* Only actual interactive elements should visually behave as clickable. */
+a, button, [role="button"], input[type="checkbox"], input[type="radio"], select { cursor: pointer; }
+button:disabled, [aria-disabled="true"] { cursor: not-allowed; }
+
+/* Make linked media obviously inspectable without applying fake hover to static cards. */
+a:has(img), button:has(img) { display: inline-block; }
+a:has(img) img, button:has(img) img {
+  transition: transform .18s ease, box-shadow .18s ease, opacity .18s ease;
+}
+a:has(img):hover img, button:has(img):hover img {
+  transform: translateY(-1px) scale(1.01);
+  box-shadow: 0 12px 30px rgba(15, 23, 42, .16);
+}
+
+/* Reduce misleading hover effects on static summary blocks. */
+.metric-card:not(a):not(button),
+.surface-card:not(a):not(button) {
+  cursor: default;
+}
+
+/* Keep dense admin pages usable without feeling over-magnified. */
+@media (min-width: 1280px) {
+  .page-container,
+  .ops-header-inner {
+    max-width: 1540px;
+  }
+}
