@@ -32,6 +32,7 @@ export const PROTECTED_ROUTE_RULES: Array<{ prefix: string; roles: InternalRole[
   { prefix: "/customer-map", roles: ["ADMIN", "CSKH"] },
   { prefix: "/dealer-map", roles: ["ADMIN", "CSKH"] },
   { prefix: "/operations-map", roles: ["ADMIN", "CSKH"] },
+  { prefix: "/maintenance-plans", roles: ["ADMIN", "CSKH"] },
 ];
 
 export function isInternalRole(value: unknown): value is InternalRole {
