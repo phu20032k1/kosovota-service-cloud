@@ -22,6 +22,7 @@ const ADMIN_NAV: NavItem[] = [
   { href: "/operations-map", label: "Điều phối", icon: "map" },
   { href: "/customer-map", label: "Bản đồ máy", icon: "droplet" },
   { href: "/dealer-map", label: "Bản đồ đại lý", icon: "map" },
+  { href: "/maintenance-plans", label: "Lịch thay lõi", icon: "calendar" },
   { href: "/admin/reports", label: "Dữ liệu", icon: "database" },
   { href: "/admin/notifications", label: "Thông báo", icon: "bell" },
   { href: "/scan", label: "Quét QR", icon: "qr" },
@@ -36,6 +37,7 @@ const CSKH_NAV: NavItem[] = [
   { href: "/operations-map", label: "Điều phối", icon: "map" },
   { href: "/customer-map", label: "Bản đồ máy", icon: "droplet" },
   { href: "/dealer-map", label: "Bản đồ đại lý", icon: "store" },
+  { href: "/maintenance-plans", label: "Lịch thay lõi", icon: "calendar" },
   { href: "/scan", label: "Quét QR", icon: "qr" },
 ];
 
