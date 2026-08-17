@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { hasRole } from "@/lib/auth";
 import { queueServiceStatusEmail } from "@/lib/notifications/events";
 import { databaseErrorMessage } from "@/lib/database-errors";
+import { protectServiceOrderCustomerData } from "@/lib/service-order-privacy";
 
 type Params = { params: Promise<{ id: string }> };
 const ALLOWED_STATUSES = ["NEW", "CALLED_NO_ANSWER", "CUSTOMER_ACCEPTED", "CUSTOMER_SELF_SERVICE", "CUSTOMER_REJECTED", "RESCHEDULED", "COMPLAINT", "ASSIGNED", "ACCEPTED", "IN_PROGRESS", "COMPLETED", "CANCELLED"];
@@ -23,7 +24,8 @@ export async function GET(request: NextRequest, { params }: Params) {
     const result = await getAuthorizedOrder(request, id);
     if (!result.auth) return NextResponse.json({ success: false, message: "Chưa được cấp quyền." }, { status: 401 });
     if (!result.order) return NextResponse.json({ success: false, message: "Không tìm thấy lệnh dịch vụ." }, { status: 404 });
-    return NextResponse.json({ success: true, data: result.order });
+    const data = protectServiceOrderCustomerData(result.order, result.auth.user.role);
+    return NextResponse.json({ success: true, data });
   } catch (error) {
     console.error("GET /api/service-orders/[id] failed", error);
     return NextResponse.json({ success: false, message: databaseErrorMessage(error, "Không tải được chi tiết lệnh dịch vụ.") }, { status: 500 });
@@ -55,7 +57,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
     if (status === "CUSTOMER_REJECTED" && current.maintenanceScheduleId) await prisma.maintenanceSchedule.update({ where: { id: current.maintenanceScheduleId }, data: { status: "DISABLED" } });
     if (status === "CUSTOMER_SELF_SERVICE" && current.maintenanceScheduleId) await prisma.maintenanceSchedule.update({ where: { id: current.maintenanceScheduleId }, data: { status: "SELF_SERVICE" } });
     if (status && status !== current.status && order.machine.customer) await queueServiceStatusEmail({ customer: order.machine.customer, orderCode: order.orderCode, machineId: order.machineId, status, serviceType: order.serviceType });
-    return NextResponse.json({ success: true, message: "Đã cập nhật lệnh dịch vụ.", data: order });
+    return NextResponse.json({ success: true, message: "Đã cập nhật lệnh dịch vụ.", data: protectServiceOrderCustomerData(order, auth.user.role) });
   } catch (error) {
     console.error("PUT /api/service-orders/[id] failed", error);
     return NextResponse.json({ success: false, message: databaseErrorMessage(error, "Không cập nhật được lệnh dịch vụ.") }, { status: 500 });
