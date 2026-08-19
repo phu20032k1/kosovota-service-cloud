@@ -6,6 +6,12 @@ export function normalizePhone(phone: string): string {
     return "0" + digits.slice(2);
   }
 
+  // Excel thường tự đổi 0912345678 thành số 912345678 và làm mất số 0 đầu.
+  // Chỉ khôi phục cho đầu số di động Việt Nam hợp lệ để không biến mọi chuỗi 9 số thành SĐT.
+  if (/^[35789]\d{8}$/.test(digits)) {
+    return `0${digits}`;
+  }
+
   return digits;
 }
 
