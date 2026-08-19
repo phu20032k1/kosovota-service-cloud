@@ -61,6 +61,7 @@ type GoogleMapsGlobal = {
 type MapTilerStyleLayer = { id: string; type?: string };
 type MapTilerMap = {
   remove: () => void;
+  resize: () => void;
   on: (event: string, fn: () => void) => void;
   getStyle: () => { layers?: MapTilerStyleLayer[] };
   getFilter: (layerId: string) => unknown;
@@ -92,7 +93,7 @@ declare global {
 
 const VIETNAM_CENTER = { lat: 16.3, lng: 106.8 };
 const VIETNAM_ZOOM = 5;
-const VIETNAM_MIN_ZOOM = 4;
+const VIETNAM_MIN_ZOOM = 3;
 const VIETNAM_BOUNDS = { north: 23.55, south: 8.18, west: 102.1, east: 109.7 };
 const VIETNAM_BOUNDS_POINTS: [number, number][] = [
   [VIETNAM_BOUNDS.south, VIETNAM_BOUNDS.west],
@@ -255,6 +256,7 @@ export default function InteractiveMap({
 
   useEffect(() => {
     let cancelled = false;
+    let viewportTimer: number | null = null;
 
     async function initialize() {
       if (!containerRef.current) return;
@@ -273,7 +275,6 @@ export default function InteractiveMap({
             language: "vi",
             minZoom: VIETNAM_MIN_ZOOM,
             scrollZoom: true,
-            maxBounds: [[VIETNAM_BOUNDS.west, VIETNAM_BOUNDS.south], [VIETNAM_BOUNDS.east, VIETNAM_BOUNDS.north]],
             attributionControl: true,
           });
           mapTilerMapRef.current = map;
@@ -281,11 +282,15 @@ export default function InteractiveMap({
             if (cancelled) return;
             map.setLanguage("vi");
             hideSensitiveMapLabels(map);
-            map.fitBounds(
-              [[VIETNAM_BOUNDS.west, VIETNAM_BOUNDS.south], [VIETNAM_BOUNDS.east, VIETNAM_BOUNDS.north]],
-              { padding: 18 },
-            );
-            setReady(true);
+            viewportTimer = window.setTimeout(() => {
+              if (cancelled) return;
+              map.resize();
+              map.fitBounds(
+                [[VIETNAM_BOUNDS.west, VIETNAM_BOUNDS.south], [VIETNAM_BOUNDS.east, VIETNAM_BOUNDS.north]],
+                { padding: 24 },
+              );
+              setReady(true);
+            }, 0);
           });
           return;
         }
@@ -301,7 +306,6 @@ export default function InteractiveMap({
             fullscreenControl: true,
             clickableIcons: false,
             gestureHandling: "greedy",
-            restriction: { latLngBounds: VIETNAM_BOUNDS, strictBounds: false },
             minZoom: VIETNAM_MIN_ZOOM,
             styles: [
               { featureType: "poi", elementType: "labels", stylers: [{ visibility: "off" }] },
@@ -309,14 +313,17 @@ export default function InteractiveMap({
             ],
           });
           googleMapRef.current = map;
-          map.fitBounds(
-            new maps.LatLngBounds(
-              { lat: VIETNAM_BOUNDS.south, lng: VIETNAM_BOUNDS.west },
-              { lat: VIETNAM_BOUNDS.north, lng: VIETNAM_BOUNDS.east },
-            ),
-            18,
-          );
-          setReady(true);
+          viewportTimer = window.setTimeout(() => {
+            if (cancelled) return;
+            map.fitBounds(
+              new maps.LatLngBounds(
+                { lat: VIETNAM_BOUNDS.south, lng: VIETNAM_BOUNDS.west },
+                { lat: VIETNAM_BOUNDS.north, lng: VIETNAM_BOUNDS.east },
+              ),
+              24,
+            );
+            setReady(true);
+          }, 0);
           return;
         }
 
@@ -328,17 +335,18 @@ export default function InteractiveMap({
           preferCanvas: true,
           minZoom: VIETNAM_MIN_ZOOM,
           scrollWheelZoom: true,
-          maxBounds: VIETNAM_BOUNDS_POINTS,
-          maxBoundsViscosity: 0.95,
         });
         L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
           maxZoom: 20,
           attribution: '&copy; OpenStreetMap contributors',
         }).addTo(map);
-        map.fitBounds(L.latLngBounds(VIETNAM_BOUNDS_POINTS), { padding: [18, 18] });
         leafletMapRef.current = map;
-        window.setTimeout(() => map.invalidateSize(), 100);
-        setReady(true);
+        viewportTimer = window.setTimeout(() => {
+          if (cancelled) return;
+          map.invalidateSize();
+          map.fitBounds(L.latLngBounds(VIETNAM_BOUNDS_POINTS), { padding: [24, 24] });
+          setReady(true);
+        }, 0);
       } catch (value) {
         if (!cancelled) setError(value instanceof Error ? value.message : "Không tải được bản đồ.");
       }
@@ -347,6 +355,7 @@ export default function InteractiveMap({
     void initialize();
     return () => {
       cancelled = true;
+      if (viewportTimer !== null) window.clearTimeout(viewportTimer);
       mapTilerMarkersRef.current.forEach((marker) => marker.remove());
       mapTilerMarkersRef.current = [];
       mapTilerMapRef.current?.remove();
@@ -417,7 +426,7 @@ export default function InteractiveMap({
           title: marker.title,
         })
           .bindTooltip(
-            `<strong>${escapeHtml(marker.title)}</strong>${marker.subtitle ? `<br/><span>${escapeHtml(marker.subtitle)}</span>` : ""}`,
+            `<strong>${escapeHtml(marker.title)}</strong>${marker.subtitle ? `<br/><span>${escapeHtml(marker.subtitle}</span>` : ""}`,
             { direction: "top", offset: [0, -40] },
           )
           .on("click", () => onSelect?.(marker.id))
