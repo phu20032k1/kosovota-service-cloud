@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { normalizePhone, isValidVietnamPhone } from "@/lib/phone";
 import { bumpDealerCacheVersion } from "@/lib/redis";
 import { checkDistributedRateLimit } from "@/lib/rate-limit";
+import { geocodeAddress } from "@/lib/maps/geocode";
 
 const REGISTRATION_TYPES = ["commercial", "service", "collaborator"] as const;
 type RegistrationType = (typeof REGISTRATION_TYPES)[number];
@@ -13,8 +14,32 @@ function text(value: unknown) {
 }
 
 function numberOrNull(value: unknown) {
-  const parsed = Number(value);
+  if (value === null || value === undefined) return null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+  const parsed = Number(raw.replace(",", "."));
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function hasUsableCoordinates(lat: number | null, lng: number | null) {
+  if (lat === null || lng === null) return false;
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return false;
+  return !(Math.abs(lat) < 0.000001 && Math.abs(lng) < 0.000001);
+}
+
+async function coordinatesForAddress(address: string, lat: number | null, lng: number | null) {
+  if (hasUsableCoordinates(lat, lng)) return { lat, lng, autoFilled: false };
+  if (!address || process.env.GEOCODING_ENABLED !== "true") return { lat: null, lng: null, autoFilled: false };
+  try {
+    const location = await geocodeAddress(address);
+    if (location && hasUsableCoordinates(location.lat, location.lng)) {
+      return { lat: location.lat, lng: location.lng, autoFilled: true };
+    }
+  } catch (error) {
+    console.warn("Không tự lấy được GPS khi đăng ký đại lý:", error);
+  }
+  return { lat: null, lng: null, autoFilled: false };
 }
 
 function ascii(value: string) {
@@ -83,6 +108,7 @@ export async function POST(request: NextRequest) {
     const province = text(body.province);
     const provinceCode = text(body.provinceCode || body.province);
     const ward = text(body.ward);
+    const address = text(body.address);
     const registrationTypeRaw = text(extra.registrationType || body.registrationType).toLowerCase();
     const registrationType: RegistrationType = isRegistrationType(registrationTypeRaw) ? registrationTypeRaw : "service";
     const services = Array.isArray(body.services)
@@ -118,6 +144,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const coordinates = await coordinatesForAddress(address, numberOrNull(body.lat), numberOrNull(body.lng));
     const { prefix, nextSequence } = await nextDealerCode(provinceCode, ward);
     let createdDealer = null;
 
@@ -137,9 +164,9 @@ export async function POST(request: NextRequest) {
             name: companyName || representativeName,
             phone,
             province,
-            address: text(body.address) || null,
-            lat: numberOrNull(body.lat),
-            lng: numberOrNull(body.lng),
+            address: address || null,
+            lat: coordinates.lat,
+            lng: coordinates.lng,
             services: registrationType === "commercial" ? null : services,
             technicianCount:
               registrationType === "commercial"
@@ -193,7 +220,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       {
         success: true,
-        message: `Đăng ký thành công. Mã đại lý tự động: ${createdDealer.dealerCode}.`,
+        message: coordinates.autoFilled
+          ? `Đăng ký thành công. Mã đại lý tự động: ${createdDealer.dealerCode}. GPS đã được lấy từ địa chỉ.`
+          : `Đăng ký thành công. Mã đại lý tự động: ${createdDealer.dealerCode}.`,
         data: {
           id: createdDealer.id,
           dealerCode: createdDealer.dealerCode,
@@ -202,6 +231,8 @@ export async function POST(request: NextRequest) {
           province: createdDealer.province,
           registrationType: createdDealer.registrationType,
           status: createdDealer.status,
+          lat: createdDealer.lat,
+          lng: createdDealer.lng,
         },
       },
       { status: 201 },
