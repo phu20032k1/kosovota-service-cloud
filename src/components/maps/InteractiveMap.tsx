@@ -26,7 +26,6 @@ type InteractiveMapProps = {
 type LeafletMap = {
   remove: () => void;
   fitBounds: (bounds: unknown, options?: unknown) => void;
-  setView: (center: [number, number], zoom: number) => void;
   invalidateSize: () => void;
 };
 
@@ -47,8 +46,6 @@ type LeafletGlobal = {
 
 type GoogleMapInstance = {
   fitBounds: (bounds: unknown, padding?: number) => void;
-  setCenter: (center: { lat: number; lng: number }) => void;
-  setZoom: (zoom: number) => void;
 };
 
 type GoogleMarkerInstance = { setMap: (map: null) => void };
@@ -56,7 +53,7 @@ type GoogleMarkerInstance = { setMap: (map: null) => void };
 type GoogleMapsGlobal = {
   Map: new (element: HTMLElement, options: unknown) => GoogleMapInstance;
   Marker: new (options: unknown) => GoogleMarkerInstance & { addListener: (event: string, fn: () => void) => void };
-  LatLngBounds: new (...args: unknown[]) => { extend: (point: { lat: number; lng: number }) => void };
+  LatLngBounds: new (...args: unknown[]) => unknown;
   Size: new (width: number, height: number) => unknown;
   Point: new (x: number, y: number) => unknown;
 };
@@ -64,14 +61,12 @@ type GoogleMapsGlobal = {
 type MapTilerStyleLayer = { id: string; type?: string };
 type MapTilerMap = {
   remove: () => void;
-  on: (event: string, fn: (event?: unknown) => void) => void;
+  on: (event: string, fn: () => void) => void;
   getStyle: () => { layers?: MapTilerStyleLayer[] };
   getFilter: (layerId: string) => unknown;
   setFilter: (layerId: string, filter: unknown) => void;
   setLanguage: (language: string) => void;
   fitBounds: (bounds: [[number, number], [number, number]], options?: { padding?: number; maxZoom?: number }) => void;
-  setCenter: (center: [number, number]) => void;
-  setZoom: (zoom: number) => void;
 };
 
 type MapTilerMarkerInstance = {
@@ -96,7 +91,8 @@ declare global {
 }
 
 const VIETNAM_CENTER = { lat: 16.3, lng: 106.8 };
-const VIETNAM_ZOOM = 6;
+const VIETNAM_ZOOM = 5;
+const VIETNAM_MIN_ZOOM = 4;
 const VIETNAM_BOUNDS = { north: 23.55, south: 8.18, west: 102.1, east: 109.7 };
 const VIETNAM_BOUNDS_POINTS: [number, number][] = [
   [VIETNAM_BOUNDS.south, VIETNAM_BOUNDS.west],
@@ -235,7 +231,13 @@ function hideSensitiveMapLabels(map: MapTilerMap) {
   }
 }
 
-export default function InteractiveMap({ markers, activeId, onSelect, className = "", height = 650, center = VIETNAM_CENTER, zoom = VIETNAM_ZOOM }: InteractiveMapProps) {
+export default function InteractiveMap({
+  markers,
+  activeId,
+  onSelect,
+  className = "",
+  height = 650,
+}: InteractiveMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const leafletMapRef = useRef<LeafletMap | null>(null);
   const leafletMarkersRef = useRef<LeafletMarker[]>([]);
@@ -243,18 +245,17 @@ export default function InteractiveMap({ markers, activeId, onSelect, className 
   const googleMarkersRef = useRef<GoogleMarkerInstance[]>([]);
   const mapTilerMapRef = useRef<MapTilerMap | null>(null);
   const mapTilerMarkersRef = useRef<MapTilerMarkerInstance[]>([]);
-  const initialViewportAppliedRef = useRef(false);
   const [error, setError] = useState("");
   const [ready, setReady] = useState(false);
   const provider = (process.env.NEXT_PUBLIC_MAP_PROVIDER || "osm").toLowerCase();
   const googleKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || "";
   const maptilerKey = process.env.NEXT_PUBLIC_MAPTILER_KEY || "";
   const maptilerStyle = process.env.NEXT_PUBLIC_MAPTILER_STYLE_URL || "";
-  const normalizedMarkers = useMemo(() => markers.filter((m) => Number.isFinite(m.lat) && Number.isFinite(m.lng)), [markers]);
+  const normalizedMarkers = useMemo(() => markers.filter((marker) => Number.isFinite(marker.lat) && Number.isFinite(marker.lng)), [markers]);
 
   useEffect(() => {
     let cancelled = false;
-    initialViewportAppliedRef.current = false;
+
     async function initialize() {
       if (!containerRef.current) return;
       setError("");
@@ -267,10 +268,10 @@ export default function InteractiveMap({ markers, activeId, onSelect, className 
           const map = new sdk.Map({
             container: containerRef.current,
             style: maptilerStyle || sdk.MapStyle.STREETS,
-            center: [center.lng, center.lat],
-            zoom,
+            center: [VIETNAM_CENTER.lng, VIETNAM_CENTER.lat],
+            zoom: VIETNAM_ZOOM,
             language: "vi",
-            minZoom: 5,
+            minZoom: VIETNAM_MIN_ZOOM,
             scrollZoom: true,
             maxBounds: [[VIETNAM_BOUNDS.west, VIETNAM_BOUNDS.south], [VIETNAM_BOUNDS.east, VIETNAM_BOUNDS.north]],
             attributionControl: true,
@@ -280,8 +281,10 @@ export default function InteractiveMap({ markers, activeId, onSelect, className 
             if (cancelled) return;
             map.setLanguage("vi");
             hideSensitiveMapLabels(map);
-            map.fitBounds([[VIETNAM_BOUNDS.west, VIETNAM_BOUNDS.south], [VIETNAM_BOUNDS.east, VIETNAM_BOUNDS.north]], { padding: 36, maxZoom: VIETNAM_ZOOM });
-            initialViewportAppliedRef.current = true;
+            map.fitBounds(
+              [[VIETNAM_BOUNDS.west, VIETNAM_BOUNDS.south], [VIETNAM_BOUNDS.east, VIETNAM_BOUNDS.north]],
+              { padding: 18 },
+            );
             setReady(true);
           });
           return;
@@ -291,40 +294,56 @@ export default function InteractiveMap({ markers, activeId, onSelect, className 
           const maps = await loadGoogleMaps(googleKey);
           if (cancelled || !containerRef.current) return;
           const map = new maps.Map(containerRef.current, {
-            center: { lat: center.lat, lng: center.lng },
-            zoom,
+            center: VIETNAM_CENTER,
+            zoom: VIETNAM_ZOOM,
             mapTypeControl: false,
             streetViewControl: false,
             fullscreenControl: true,
             clickableIcons: false,
             gestureHandling: "greedy",
             restriction: { latLngBounds: VIETNAM_BOUNDS, strictBounds: false },
-            minZoom: 5,
+            minZoom: VIETNAM_MIN_ZOOM,
             styles: [
               { featureType: "poi", elementType: "labels", stylers: [{ visibility: "off" }] },
               { featureType: "transit", elementType: "labels", stylers: [{ visibility: "off" }] },
             ],
           });
           googleMapRef.current = map;
-          map.fitBounds(new maps.LatLngBounds({ lat: VIETNAM_BOUNDS.south, lng: VIETNAM_BOUNDS.west }, { lat: VIETNAM_BOUNDS.north, lng: VIETNAM_BOUNDS.east }), 36);
-          initialViewportAppliedRef.current = true;
+          map.fitBounds(
+            new maps.LatLngBounds(
+              { lat: VIETNAM_BOUNDS.south, lng: VIETNAM_BOUNDS.west },
+              { lat: VIETNAM_BOUNDS.north, lng: VIETNAM_BOUNDS.east },
+            ),
+            18,
+          );
           setReady(true);
           return;
         }
 
         const L = await loadLeaflet();
         if (cancelled || !containerRef.current) return;
-        const map = L.map(containerRef.current, { zoomControl: true, attributionControl: true, preferCanvas: true, minZoom: 5, scrollWheelZoom: true, maxBounds: VIETNAM_BOUNDS_POINTS, maxBoundsViscosity: 0.95 });
-        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 20, attribution: '&copy; OpenStreetMap contributors' }).addTo(map);
-        map.fitBounds(L.latLngBounds(VIETNAM_BOUNDS_POINTS), { padding: [36, 36], maxZoom: VIETNAM_ZOOM });
+        const map = L.map(containerRef.current, {
+          zoomControl: true,
+          attributionControl: true,
+          preferCanvas: true,
+          minZoom: VIETNAM_MIN_ZOOM,
+          scrollWheelZoom: true,
+          maxBounds: VIETNAM_BOUNDS_POINTS,
+          maxBoundsViscosity: 0.95,
+        });
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+          maxZoom: 20,
+          attribution: '&copy; OpenStreetMap contributors',
+        }).addTo(map);
+        map.fitBounds(L.latLngBounds(VIETNAM_BOUNDS_POINTS), { padding: [18, 18] });
         leafletMapRef.current = map;
-        initialViewportAppliedRef.current = true;
         window.setTimeout(() => map.invalidateSize(), 100);
         setReady(true);
       } catch (value) {
         if (!cancelled) setError(value instanceof Error ? value.message : "Không tải được bản đồ.");
       }
     }
+
     void initialize();
     return () => {
       cancelled = true;
@@ -340,25 +359,21 @@ export default function InteractiveMap({ markers, activeId, onSelect, className 
       googleMarkersRef.current = [];
       googleMapRef.current = null;
     };
-  }, [provider, googleKey, maptilerKey, maptilerStyle, center.lat, center.lng, zoom]);
+  }, [provider, googleKey, maptilerKey, maptilerStyle]);
 
   useEffect(() => {
     if (!ready) return;
-    const activeMarker = normalizedMarkers.find((marker) => marker.id === activeId) || null;
 
     if (mapTilerMapRef.current && window.maptilersdk) {
-      const map = mapTilerMapRef.current;
       const sdk = window.maptilersdk;
       mapTilerMarkersRef.current.forEach((marker) => marker.remove());
       mapTilerMarkersRef.current = normalizedMarkers.map((marker) => {
         const element = createMapTilerMarkerElement(marker, marker.id === activeId);
         element.addEventListener("click", () => onSelect?.(marker.id));
-        return new sdk.Marker({ element, anchor: "bottom" }).setLngLat([marker.lng, marker.lat]).addTo(map);
+        return new sdk.Marker({ element, anchor: "bottom" })
+          .setLngLat([marker.lng, marker.lat])
+          .addTo(mapTilerMapRef.current!);
       });
-      if (activeMarker) {
-        map.setCenter([activeMarker.lng, activeMarker.lat]);
-        map.setZoom(15);
-      }
       return;
     }
 
@@ -371,16 +386,16 @@ export default function InteractiveMap({ markers, activeId, onSelect, className 
           map: googleMapRef.current,
           position: { lat: marker.lat, lng: marker.lng },
           title: marker.title,
-          icon: { url: markerSvg(marker, active), scaledSize: new maps.Size(active ? 56 : 44, active ? 65 : 52), anchor: new maps.Point(active ? 28 : 22, active ? 60 : 48) },
+          icon: {
+            url: markerSvg(marker, active),
+            scaledSize: new maps.Size(active ? 56 : 44, active ? 65 : 52),
+            anchor: new maps.Point(active ? 28 : 22, active ? 60 : 48),
+          },
           optimized: true,
         });
         instance.addListener("click", () => onSelect?.(marker.id));
         return instance;
       });
-      if (activeMarker) {
-        googleMapRef.current.setCenter({ lat: activeMarker.lat, lng: activeMarker.lng });
-        googleMapRef.current.setZoom(15);
-      }
       return;
     }
 
@@ -392,23 +407,51 @@ export default function InteractiveMap({ markers, activeId, onSelect, className 
         const glyph = markerGlyph(marker.glyph);
         const active = marker.id === activeId;
         const html = `<div class="kosovota-map-marker ${active ? "is-active" : ""}" style="--marker-color:${color}"><span>${glyph}</span></div>`;
-        return L.marker([marker.lat, marker.lng], { icon: L.divIcon({ className: "kosovota-map-marker-wrap", html, iconSize: [active ? 52 : 44, active ? 60 : 52], iconAnchor: [active ? 26 : 22, active ? 57 : 49] }), title: marker.title })
-          .bindTooltip(`<strong>${escapeHtml(marker.title)}</strong>${marker.subtitle ? `<br/><span>${escapeHtml(marker.subtitle)}</span>` : ""}`, { direction: "top", offset: [0, -40] })
+        return L.marker([marker.lat, marker.lng], {
+          icon: L.divIcon({
+            className: "kosovota-map-marker-wrap",
+            html,
+            iconSize: [active ? 52 : 44, active ? 60 : 52],
+            iconAnchor: [active ? 26 : 22, active ? 57 : 49],
+          }),
+          title: marker.title,
+        })
+          .bindTooltip(
+            `<strong>${escapeHtml(marker.title)}</strong>${marker.subtitle ? `<br/><span>${escapeHtml(marker.subtitle)}</span>` : ""}`,
+            { direction: "top", offset: [0, -40] },
+          )
           .on("click", () => onSelect?.(marker.id))
           .addTo(leafletMapRef.current!);
       });
-      if (activeMarker) leafletMapRef.current.setView([activeMarker.lat, activeMarker.lng], 15);
     }
   }, [normalizedMarkers, activeId, onSelect, ready]);
 
-  const providerLabel = maptilerKey ? "MapTiler · Tiếng Việt" : provider === "google" && googleKey ? "Google Maps" : "OpenStreetMap";
+  const providerLabel = maptilerKey
+    ? "MapTiler · Tiếng Việt"
+    : provider === "google" && googleKey
+      ? "Google Maps"
+      : "OpenStreetMap";
 
   return (
     <div className={`map-frame ${className}`} style={{ height }}>
       <div ref={containerRef} className="h-full w-full" aria-label="Bản đồ KOSOVOTA" />
-      {!ready && !error && <div className="map-overlay"><span className="animate-spin"><Icon name="refresh" size={22}/></span><span>Đang tải bản đồ...</span></div>}
-      {error && <div className="map-overlay map-error"><Icon name="alert" size={24}/><strong>{error}</strong><span>Kiểm tra Internet hoặc khóa API trong Environment Variables.</span></div>}
-      <div className="map-provider-badge"><Icon name="map" size={14}/><span>Việt Nam · {providerLabel}</span></div>
+      {!ready && !error && (
+        <div className="map-overlay">
+          <span className="animate-spin"><Icon name="refresh" size={22} /></span>
+          <span>Đang tải bản đồ...</span>
+        </div>
+      )}
+      {error && (
+        <div className="map-overlay map-error">
+          <Icon name="alert" size={24} />
+          <strong>{error}</strong>
+          <span>Kiểm tra Internet hoặc khóa API trong Environment Variables.</span>
+        </div>
+      )}
+      <div className="map-provider-badge">
+        <Icon name="map" size={14} />
+        <span>Việt Nam · {providerLabel}</span>
+      </div>
     </div>
   );
 }
