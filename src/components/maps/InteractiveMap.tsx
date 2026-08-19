@@ -97,12 +97,7 @@ declare global {
 
 const VIETNAM_CENTER = { lat: 16.3, lng: 106.8 };
 const VIETNAM_ZOOM = 6;
-const VIETNAM_BOUNDS = {
-  north: 23.55,
-  south: 8.18,
-  west: 102.1,
-  east: 109.7,
-};
+const VIETNAM_BOUNDS = { north: 23.55, south: 8.18, west: 102.1, east: 109.7 };
 const VIETNAM_BOUNDS_POINTS: [number, number][] = [
   [VIETNAM_BOUNDS.south, VIETNAM_BOUNDS.west],
   [VIETNAM_BOUNDS.north, VIETNAM_BOUNDS.east],
@@ -190,13 +185,7 @@ function loadMapTiler() {
 }
 
 function escapeHtml(value: string) {
-  return value.replace(/[&<>"']/g, (character) => ({
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    '"': "&quot;",
-    "'": "&#039;",
-  })[character] || character);
+  return value.replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" })[character] || character);
 }
 
 function safeMarkerColor(value?: string) {
@@ -214,7 +203,7 @@ function markerGlyph(glyph: MapMarker["glyph"]) {
 function markerSvg(marker: MapMarker, active: boolean) {
   const color = safeMarkerColor(marker.color);
   const glyph = markerGlyph(marker.glyph);
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="48" height="56" viewBox="0 0 48 56"><filter id="s"><feDropShadow dx="0" dy="3" stdDeviation="3" flood-opacity=".24"/></filter><path filter="url(#s)" d="M24 2C12.4 2 3 11.4 3 23c0 15 21 31 21 31s21-16 21-31C45 11.4 35.6 2 24 2Z" fill="${color}" stroke="white" stroke-width="${active ? 4 : 3}"/><circle cx="24" cy="23" r="11" fill="white" fill-opacity=".98"/><text x="24" y="28" text-anchor="middle" font-family="Arial,sans-serif" font-size="${glyph === "★" ? 15 : 13}" font-weight="800" fill="${color}">${glyph}</text></svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="48" height="56" viewBox="0 0 48 56"><filter id="s"><feDropShadow dx="0" dy="3" stdDeviation="3" flood-opacity=".24"/></filter><path filter="url(#s)" d="M24 2C12.4 2 3 11.4 3 23c0 15 21 31 21 31s21-16 21-31C45 11.4 35.6 2 24 2Z" fill="${color}" stroke="white" stroke-width="${active ? 4 : 3}"/><circle cx="24" cy="23" r="11" fill="white"/><text x="24" y="28" text-anchor="middle" font-family="Arial,sans-serif" font-size="13" font-weight="800" fill="${color}">${glyph}</text></svg>`;
   return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
 }
 
@@ -224,42 +213,29 @@ function createMapTilerMarkerElement(marker: MapMarker, active: boolean) {
   element.className = "kosovota-map-marker-wrap";
   element.title = marker.subtitle ? `${marker.title} · ${marker.subtitle}` : marker.title;
   element.setAttribute("aria-label", element.title);
-  element.addEventListener("mousedown", (event) => event.preventDefault());
   element.innerHTML = `<div class="kosovota-map-marker ${active ? "is-active" : ""}" style="--marker-color:${safeMarkerColor(marker.color)}"><span>${markerGlyph(marker.glyph)}</span></div>`;
   return element;
 }
 
 function sensitiveLabelFilterForField(field: string) {
   const normalized = ["downcase", ["to-string", ["coalesce", ["get", field], ""]]];
-  return [
-    "all",
-    ...HIDDEN_LABEL_TERMS.map((term) => ["==", ["index-of", term, normalized], -1]),
-  ];
+  return ["all", ...HIDDEN_LABEL_TERMS.map((term) => ["==", ["index-of", term, normalized], -1])];
 }
 
 function hideSensitiveMapLabels(map: MapTilerMap) {
-  const layers = map.getStyle().layers || [];
-  for (const layer of layers) {
+  for (const layer of map.getStyle().layers || []) {
     if (layer.type !== "symbol") continue;
     try {
       const existing = map.getFilter(layer.id);
       const privacyFilter = ["all", ...LABEL_NAME_FIELDS.map(sensitiveLabelFilterForField)];
       map.setFilter(layer.id, existing ? ["all", existing, privacyFilter] : privacyFilter);
     } catch {
-      // Một vài style layer đặc biệt không nhận filter runtime; bỏ qua layer đó thay vì làm hỏng toàn bộ map.
+      // Một vài style layer đặc biệt không hỗ trợ filter runtime.
     }
   }
 }
 
-export default function InteractiveMap({
-  markers,
-  activeId,
-  onSelect,
-  className = "",
-  height = 650,
-  center = VIETNAM_CENTER,
-  zoom = VIETNAM_ZOOM,
-}: InteractiveMapProps) {
+export default function InteractiveMap({ markers, activeId, onSelect, className = "", height = 650, center = VIETNAM_CENTER, zoom = VIETNAM_ZOOM }: InteractiveMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const leafletMapRef = useRef<LeafletMap | null>(null);
   const leafletMarkersRef = useRef<LeafletMarker[]>([]);
@@ -267,6 +243,7 @@ export default function InteractiveMap({
   const googleMarkersRef = useRef<GoogleMarkerInstance[]>([]);
   const mapTilerMapRef = useRef<MapTilerMap | null>(null);
   const mapTilerMarkersRef = useRef<MapTilerMarkerInstance[]>([]);
+  const initialViewportAppliedRef = useRef(false);
   const [error, setError] = useState("");
   const [ready, setReady] = useState(false);
   const provider = (process.env.NEXT_PUBLIC_MAP_PROVIDER || "osm").toLowerCase();
@@ -274,11 +251,10 @@ export default function InteractiveMap({
   const maptilerKey = process.env.NEXT_PUBLIC_MAPTILER_KEY || "";
   const maptilerStyle = process.env.NEXT_PUBLIC_MAPTILER_STYLE_URL || "";
   const normalizedMarkers = useMemo(() => markers.filter((m) => Number.isFinite(m.lat) && Number.isFinite(m.lng)), [markers]);
-  const centerLat = center.lat;
-  const centerLng = center.lng;
 
   useEffect(() => {
     let cancelled = false;
+    initialViewportAppliedRef.current = false;
     async function initialize() {
       if (!containerRef.current) return;
       setError("");
@@ -291,31 +267,22 @@ export default function InteractiveMap({
           const map = new sdk.Map({
             container: containerRef.current,
             style: maptilerStyle || sdk.MapStyle.STREETS,
-            center: [centerLng, centerLat],
+            center: [center.lng, center.lat],
             zoom,
             language: "vi",
             minZoom: 5,
-            scrollZoom: false,
-            keyboard: false,
-            maxBounds: [
-              [VIETNAM_BOUNDS.west, VIETNAM_BOUNDS.south],
-              [VIETNAM_BOUNDS.east, VIETNAM_BOUNDS.north],
-            ],
+            scrollZoom: true,
+            maxBounds: [[VIETNAM_BOUNDS.west, VIETNAM_BOUNDS.south], [VIETNAM_BOUNDS.east, VIETNAM_BOUNDS.north]],
             attributionControl: true,
           });
           mapTilerMapRef.current = map;
           map.on("load", () => {
             if (cancelled) return;
-            try {
-              map.setLanguage("vi");
-              hideSensitiveMapLabels(map);
-              containerRef.current?.querySelector("canvas")?.setAttribute("tabindex", "-1");
-            } finally {
-              setReady(true);
-            }
-          });
-          map.on("error", () => {
-            if (!cancelled && !mapTilerMapRef.current) setError("MapTiler không tải được style bản đồ.");
+            map.setLanguage("vi");
+            hideSensitiveMapLabels(map);
+            map.fitBounds([[VIETNAM_BOUNDS.west, VIETNAM_BOUNDS.south], [VIETNAM_BOUNDS.east, VIETNAM_BOUNDS.north]], { padding: 36, maxZoom: VIETNAM_ZOOM });
+            initialViewportAppliedRef.current = true;
+            setReady(true);
           });
           return;
         }
@@ -323,54 +290,37 @@ export default function InteractiveMap({
         if (provider === "google" && googleKey) {
           const maps = await loadGoogleMaps(googleKey);
           if (cancelled || !containerRef.current) return;
-          googleMapRef.current = new maps.Map(containerRef.current, {
-            center: { lat: centerLat, lng: centerLng },
+          const map = new maps.Map(containerRef.current, {
+            center: { lat: center.lat, lng: center.lng },
             zoom,
             mapTypeControl: false,
             streetViewControl: false,
             fullscreenControl: true,
             clickableIcons: false,
-            gestureHandling: "cooperative",
-            keyboardShortcuts: false,
-            restriction: {
-              latLngBounds: {
-                north: VIETNAM_BOUNDS.north,
-                south: VIETNAM_BOUNDS.south,
-                east: VIETNAM_BOUNDS.east,
-                west: VIETNAM_BOUNDS.west,
-              },
-              strictBounds: false,
-            },
+            gestureHandling: "greedy",
+            restriction: { latLngBounds: VIETNAM_BOUNDS, strictBounds: false },
             minZoom: 5,
             styles: [
               { featureType: "poi", elementType: "labels", stylers: [{ visibility: "off" }] },
               { featureType: "transit", elementType: "labels", stylers: [{ visibility: "off" }] },
             ],
           });
-          if (!cancelled) setReady(true);
+          googleMapRef.current = map;
+          map.fitBounds(new maps.LatLngBounds({ lat: VIETNAM_BOUNDS.south, lng: VIETNAM_BOUNDS.west }, { lat: VIETNAM_BOUNDS.north, lng: VIETNAM_BOUNDS.east }), 36);
+          initialViewportAppliedRef.current = true;
+          setReady(true);
           return;
         }
 
         const L = await loadLeaflet();
         if (cancelled || !containerRef.current) return;
-        const map = L.map(containerRef.current, {
-          zoomControl: true,
-          attributionControl: true,
-          preferCanvas: true,
-          keyboard: false,
-          scrollWheelZoom: false,
-          minZoom: 5,
-          maxBounds: VIETNAM_BOUNDS_POINTS,
-          maxBoundsViscosity: 0.95,
-        });
-        map.setView([centerLat, centerLng], zoom);
-        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-          maxZoom: 20,
-          attribution: '&copy; OpenStreetMap contributors',
-        }).addTo(map);
+        const map = L.map(containerRef.current, { zoomControl: true, attributionControl: true, preferCanvas: true, minZoom: 5, scrollWheelZoom: true, maxBounds: VIETNAM_BOUNDS_POINTS, maxBoundsViscosity: 0.95 });
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 20, attribution: '&copy; OpenStreetMap contributors' }).addTo(map);
+        map.fitBounds(L.latLngBounds(VIETNAM_BOUNDS_POINTS), { padding: [36, 36], maxZoom: VIETNAM_ZOOM });
         leafletMapRef.current = map;
+        initialViewportAppliedRef.current = true;
         window.setTimeout(() => map.invalidateSize(), 100);
-        if (!cancelled) setReady(true);
+        setReady(true);
       } catch (value) {
         if (!cancelled) setError(value instanceof Error ? value.message : "Không tải được bản đồ.");
       }
@@ -390,7 +340,7 @@ export default function InteractiveMap({
       googleMarkersRef.current = [];
       googleMapRef.current = null;
     };
-  }, [provider, googleKey, maptilerKey, maptilerStyle, centerLat, centerLng, zoom]);
+  }, [provider, googleKey, maptilerKey, maptilerStyle, center.lat, center.lng, zoom]);
 
   useEffect(() => {
     if (!ready) return;
@@ -401,36 +351,13 @@ export default function InteractiveMap({
       const sdk = window.maptilersdk;
       mapTilerMarkersRef.current.forEach((marker) => marker.remove());
       mapTilerMarkersRef.current = normalizedMarkers.map((marker) => {
-        const active = marker.id === activeId;
-        const element = createMapTilerMarkerElement(marker, active);
+        const element = createMapTilerMarkerElement(marker, marker.id === activeId);
         element.addEventListener("click", () => onSelect?.(marker.id));
         return new sdk.Marker({ element, anchor: "bottom" }).setLngLat([marker.lng, marker.lat]).addTo(map);
       });
-
       if (activeMarker) {
         map.setCenter([activeMarker.lng, activeMarker.lat]);
         map.setZoom(15);
-      } else if (normalizedMarkers.length > 1) {
-        const lngs = normalizedMarkers.map((marker) => marker.lng);
-        const lats = normalizedMarkers.map((marker) => marker.lat);
-        map.fitBounds(
-          [
-            [Math.min(...lngs), Math.min(...lats)],
-            [Math.max(...lngs), Math.max(...lats)],
-          ],
-          { padding: 56, maxZoom: 13 },
-        );
-      } else if (normalizedMarkers.length === 1) {
-        map.setCenter([normalizedMarkers[0].lng, normalizedMarkers[0].lat]);
-        map.setZoom(13);
-      } else {
-        map.fitBounds(
-          [
-            [VIETNAM_BOUNDS.west, VIETNAM_BOUNDS.south],
-            [VIETNAM_BOUNDS.east, VIETNAM_BOUNDS.north],
-          ],
-          { padding: 40, maxZoom: VIETNAM_ZOOM },
-        );
       }
       return;
     }
@@ -438,39 +365,21 @@ export default function InteractiveMap({
     if (googleMapRef.current && window.google?.maps) {
       const maps = window.google.maps;
       googleMarkersRef.current.forEach((marker) => marker.setMap(null));
-      googleMarkersRef.current = [];
-      const bounds = new maps.LatLngBounds();
-      normalizedMarkers.forEach((marker) => {
+      googleMarkersRef.current = normalizedMarkers.map((marker) => {
         const active = marker.id === activeId;
         const instance = new maps.Marker({
           map: googleMapRef.current,
           position: { lat: marker.lat, lng: marker.lng },
           title: marker.title,
-          icon: {
-            url: markerSvg(marker, active),
-            scaledSize: new maps.Size(active ? 56 : 44, active ? 65 : 52),
-            anchor: new maps.Point(active ? 28 : 22, active ? 60 : 48),
-          },
+          icon: { url: markerSvg(marker, active), scaledSize: new maps.Size(active ? 56 : 44, active ? 65 : 52), anchor: new maps.Point(active ? 28 : 22, active ? 60 : 48) },
           optimized: true,
         });
         instance.addListener("click", () => onSelect?.(marker.id));
-        googleMarkersRef.current.push(instance);
-        bounds.extend({ lat: marker.lat, lng: marker.lng });
+        return instance;
       });
-
       if (activeMarker) {
         googleMapRef.current.setCenter({ lat: activeMarker.lat, lng: activeMarker.lng });
         googleMapRef.current.setZoom(15);
-      } else if (normalizedMarkers.length > 1) {
-        googleMapRef.current.fitBounds(bounds, 72);
-      } else if (normalizedMarkers.length === 1) {
-        googleMapRef.current.setCenter({ lat: normalizedMarkers[0].lat, lng: normalizedMarkers[0].lng });
-        googleMapRef.current.setZoom(13);
-      } else {
-        googleMapRef.current.fitBounds(new maps.LatLngBounds(
-          { lat: VIETNAM_BOUNDS.south, lng: VIETNAM_BOUNDS.west },
-          { lat: VIETNAM_BOUNDS.north, lng: VIETNAM_BOUNDS.east },
-        ), 40);
       }
       return;
     }
@@ -483,21 +392,12 @@ export default function InteractiveMap({
         const glyph = markerGlyph(marker.glyph);
         const active = marker.id === activeId;
         const html = `<div class="kosovota-map-marker ${active ? "is-active" : ""}" style="--marker-color:${color}"><span>${glyph}</span></div>`;
-        return L.marker([marker.lat, marker.lng], {
-          icon: L.divIcon({ className: "kosovota-map-marker-wrap", html, iconSize: [active ? 52 : 44, active ? 60 : 52], iconAnchor: [active ? 26 : 22, active ? 57 : 49] }),
-          title: marker.title,
-        }).bindTooltip(`<strong>${escapeHtml(marker.title)}</strong>${marker.subtitle ? `<br/><span>${escapeHtml(marker.subtitle)}</span>` : ""}`, { direction: "top", offset: [0, -40] }).on("click", () => onSelect?.(marker.id)).addTo(leafletMapRef.current!);
+        return L.marker([marker.lat, marker.lng], { icon: L.divIcon({ className: "kosovota-map-marker-wrap", html, iconSize: [active ? 52 : 44, active ? 60 : 52], iconAnchor: [active ? 26 : 22, active ? 57 : 49] }), title: marker.title })
+          .bindTooltip(`<strong>${escapeHtml(marker.title)}</strong>${marker.subtitle ? `<br/><span>${escapeHtml(marker.subtitle)}</span>` : ""}`, { direction: "top", offset: [0, -40] })
+          .on("click", () => onSelect?.(marker.id))
+          .addTo(leafletMapRef.current!);
       });
-
-      if (activeMarker) {
-        leafletMapRef.current.setView([activeMarker.lat, activeMarker.lng], 15);
-      } else if (normalizedMarkers.length > 1) {
-        leafletMapRef.current.fitBounds(L.latLngBounds(normalizedMarkers.map((m) => [m.lat, m.lng])), { padding: [56, 56], maxZoom: 13 });
-      } else if (normalizedMarkers.length === 1) {
-        leafletMapRef.current.setView([normalizedMarkers[0].lat, normalizedMarkers[0].lng], 13);
-      } else {
-        leafletMapRef.current.fitBounds(L.latLngBounds(VIETNAM_BOUNDS_POINTS), { padding: [40, 40], maxZoom: VIETNAM_ZOOM });
-      }
+      if (activeMarker) leafletMapRef.current.setView([activeMarker.lat, activeMarker.lng], 15);
     }
   }, [normalizedMarkers, activeId, onSelect, ready]);
 
