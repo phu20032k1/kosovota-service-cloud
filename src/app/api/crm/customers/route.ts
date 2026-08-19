@@ -15,7 +15,14 @@ export async function GET(request: NextRequest) {
 
     const customers = await prisma.customer.findMany({
       where: {
-        ...(q ? { OR: [{ name: { contains: q } }, { phone: { contains: q } }, { address: { contains: q } }] } : {}),
+        ...(q ? {
+          OR: [
+            { name: { contains: q } },
+            { phone: { contains: q } },
+            { address: { contains: q } },
+            { machines: { some: { OR: [{ id: { contains: q } }, { serial: { contains: q } }] } } },
+          ],
+        } : {}),
         ...(segment ? { segment } : {}),
         ...(auth.user.role === "CSKH" && provinceScope.length
           ? { machines: { some: { provinceCode: { in: provinceScope } } } }
@@ -76,7 +83,6 @@ export async function DELETE(request: NextRequest) {
       const existingIds = existing.map((customer) => customer.id);
       if (!existingIds.length) return { deleted: 0, customers: existing };
 
-      // Giữ lại lịch sử máy và Ticket, chỉ tháo liên kết khách hàng trước khi xóa hồ sơ CRM.
       await tx.machine.updateMany({ where: { customerId: { in: existingIds } }, data: { customerId: null } });
       await tx.supportTicket.updateMany({ where: { customerId: { in: existingIds } }, data: { customerId: null } });
       await tx.customerActivity.deleteMany({ where: { customerId: { in: existingIds } } });

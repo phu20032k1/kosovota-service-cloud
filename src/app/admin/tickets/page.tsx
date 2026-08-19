@@ -8,6 +8,7 @@ import { Notice } from "@/components/ui/Notice";
 import { LoadingState } from "@/components/ui/LoadingState";
 import { Icon } from "@/components/ui/Icon";
 import { StatusBadge } from "@/components/ui/StatusBadge";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 import { readApiResponse } from "@/lib/client-api";
 
 type TicketMessage = { id: string; authorName: string; message: string; isInternal: boolean; createdAt: string };
@@ -44,10 +45,11 @@ type Ticket = {
   messages: TicketMessage[];
 };
 type Option = { id: string; name: string; phone?: string; address?: string | null };
+type MachineOption = { id: string; serial?: string | null; model: string; name?: string | null; customer?: Option | null };
 type Data = {
   tickets: Ticket[];
   customers: Option[];
-  machines: { id: string; model: string; name?: string | null; customer?: Option | null }[];
+  machines: MachineOption[];
   dealers: { id: string; dealerCode: string; name: string }[];
   staff: { id: string; name: string }[];
 };
@@ -118,6 +120,7 @@ export default function TicketsPage() {
       setLoading(false);
     }
   }, []);
+
   useEffect(() => { void load(); }, [load]);
   useEffect(() => {
     if (!open) return;
@@ -144,6 +147,23 @@ export default function TicketsPage() {
   const customerMachines = useMemo(() => form.customerId
     ? (data?.machines || []).filter((machine) => machine.customer?.id === form.customerId)
     : data?.machines || [], [data, form.customerId]);
+
+  const customerSearchOptions = useMemo(() => (data?.customers || []).map((customer) => {
+    const machines = (data?.machines || []).filter((machine) => machine.customer?.id === customer.id);
+    return {
+      value: customer.id,
+      label: `${customer.name} · ${customer.phone || "Chưa có SĐT"}`,
+      description: `${customer.address || "Chưa có địa chỉ"}${machines.length ? ` · ${machines.length} máy` : " · Chưa gắn máy"}`,
+      searchText: `${customer.name} ${customer.phone || ""} ${customer.address || ""} ${machines.map((machine) => `${machine.id} ${machine.serial || ""}`).join(" ")}`,
+    };
+  }), [data]);
+
+  const machineSearchOptions = useMemo(() => customerMachines.map((machine) => ({
+    value: machine.id,
+    label: `${machine.serial || machine.id} · ${machine.name || machine.model}`,
+    description: `${machine.serial && machine.serial !== machine.id ? `ID ${machine.id} · ` : ""}${machine.customer ? `${machine.customer.name} · ${machine.customer.phone || "Chưa có SĐT"}` : "Chưa gắn khách hàng"}`,
+    searchText: `${machine.id} ${machine.serial || ""} ${machine.model} ${machine.name || ""} ${machine.customer?.name || ""} ${machine.customer?.phone || ""}`,
+  })), [customerMachines]);
 
   function showNotice(kind: "success" | "error", text: string) {
     if (kind === "success") { setMessage(text); setError(""); }
@@ -207,9 +227,35 @@ export default function TicketsPage() {
   }
 
   function selectCustomer(id: string) {
+    if (!id) {
+      setForm((current) => ({ ...current, customerId: "", machineId: "" }));
+      return;
+    }
     const customer = data?.customers.find((item) => item.id === id);
     const machines = (data?.machines || []).filter((machine) => machine.customer?.id === id);
-    setForm((current) => ({ ...current, customerId: id, machineId: machines.length === 1 ? machines[0].id : "", contactName: customer?.name || current.contactName, contactPhone: customer?.phone || current.contactPhone }));
+    setForm((current) => ({
+      ...current,
+      customerId: id,
+      machineId: machines.length === 1 ? machines[0].id : "",
+      contactName: customer?.name || current.contactName,
+      contactPhone: customer?.phone || current.contactPhone,
+    }));
+  }
+
+  function selectMachine(id: string) {
+    if (!id) {
+      setForm((current) => ({ ...current, machineId: "" }));
+      return;
+    }
+    const machine = data?.machines.find((item) => item.id === id);
+    const customer = machine?.customer || null;
+    setForm((current) => ({
+      ...current,
+      machineId: id,
+      customerId: customer?.id || current.customerId,
+      contactName: customer?.name || current.contactName,
+      contactPhone: customer?.phone || current.contactPhone,
+    }));
   }
 
   return <main className="min-h-screen">
@@ -260,13 +306,13 @@ export default function TicketsPage() {
 
     {open && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setOpen(false); }}>
       <form onSubmit={create} className="modal-panel max-w-4xl">
-        <div className="modal-header"><div><p className="eyebrow">Phiếu hỗ trợ → Điều phối</p><h3 className="mt-1 text-2xl font-black">Tạo yêu cầu hỗ trợ</h3><p className="text-sm text-slate-500">Khi chọn máy, hệ thống tự tạo lệnh và đưa sang tab Điều phối.</p></div><button type="button" onClick={() => setOpen(false)} className="icon-button"><Icon name="x" size={18}/></button></div>
+        <div className="modal-header"><div><p className="eyebrow">Phiếu hỗ trợ → Điều phối</p><h3 className="mt-1 text-2xl font-black">Tạo yêu cầu hỗ trợ</h3><p className="text-sm text-slate-500">Gõ tên/SĐT/Seri để tìm nhanh. Chọn máy sẽ tự nhận khách hàng và tạo lệnh Điều phối.</p></div><button type="button" onClick={() => setOpen(false)} className="icon-button"><Icon name="x" size={18}/></button></div>
         <div className="modal-body space-y-5"><div className="form-grid">
           <Field label="Loại yêu cầu" className="span-4"><select value={form.type} onChange={(event) => setForm({ ...form, type: event.target.value })}>{Object.entries(TYPE_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></Field>
           <Field label="Mức ưu tiên" className="span-4"><select value={form.priority} onChange={(event) => setForm({ ...form, priority: event.target.value })}><option value="LOW">Thấp</option><option value="NORMAL">Bình thường</option><option value="HIGH">Cao</option><option value="CRITICAL">Khẩn cấp</option></select></Field>
           <Field label="Hạn xử lý" className="span-4"><input type="datetime-local" value={form.dueAt} onChange={(event) => setForm({ ...form, dueAt: event.target.value })}/></Field>
-          <Field label="Khách hàng CRM" className="span-6"><select value={form.customerId} onChange={(event) => selectCustomer(event.target.value)}><option value="">Nhập người liên hệ thủ công</option>{(data?.customers || []).map((customer) => <option key={customer.id} value={customer.id}>{customer.name} · {customer.phone}</option>)}</select></Field>
-          <Field label="Máy / sản phẩm cần xử lý" className="span-6"><select value={form.machineId} onChange={(event) => setForm({ ...form, machineId: event.target.value })}><option value="">Chưa xác định máy</option>{customerMachines.map((machine) => <option key={machine.id} value={machine.id}>{machine.id} · {machine.name || machine.model}</option>)}</select></Field>
+          <Field label="Khách hàng CRM — gõ tên, SĐT, địa chỉ hoặc Seri máy" className="span-6"><SearchableSelect value={form.customerId} onChange={selectCustomer} options={customerSearchOptions} placeholder="Gõ để tìm khách hàng hoặc Seri máy..." emptyText="Không tìm thấy khách hàng/Seri phù hợp"/></Field>
+          <Field label="Máy / sản phẩm — gõ ID, Seri, model hoặc tên khách" className="span-6"><SearchableSelect value={form.machineId} onChange={selectMachine} options={machineSearchOptions} placeholder={form.customerId ? "Tìm trong các máy của khách..." : "Gõ ID/Seri máy để tìm..."} emptyText={form.customerId ? "Khách này chưa có máy phù hợp" : "Không tìm thấy máy phù hợp"}/></Field>
           <Field label="Tên người liên hệ" className="span-6"><input required value={form.contactName} onChange={(event) => setForm({ ...form, contactName: event.target.value })}/></Field>
           <Field label="Số điện thoại" className="span-6"><input required value={form.contactPhone} onChange={(event) => setForm({ ...form, contactPhone: event.target.value.replace(/\D/g, "") })}/></Field>
           <Field label="Nhân viên phụ trách" className="span-6"><select value={form.assigneeId} onChange={(event) => setForm({ ...form, assigneeId: event.target.value })}><option value="">Chưa phân công</option>{(data?.staff || []).map((staff) => <option key={staff.id} value={staff.id}>{staff.name}</option>)}</select></Field>
@@ -319,4 +365,4 @@ function RequirementRestatement({ form, machineLabel }: { form: TicketForm; mach
 }
 
 function Summary({ label, value }: { label: string; value: string }) { return <div><dt>{label}</dt><dd>{value}</dd></div>; }
-function Field({ label, className = "", children }: { label: string; className?: string; children: ReactNode }) { return <label className={className}><span className="mb-1 block text-sm font-bold">{label}</span>{children}</label>; }
+function Field({ label, className = "", children }: { label: string; className?: string; children: ReactNode }) { return <div className={className}><span className="mb-1 block text-sm font-bold">{label}</span>{children}</div>; }

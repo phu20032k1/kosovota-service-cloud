@@ -4,8 +4,26 @@ import { hasRole } from "@/lib/auth";
 import { writeAudit } from "@/lib/audit";
 import { normalizePhone, isValidVietnamPhone } from "@/lib/phone";
 import { databaseErrorMessage } from "@/lib/database-errors";
+import { geocodeAddress } from "@/lib/maps/geocode";
 
 type Params = { params: Promise<{ id: string }> };
+
+function hasUsableCoordinates(lat: number | null, lng: number | null) {
+  if (lat === null || lng === null || !Number.isFinite(lat) || !Number.isFinite(lng)) return false;
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return false;
+  return !(Math.abs(lat) < 0.000001 && Math.abs(lng) < 0.000001);
+}
+
+async function geocodeCustomerAddress(address: string) {
+  if (!address || process.env.GEOCODING_ENABLED !== "true") return null;
+  try {
+    const location = await geocodeAddress(address);
+    return location && hasUsableCoordinates(location.lat, location.lng) ? location : null;
+  } catch (error) {
+    console.warn(`Không tự lấy được GPS từ địa chỉ khách hàng ${address}:`, error);
+    return null;
+  }
+}
 
 export async function GET(request: NextRequest, { params }: Params) {
   try {
@@ -59,16 +77,47 @@ export async function PUT(request: NextRequest, { params }: Params) {
       if (duplicate) return NextResponse.json({ success: false, message: "Số điện thoại đã thuộc khách hàng khác." }, { status: 409 });
       data.phone = phone;
     }
-    if (typeof body.address === "string") data.address = body.address.trim() || null;
+
+    const address = typeof body.address === "string" ? body.address.trim() : null;
+    if (typeof body.address === "string") data.address = address || null;
     if (typeof body.segment === "string") data.segment = body.segment;
     if (typeof body.tags === "string") data.tags = body.tags.trim() || null;
     if (Number.isInteger(body.satisfaction)) data.satisfaction = Math.min(5, Math.max(1, body.satisfaction));
     if ("ownerId" in body) data.ownerId = body.ownerId || null;
     if ("nextContactAt" in body) data.nextContactAt = body.nextContactAt ? new Date(body.nextContactAt) : null;
 
-    const customer = await prisma.customer.update({ where: { id }, data });
-    await writeAudit({ request, userId: auth.user.id, action: "UPDATE_CUSTOMER_CRM", target: customer.phone, detail: body });
-    return NextResponse.json({ success: true, message: "Đã cập nhật hồ sơ khách hàng.", data: customer });
+    const location = address ? await geocodeCustomerAddress(address) : null;
+    const result = await prisma.$transaction(async (tx) => {
+      const customer = await tx.customer.update({ where: { id }, data });
+      let gpsUpdatedCount = 0;
+      if (location) {
+        const machines = await tx.machine.findMany({
+          where: { customerId: id },
+          select: { id: true, lat: true, lng: true },
+        });
+        for (const machine of machines) {
+          if (hasUsableCoordinates(machine.lat, machine.lng)) continue;
+          await tx.machine.update({ where: { id: machine.id }, data: { lat: location.lat, lng: location.lng } });
+          gpsUpdatedCount += 1;
+        }
+      }
+      return { customer, gpsUpdatedCount };
+    });
+
+    await writeAudit({
+      request,
+      userId: auth.user.id,
+      action: "UPDATE_CUSTOMER_CRM",
+      target: result.customer.phone,
+      detail: { ...body, gpsUpdatedCount: result.gpsUpdatedCount },
+    });
+    return NextResponse.json({
+      success: true,
+      message: result.gpsUpdatedCount
+        ? `Đã cập nhật hồ sơ khách hàng và tự bổ sung GPS cho ${result.gpsUpdatedCount} máy từ địa chỉ.`
+        : "Đã cập nhật hồ sơ khách hàng.",
+      data: result.customer,
+    });
   } catch (error) {
     console.error("PUT /api/crm/customers/[id] failed", error);
     return NextResponse.json({ success: false, message: databaseErrorMessage(error, "Không cập nhật được khách hàng.") }, { status: 500 });
