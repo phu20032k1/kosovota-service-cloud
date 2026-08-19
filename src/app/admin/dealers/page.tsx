@@ -29,10 +29,10 @@ type Dealer = {
   serviceOrders?: { id: string; status: string }[];
 };
 
+type BulkError = { dealerCode: string; message: string };
 type PendingAction =
   | { type: "DELETE"; codes: string[] }
   | { type: "STATUS"; codes: string[]; status: "APPROVED" | "REJECTED" | "SUSPENDED" };
-
 
 function actionLabel(action: PendingAction | null) {
   if (!action) return "";
@@ -50,6 +50,7 @@ export default function AdminDealersPage() {
   const [status, setStatus] = useState("ALL");
   const [query, setQuery] = useState("");
   const [notice, setNotice] = useState<{ kind: "success" | "error"; text: string } | null>(null);
+  const [bulkErrors, setBulkErrors] = useState<BulkError[]>([]);
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
 
   const load = useCallback(async () => {
@@ -93,6 +94,7 @@ export default function AdminDealersPage() {
     if (!dealerCodes.length) return;
     setBusy(true);
     setNotice(null);
+    setBulkErrors([]);
     try {
       const response = await fetch("/api/dealers", {
         method: "PATCH",
@@ -100,9 +102,13 @@ export default function AdminDealersPage() {
         body: JSON.stringify(dealerCodes.length === 1 ? { dealerCode: dealerCodes[0], status: nextStatus } : { dealerCodes, status: nextStatus }),
       });
       const result = await response.json();
+      const errors: BulkError[] = Array.isArray(result.errors) ? result.errors : [];
+      setBulkErrors(errors);
       if (!response.ok || !result.success) throw new Error(result.message || "Không cập nhật được hồ sơ");
+
       setNotice({ kind: "success", text: result.message });
-      setSelectedCodes((current) => current.filter((code) => !dealerCodes.includes(code)));
+      const failedCodes = new Set(errors.map((item) => item.dealerCode));
+      setSelectedCodes((current) => current.filter((code) => !dealerCodes.includes(code) || failedCodes.has(code)));
       await load();
     } catch (error) {
       setNotice({ kind: "error", text: error instanceof Error ? error.message : "Không cập nhật được hồ sơ" });
@@ -115,6 +121,7 @@ export default function AdminDealersPage() {
     if (!dealerCodes.length) return;
     setBusy(true);
     setNotice(null);
+    setBulkErrors([]);
     try {
       const response = await fetch("/api/dealers", {
         method: "DELETE",
@@ -152,6 +159,7 @@ export default function AdminDealersPage() {
     />
     <div className="page-container space-y-6">
       {notice && <Notice kind={notice.kind}>{notice.text}</Notice>}
+      {!!bulkErrors.length && <Notice kind="warning"><div><strong>{bulkErrors.length} hồ sơ chưa xử lý được và vẫn được giữ chọn:</strong><div className="mt-2 space-y-1">{bulkErrors.slice(0, 30).map((item) => <p key={`${item.dealerCode}-${item.message}`}><strong>{item.dealerCode}:</strong> {item.message}</p>)}</div></div></Notice>}
 
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard label="Tổng hồ sơ" value={items.length} icon="store" />
@@ -209,6 +217,7 @@ export default function AdminDealersPage() {
                   <p className="mt-1 text-sm text-slate-600">{dealer.representativeName || "Chưa có người đại diện"} · <a href={`tel:${dealer.phone}`} className="font-bold text-emerald-700">{dealer.phone}</a></p>
                   <p className="mt-1 text-sm text-slate-600">{dealer.address || "Chưa có địa chỉ"} · {dealer.province || "Chưa có tỉnh"}</p>
                   <p className="mt-2 text-sm leading-6"><strong>Năng lực:</strong> {dealer.services || "Chưa khai báo"}</p>
+                  <p className="mt-1 text-sm text-slate-600"><strong>Số kỹ thuật viên:</strong> {dealer.technicianCount ?? 0}</p>
                   <div className="mt-3 flex flex-wrap gap-2 text-sm">
                     {dealer.portraitPhoto && <a href={dealer.portraitPhoto} target="_blank" className="btn-secondary px-3 py-2 text-xs"><Icon name="camera" size={15}/>Chân dung</a>}
                     {dealer.storePhoto && <a href={dealer.storePhoto} target="_blank" className="btn-secondary px-3 py-2 text-xs"><Icon name="store" size={15}/>Cửa hàng</a>}
@@ -235,7 +244,7 @@ export default function AdminDealersPage() {
       open={Boolean(pendingAction)}
       tone={pendingAction?.type === "DELETE" ? "danger" : pendingAction?.status === "APPROVED" ? "info" : "warning"}
       title={pendingAction?.type === "DELETE" ? "Xóa hồ sơ đại lý?" : "Xác nhận cập nhật hồ sơ?"}
-      description={pendingAction?.type === "DELETE" ? "Thao tác này xóa hồ sơ đại lý khỏi danh sách. Lịch sử dịch vụ được giữ lại bằng cách bỏ liên kết đại lý; tài khoản đại lý/KTV liên quan sẽ bị khóa." : "Hệ thống sẽ cập nhật trạng thái và gửi thông báo tương ứng cho đại lý. Hãy kiểm tra đúng danh sách trước khi tiếp tục."}
+      description={pendingAction?.type === "DELETE" ? "Thao tác này xóa hồ sơ đại lý khỏi danh sách. Lịch sử dịch vụ được giữ lại bằng cách bỏ liên kết đại lý; tài khoản đại lý/KTV liên quan sẽ bị khóa." : "Mỗi hồ sơ được xử lý độc lập. Nếu một hồ sơ lỗi, các hồ sơ còn lại vẫn được cập nhật và hồ sơ lỗi sẽ được giữ chọn để xử lý lại."}
       highlight={actionLabel(pendingAction)}
       confirmLabel={pendingAction?.type === "DELETE" ? "Xóa dữ liệu" : "Xác nhận"}
       busy={busy}
