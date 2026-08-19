@@ -132,7 +132,7 @@ async function coordinatesFromAddress(
   cache: Map<string, Coordinates>,
 ): Promise<Coordinates> {
   if (hasUsableCoordinates(inputLat, inputLng)) return { lat: inputLat, lng: inputLng, explicit: true };
-  if (!address || process.env.GEOCODING_ENABLED !== "true") return { lat: null, lng: null, explicit: false };
+  if (!address) return { lat: null, lng: null, explicit: false };
   const cacheKey = address.trim().toLowerCase();
   const cached = cache.get(cacheKey);
   if (cached) return cached;
@@ -169,8 +169,10 @@ export async function POST(request: NextRequest) {
     let updatedCount = 0;
     let linkedMachineCount = 0;
     let gpsUpdatedCount = 0;
+    let gpsFailedCount = 0;
     let lifecycleUpdatedCount = 0;
     const errors: { row: number; message: string }[] = [];
+    const warnings: { row: number; message: string }[] = [];
     const geocodeCache = new Map<string, Coordinates>();
 
     for (const { data: row, rowNumber } of parsedRows) {
@@ -203,6 +205,10 @@ export async function POST(request: NextRequest) {
         const coordinates = shouldResolveGps
           ? await coordinatesFromAddress(address, inputLat, inputLng, geocodeCache)
           : { lat: null, lng: null, explicit: false };
+        if (shouldResolveGps && address && !hasUsableCoordinates(inputLat, inputLng) && !hasUsableCoordinates(coordinates.lat, coordinates.lng)) {
+          gpsFailedCount += 1;
+          warnings.push({ row: rowNumber, message: `Không tự ghim được GPS từ địa chỉ cho máy ${machineKey}; dữ liệu khách/máy vẫn được import.` });
+        }
 
         const outcome = await prisma.$transaction(async (tx) => {
           const existed = await tx.customer.findUnique({ where: { phone }, select: { id: true } });
@@ -306,24 +312,28 @@ export async function POST(request: NextRequest) {
         userId: auth.user.id,
         action: "IMPORT_CUSTOMERS",
         target: file.name,
-        detail: `Tạo ${createdCount}, cập nhật ${updatedCount}, gắn máy ${linkedMachineCount}, GPS ${gpsUpdatedCount}, vòng đời ${lifecycleUpdatedCount}, lỗi ${errors.length}`,
+        detail: `Tạo ${createdCount}, cập nhật ${updatedCount}, gắn máy ${linkedMachineCount}, GPS ${gpsUpdatedCount}, GPS chưa ghim ${gpsFailedCount}, vòng đời ${lifecycleUpdatedCount}, lỗi ${errors.length}`,
       },
     });
     return NextResponse.json({
       success: true,
       message: errors.length
         ? `Đã xử lý file. Có ${errors.length} dòng lỗi; xem chi tiết bên dưới để sửa đúng dòng.`
-        : "Đã xử lý toàn bộ file khách hàng và đồng bộ dữ liệu máy/GPS.",
+        : gpsFailedCount
+          ? `Đã xử lý file khách hàng. Có ${gpsFailedCount} địa chỉ chưa tự ghim được GPS; xem cảnh báo bên dưới.`
+          : "Đã xử lý toàn bộ file khách hàng và đồng bộ dữ liệu máy/GPS.",
       summary: {
         successCount: createdCount + updatedCount,
         createdCount,
         updatedCount,
         linkedMachineCount,
         gpsUpdatedCount,
+        gpsFailedCount,
         lifecycleUpdatedCount,
         errorCount: errors.length,
       },
       errors,
+      warnings,
     });
   } catch (error) {
     console.error("import customers failed", error);
