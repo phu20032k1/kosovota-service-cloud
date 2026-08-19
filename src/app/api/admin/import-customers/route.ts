@@ -68,7 +68,9 @@ export async function POST(request: NextRequest) {
         if (!name) throw new Error("Thiếu tên khách hàng");
         if (!isValidVietnamPhone(phone)) throw new Error("Số điện thoại không hợp lệ");
         const machineKey = value(row, "ID máy", "Mã máy", "Số Seri", "Seri", "Serial").toUpperCase();
-        const machineModel = value(row, "Model", "Dòng máy", "Tên máy");
+        const machineModel = value(row, "Model", "Dòng máy");
+        const machineName = value(row, "Tên máy", "Tên thiết bị", "Tên sản phẩm");
+        const effectiveMachineModel = machineModel || machineName;
         const installDate = excelDate(row[normalizedHeader("Ngày lắp đặt")] ?? row[normalizedHeader("Ngày lắp")]);
 
         const outcome = await prisma.$transaction(async (tx) => {
@@ -85,10 +87,28 @@ export async function POST(request: NextRequest) {
           if (machineKey) {
             const machine = await tx.machine.findFirst({ where: { OR: [{ id: machineKey }, { serial: machineKey }] }, select: { id: true } });
             if (machine) {
-              await tx.machine.update({ where: { id: machine.id }, data: { customerId: customer.id, installDate: installDate || undefined } });
+              await tx.machine.update({
+                where: { id: machine.id },
+                data: {
+                  customerId: customer.id,
+                  ...(installDate ? { installDate } : {}),
+                  ...(machineModel ? { model: machineModel.toUpperCase() } : {}),
+                  ...(machineName ? { name: machineName } : {}),
+                },
+              });
               linked = true;
-            } else if (machineModel) {
-              await tx.machine.create({ data: { id: machineKey, serial: machineKey, model: machineModel.toUpperCase(), name: machineModel, customerId: customer.id, installDate, status: installDate ? "ACTIVE" : "NEW" } });
+            } else if (effectiveMachineModel) {
+              await tx.machine.create({
+                data: {
+                  id: machineKey,
+                  serial: machineKey,
+                  model: effectiveMachineModel.toUpperCase(),
+                  name: machineName || effectiveMachineModel,
+                  customerId: customer.id,
+                  installDate,
+                  status: installDate ? "ACTIVE" : "NEW",
+                },
+              });
               linked = true;
             } else throw new Error(`Không tìm thấy máy ${machineKey}; cần cột Model/Tên máy để tạo mới`);
           }
@@ -102,7 +122,7 @@ export async function POST(request: NextRequest) {
     }
 
     await prisma.adminLog.create({ data: { userId: auth.user.id, action: "IMPORT_CUSTOMERS", target: file.name, detail: `Tạo ${createdCount}, cập nhật ${updatedCount}, gắn máy ${linkedMachineCount}, lỗi ${errors.length}` } });
-    return NextResponse.json({ success: true, message: "Đã xử lý file khách hàng.", summary: { successCount: createdCount + updatedCount, createdCount, updatedCount, linkedMachineCount, errorCount: errors.length }, errors });
+    return NextResponse.json({ success: true, message: "Đã xử lý file khách hàng và đồng bộ các cột có dữ liệu.", summary: { successCount: createdCount + updatedCount, createdCount, updatedCount, linkedMachineCount, errorCount: errors.length }, errors });
   } catch (error) {
     console.error("import customers failed", error);
     return NextResponse.json({ success: false, message: "Không đọc được file Excel khách hàng." }, { status: 500 });

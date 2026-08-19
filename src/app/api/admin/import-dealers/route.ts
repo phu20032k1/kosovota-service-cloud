@@ -55,12 +55,27 @@ function value(row: Record<string, unknown>, ...keys: string[]) {
 }
 
 function numberOrNull(text: string) {
-  const parsed = Number(text.replace(",", "."));
+  const raw = text.trim();
+  if (!raw) return null;
+  const parsed = Number(raw.replace(",", "."));
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function dateOrNull(input: unknown) {
+  if (!input) return null;
+  if (input instanceof Date) return input;
+  if (typeof input === "number") return new Date(Date.UTC(1899, 11, 30) + input * 86400000);
+  const text = String(input).trim();
+  if (!text) return null;
+  const match = text.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+  const parsed = match ? new Date(Number(match[3]), Number(match[2]) - 1, Number(match[1])) : new Date(text);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
 function registrationType(row: Record<string, unknown>) {
-  const raw = normalizedHeader(value(row, "Loại đăng ký", "Loại", "Vai trò", "Registration Type", "registrationType"));
+  const source = value(row, "Loại đăng ký", "Loại", "Vai trò", "Registration Type", "registrationType");
+  if (!source) return "";
+  const raw = normalizedHeader(source);
   return raw.includes("ctv") || raw.includes("cong tac") || raw.includes("collaborator") ? "collaborator" : "dealer";
 }
 
@@ -125,10 +140,29 @@ export async function POST(request: NextRequest) {
       try {
         const dealerCode = value(row, "Mã đại lý", "Ma dai ly", "Dealer Code", "dealerCode", "Mã khách hàng CRM", "Mã CRM", "CRM Code").toUpperCase();
         const name = value(row, "Tên đại lý", "Ten dai ly", "Tên", "Name", "Công ty", "Company", "Tên công ty");
-        const representativeName = value(row, "Đại diện", "Người đại diện", "Nguoi dai dien", "Representative", "Họ tên", "Ho ten") || name;
+        const representativeName = value(row, "Đại diện", "Người đại diện", "Nguoi dai dien", "Representative", "Họ tên", "Ho ten");
         const phone = normalizePhone(value(row, "SĐT", "Số điện thoại", "Phone", "Điện thoại"));
         const province = value(row, "Tỉnh", "Province", "Tỉnh/Thành", "Tinh thanh");
         const type = registrationType(row);
+        const address = value(row, "Địa chỉ", "Address");
+        const services = value(row, "Dịch vụ", "Năng lực dịch vụ", "Services");
+        const technicianCount = numberOrNull(value(row, "Số KTV", "Technician Count"));
+        const serviceArea = value(row, "Khu vực phụ trách", "Service Area");
+        const companyName = value(row, "Tên công ty", "Company");
+        const email = value(row, "Email");
+        const birthDate = dateOrNull(row["Ngày sinh"] ?? row[normalizedHeader("Ngày sinh")] ?? row["Birth date"] ?? row[normalizedHeader("Birth date")]);
+        const locationType = value(row, "Loại địa điểm", "Location Type");
+        const taxCode = value(row, "Mã số thuế", "Tax Code");
+        const citizenId = value(row, "CCCD", "Citizen ID");
+        const bankAccount = value(row, "Số tài khoản", "Bank Account");
+        const accountHolder = value(row, "Chủ tài khoản", "Account Holder");
+        const bankName = value(row, "Ngân hàng", "Bank Name");
+        const portraitPhoto = value(row, "Ảnh chân dung", "Portrait Photo");
+        const storePhoto = value(row, "Ảnh cửa hàng", "Store Photo");
+        const warehousePhoto = value(row, "Ảnh kho", "Warehouse Photo");
+        const videoName = value(row, "Video", "Tên video", "Video Name");
+        const lat = numberOrNull(value(row, "Vĩ độ", "Latitude", "lat"));
+        const lng = numberOrNull(value(row, "Kinh độ", "Longitude", "lng"));
 
         if (!dealerCode) throw new Error("Thiếu Mã đại lý/Mã CRM; hệ thống không tự sinh mã");
         if (!/^[A-Z0-9][A-Z0-9._/-]{2,39}$/.test(dealerCode)) throw new Error("Mã CRM không hợp lệ");
@@ -141,44 +175,58 @@ export async function POST(request: NextRequest) {
             where: { dealerCode },
             update: {
               name,
-              representativeName,
               phone,
-              registrationType: type,
-              province: province || undefined,
-              address: value(row, "Địa chỉ", "Address") || undefined,
-              services: value(row, "Dịch vụ", "Năng lực dịch vụ", "Services") || "Lắp đặt, bảo trì",
               status: "APPROVED",
-              technicianCount: numberOrNull(value(row, "Số KTV", "Technician Count")) ?? undefined,
-              serviceArea: value(row, "Khu vực phụ trách", "Service Area") || undefined,
-              companyName: value(row, "Tên công ty", "Company") || undefined,
-              taxCode: value(row, "Mã số thuế", "Tax Code") || undefined,
-              citizenId: value(row, "CCCD", "Citizen ID") || undefined,
-              bankAccount: value(row, "Số tài khoản", "Bank Account") || undefined,
-              accountHolder: value(row, "Chủ tài khoản", "Account Holder") || undefined,
-              bankName: value(row, "Ngân hàng", "Bank Name") || undefined,
-              lat: numberOrNull(value(row, "Vĩ độ", "Latitude", "lat")),
-              lng: numberOrNull(value(row, "Kinh độ", "Longitude", "lng")),
+              ...(representativeName ? { representativeName } : {}),
+              ...(type ? { registrationType: type } : {}),
+              ...(province ? { province } : {}),
+              ...(address ? { address } : {}),
+              ...(services ? { services } : {}),
+              ...(technicianCount !== null ? { technicianCount } : {}),
+              ...(serviceArea ? { serviceArea } : {}),
+              ...(companyName ? { companyName } : {}),
+              ...(email ? { email } : {}),
+              ...(birthDate ? { birthDate } : {}),
+              ...(locationType ? { locationType } : {}),
+              ...(taxCode ? { taxCode } : {}),
+              ...(citizenId ? { citizenId } : {}),
+              ...(bankAccount ? { bankAccount } : {}),
+              ...(accountHolder ? { accountHolder } : {}),
+              ...(bankName ? { bankName } : {}),
+              ...(portraitPhoto ? { portraitPhoto } : {}),
+              ...(storePhoto ? { storePhoto } : {}),
+              ...(warehousePhoto ? { warehousePhoto } : {}),
+              ...(videoName ? { videoName } : {}),
+              ...(lat !== null ? { lat } : {}),
+              ...(lng !== null ? { lng } : {}),
             },
             create: {
               dealerCode,
               name,
-              representativeName,
+              representativeName: representativeName || name,
               phone,
-              registrationType: type,
+              registrationType: type || "dealer",
               province: province || null,
-              address: value(row, "Địa chỉ", "Address") || null,
-              services: value(row, "Dịch vụ", "Năng lực dịch vụ", "Services") || "Lắp đặt, bảo trì",
+              address: address || null,
+              services: services || "Lắp đặt, bảo trì",
               status: "APPROVED",
-              technicianCount: numberOrNull(value(row, "Số KTV", "Technician Count")),
-              serviceArea: value(row, "Khu vực phụ trách", "Service Area") || null,
-              companyName: value(row, "Tên công ty", "Company") || null,
-              taxCode: value(row, "Mã số thuế", "Tax Code") || null,
-              citizenId: value(row, "CCCD", "Citizen ID") || null,
-              bankAccount: value(row, "Số tài khoản", "Bank Account") || null,
-              accountHolder: value(row, "Chủ tài khoản", "Account Holder") || null,
-              bankName: value(row, "Ngân hàng", "Bank Name") || null,
-              lat: numberOrNull(value(row, "Vĩ độ", "Latitude", "lat")),
-              lng: numberOrNull(value(row, "Kinh độ", "Longitude", "lng")),
+              technicianCount,
+              serviceArea: serviceArea || null,
+              companyName: companyName || null,
+              email: email || null,
+              birthDate,
+              locationType: locationType || null,
+              taxCode: taxCode || null,
+              citizenId: citizenId || null,
+              bankAccount: bankAccount || null,
+              accountHolder: accountHolder || null,
+              bankName: bankName || null,
+              portraitPhoto: portraitPhoto || null,
+              storePhoto: storePhoto || null,
+              warehousePhoto: warehousePhoto || null,
+              videoName: videoName || null,
+              lat,
+              lng,
             },
           });
           const initialPassword = await ensureApprovedAccount(tx, dealer);
@@ -214,7 +262,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      message: `Đã import và tự động duyệt ${successCount} hồ sơ đại lý/CTV.`,
+      message: `Đã import, đồng bộ các cột có dữ liệu và tự động duyệt ${successCount} hồ sơ đại lý/CTV.`,
       summary: { successCount, errorCount: errors.length, createdCount, updatedCount, accountCreatedCount },
       errors,
     });

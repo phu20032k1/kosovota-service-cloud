@@ -9,7 +9,7 @@ type ImportResult = {
   errors?: { row: number; message: string }[];
 };
 
-export default function ImportMachinesButton({ onComplete }: { onComplete?: () => void }) {
+export default function ImportMachinesButton({ onComplete }: { onComplete?: () => void | Promise<void> }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(false);
   const [fileName, setFileName] = useState("");
@@ -27,7 +27,7 @@ export default function ImportMachinesButton({ onComplete }: { onComplete?: () =
       const response = await fetch("/api/admin/import-machines", { method: "POST", body: formData });
       const data = await response.json();
       setResult(data);
-      if (data.success) onComplete?.();
+      if (data.success && onComplete) await onComplete();
     } catch {
       setResult({ success: false, message: "Không thể upload file. Kiểm tra mạng hoặc đăng nhập Admin." });
     } finally {

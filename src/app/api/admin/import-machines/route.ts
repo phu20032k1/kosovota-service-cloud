@@ -64,8 +64,9 @@ function value(row: Record<string, unknown>, ...keys: string[]) {
 }
 
 function numberValue(row: Record<string, unknown>, ...keys: string[]) {
-  const raw = value(row, ...keys).replace(",", ".");
-  const parsed = Number(raw);
+  const raw = value(row, ...keys);
+  if (!raw) return null;
+  const parsed = Number(raw.replace(",", "."));
   return Number.isFinite(parsed) ? parsed : null;
 }
 
@@ -162,10 +163,13 @@ export async function POST(request: NextRequest) {
         const machineId = (value(row, "ID máy", "ID Máy", "machineId", "Mã máy") || info.serial).toUpperCase();
         const model = info.model;
         if (!machineId || !model) throw new Error("Thiếu ID máy/Seri hoặc Model/Mã số");
+
         const phone = normalizePhone(value(row, "SĐT khách hàng", "Số điện thoại", "SĐT"));
-        const name = value(row, "Tên khách hàng", "Họ tên khách hàng") || "Khách hàng KOSOVOTA";
+        const customerName = value(row, "Tên khách hàng", "Họ tên khách hàng");
         const address = value(row, "Địa chỉ", "Địa chỉ khách hàng");
         const installDate = parseExcelDate(row["Ngày lắp"] ?? row["Ngày lắp đặt"] ?? row["ngay lap"] ?? row["ngay lap dat"]);
+        const provinceCode = value(row, "Mã tỉnh", "Tỉnh", "Tỉnh/Thành", "Tỉnh/Thành phố", "Province");
+        const status = value(row, "Trạng thái", "Status");
         let lat = numberValue(row, "Vĩ độ", "Latitude", "lat");
         let lng = numberValue(row, "Kinh độ", "Longitude", "lng");
         if ((lat === null || lng === null) && address && process.env.GEOCODING_ENABLED === "true") {
@@ -176,52 +180,67 @@ export async function POST(request: NextRequest) {
             console.warn(`Không geocode được dòng ${rowNumber}:`, geocodeError);
           }
         }
+
         const outcome = await prisma.$transaction(async (tx) => {
           const customer = phone ? await tx.customer.upsert({
             where: { phone },
-            update: { name, address: address || undefined },
-            create: { name, phone, address: address || null },
+            update: {
+              ...(customerName ? { name: customerName } : {}),
+              ...(address ? { address } : {}),
+            },
+            create: { name: customerName || "Khách hàng KOSOVOTA", phone, address: address || null },
           }) : null;
-          const existed = await tx.machine.findUnique({ where: { id: machineId }, select: { id: true } });
-          const machine = await tx.machine.upsert({
-          where: { id: machineId },
-          update: {
-            model,
-            name: info.machineName || undefined,
-            capacity: info.capacity || undefined,
-            specification: info.spec || undefined,
-            warrantyMonths: info.warrantyMonths ?? undefined,
-            serial: info.serial || undefined,
-            manufactureDate: info.manufactureDate || undefined,
-            provinceCode: value(row, "Mã tỉnh", "Tỉnh") || undefined,
-            status: value(row, "Trạng thái") || "NEW",
-            installDate: installDate || undefined,
-            customerId: customer?.id,
-            lat,
-            lng,
-          },
-          create: {
-            id: machineId,
-            model,
-            name: info.machineName || null,
-            capacity: info.capacity || null,
-            specification: info.spec || null,
-            warrantyMonths: info.warrantyMonths,
-            serial: info.serial || null,
-            manufactureDate: info.manufactureDate,
-            provinceCode: value(row, "Mã tỉnh", "Tỉnh") || null,
-            status: value(row, "Trạng thái") || "NEW",
-            installDate,
-            customerId: customer?.id || null,
-            lat,
-            lng,
-          },
+
+          const existingMachine = await tx.machine.findFirst({
+            where: info.serial
+              ? { OR: [{ id: machineId }, { serial: info.serial }] }
+              : { id: machineId },
+            select: { id: true },
           });
+          const targetMachineId = existingMachine?.id || machineId;
+
+          const machineUpdate = {
+            model,
+            ...(info.machineName ? { name: info.machineName } : {}),
+            ...(info.capacity ? { capacity: info.capacity } : {}),
+            ...(info.spec ? { specification: info.spec } : {}),
+            ...(info.warrantyMonths !== null ? { warrantyMonths: info.warrantyMonths } : {}),
+            ...(info.serial ? { serial: info.serial } : {}),
+            ...(info.manufactureDate ? { manufactureDate: info.manufactureDate } : {}),
+            ...(provinceCode ? { provinceCode } : {}),
+            ...(status ? { status } : {}),
+            ...(installDate ? { installDate } : {}),
+            ...(customer ? { customerId: customer.id } : {}),
+            ...(lat !== null ? { lat } : {}),
+            ...(lng !== null ? { lng } : {}),
+          };
+
+          const machine = await tx.machine.upsert({
+            where: { id: targetMachineId },
+            update: machineUpdate,
+            create: {
+              id: machineId,
+              model,
+              name: info.machineName || null,
+              capacity: info.capacity || null,
+              specification: info.spec || null,
+              warrantyMonths: info.warrantyMonths,
+              serial: info.serial || null,
+              manufactureDate: info.manufactureDate,
+              provinceCode: provinceCode || null,
+              status: status || "NEW",
+              installDate,
+              customerId: customer?.id || null,
+              lat,
+              lng,
+            },
+          });
+
           if (installDate) {
-            const count = await tx.maintenanceSchedule.count({ where: { machineId } });
-            if (!count) await tx.maintenanceSchedule.createMany({ data: buildMaintenanceSchedules(machineId, installDate, machine.model) });
+            const count = await tx.maintenanceSchedule.count({ where: { machineId: targetMachineId } });
+            if (!count) await tx.maintenanceSchedule.createMany({ data: buildMaintenanceSchedules(targetMachineId, installDate, machine.model) });
           }
-          return { existed: Boolean(existed) };
+          return { existed: Boolean(existingMachine) };
         });
         successCount += 1;
         if (outcome.existed) updatedCount += 1; else createdCount += 1;
@@ -230,7 +249,7 @@ export async function POST(request: NextRequest) {
       }
     }
     await prisma.adminLog.create({ data: { userId: auth.user.id, action: "IMPORT_MACHINES", target: file.name, detail: `Tạo mới ${createdCount}, cập nhật ${updatedCount}, lỗi ${errors.length}` } });
-    return NextResponse.json({ success: true, message: "Đã xử lý file Excel.", summary: { successCount, errorCount: errors.length, createdCount, updatedCount }, errors });
+    return NextResponse.json({ success: true, message: "Đã xử lý file Excel và đồng bộ các cột có dữ liệu.", summary: { successCount, errorCount: errors.length, createdCount, updatedCount }, errors });
   } catch (error) {
     console.error("import machines failed", error);
     return NextResponse.json({ success: false, message: "Không đọc được file Excel." }, { status: 500 });

@@ -5,7 +5,7 @@ import { Icon } from "@/components/ui/Icon";
 
 type Result = { success: boolean; message: string; summary?: { successCount: number; createdCount: number; updatedCount: number; linkedMachineCount: number; errorCount: number }; errors?: { row: number; message: string }[] };
 
-export default function ImportCustomersButton({ onComplete }: { onComplete?: () => void }) {
+export default function ImportCustomersButton({ onComplete }: { onComplete?: () => void | Promise<void> }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<Result | null>(null);
@@ -19,7 +19,7 @@ export default function ImportCustomersButton({ onComplete }: { onComplete?: () 
       const response = await fetch("/api/admin/import-customers", { method: "POST", body });
       const data = await response.json().catch(() => ({ success: false, message: "Máy chủ trả về dữ liệu không hợp lệ." }));
       setResult(data);
-      if (data.success) onComplete?.();
+      if (data.success && onComplete) await onComplete();
     } catch { setResult({ success: false, message: "Không thể tải file lên. Vui lòng kiểm tra kết nối." }); }
     finally { setLoading(false); event.target.value = ""; }
   }
