@@ -426,7 +426,7 @@ export default function InteractiveMap({
           title: marker.title,
         })
           .bindTooltip(
-            `<strong>${escapeHtml(marker.title)}</strong>${marker.subtitle ? `<br/><span>${escapeHtml(marker.subtitle}</span>` : ""}`,
+            `<strong>${escapeHtml(marker.title)}</strong>${marker.subtitle ? `<br/><span>${escapeHtml(marker.subtitle)}</span>` : ""}`,
             { direction: "top", offset: [0, -40] },
           )
           .on("click", () => onSelect?.(marker.id))
