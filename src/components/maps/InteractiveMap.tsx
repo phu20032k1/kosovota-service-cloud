@@ -224,6 +224,7 @@ function createMapTilerMarkerElement(marker: MapMarker, active: boolean) {
   element.className = "kosovota-map-marker-wrap";
   element.title = marker.subtitle ? `${marker.title} · ${marker.subtitle}` : marker.title;
   element.setAttribute("aria-label", element.title);
+  element.addEventListener("mousedown", (event) => event.preventDefault());
   element.innerHTML = `<div class="kosovota-map-marker ${active ? "is-active" : ""}" style="--marker-color:${safeMarkerColor(marker.color)}"><span>${markerGlyph(marker.glyph)}</span></div>`;
   return element;
 }
@@ -294,6 +295,8 @@ export default function InteractiveMap({
             zoom,
             language: "vi",
             minZoom: 5,
+            scrollZoom: false,
+            keyboard: false,
             maxBounds: [
               [VIETNAM_BOUNDS.west, VIETNAM_BOUNDS.south],
               [VIETNAM_BOUNDS.east, VIETNAM_BOUNDS.north],
@@ -306,6 +309,7 @@ export default function InteractiveMap({
             try {
               map.setLanguage("vi");
               hideSensitiveMapLabels(map);
+              containerRef.current?.querySelector("canvas")?.setAttribute("tabindex", "-1");
             } finally {
               setReady(true);
             }
@@ -326,7 +330,8 @@ export default function InteractiveMap({
             streetViewControl: false,
             fullscreenControl: true,
             clickableIcons: false,
-            gestureHandling: "greedy",
+            gestureHandling: "cooperative",
+            keyboardShortcuts: false,
             restriction: {
               latLngBounds: {
                 north: VIETNAM_BOUNDS.north,
@@ -352,6 +357,8 @@ export default function InteractiveMap({
           zoomControl: true,
           attributionControl: true,
           preferCanvas: true,
+          keyboard: false,
+          scrollWheelZoom: false,
           minZoom: 5,
           maxBounds: VIETNAM_BOUNDS_POINTS,
           maxBoundsViscosity: 0.95,
