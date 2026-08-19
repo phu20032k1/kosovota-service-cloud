@@ -5,6 +5,8 @@ import { hasRole } from "@/lib/auth";
 import { isValidVietnamPhone, normalizePhone } from "@/lib/phone";
 import { geocodeAddress } from "@/lib/maps/geocode";
 
+type Coordinates = { lat: number | null; lng: number | null; explicit: boolean };
+
 function normalizedHeader(input: unknown) {
   return String(input ?? "")
     .normalize("NFD")
@@ -85,10 +87,23 @@ function rawValue(row: Record<string, unknown>, ...keys: string[]) {
 function excelDate(input: unknown) {
   if (!input) return null;
   if (input instanceof Date) return input;
-  if (typeof input === "number") return new Date(Date.UTC(1899, 11, 30) + input * 86400000);
+  if (typeof input === "number") {
+    if (Number.isInteger(input) && input >= 1900 && input <= 2100) return new Date(Date.UTC(input, 0, 1));
+    return new Date(Date.UTC(1899, 11, 30) + input * 86400000);
+  }
   const text = String(input).trim();
-  const match = text.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
-  const parsed = match ? new Date(Number(match[3]), Number(match[2]) - 1, Number(match[1])) : new Date(text);
+  if (!text) return null;
+  if (/^(19|20)\d{2}$/.test(text)) return new Date(Date.UTC(Number(text), 0, 1));
+  const monthYear = text.match(/^(\d{1,2})[/-](\d{4})$/);
+  if (monthYear) {
+    const month = Number(monthYear[1]);
+    const year = Number(monthYear[2]);
+    if (month >= 1 && month <= 12) return new Date(Date.UTC(year, month - 1, 1));
+  }
+  const dayMonthYear = text.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+  const parsed = dayMonthYear
+    ? new Date(Date.UTC(Number(dayMonthYear[3]), Number(dayMonthYear[2]) - 1, Number(dayMonthYear[1])))
+    : new Date(text);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
@@ -110,16 +125,30 @@ function hasUsableCoordinates(lat: number | null | undefined, lng: number | null
   return !(Math.abs(lat) < 0.000001 && Math.abs(lng) < 0.000001);
 }
 
-async function coordinatesFromAddress(address: string, inputLat: number | null, inputLng: number | null) {
+async function coordinatesFromAddress(
+  address: string,
+  inputLat: number | null,
+  inputLng: number | null,
+  cache: Map<string, Coordinates>,
+): Promise<Coordinates> {
   if (hasUsableCoordinates(inputLat, inputLng)) return { lat: inputLat, lng: inputLng, explicit: true };
   if (!address || process.env.GEOCODING_ENABLED !== "true") return { lat: null, lng: null, explicit: false };
+  const cacheKey = address.trim().toLowerCase();
+  const cached = cache.get(cacheKey);
+  if (cached) return cached;
   try {
     const result = await geocodeAddress(address);
-    if (result && hasUsableCoordinates(result.lat, result.lng)) return { lat: result.lat, lng: result.lng, explicit: false };
+    const coordinates: Coordinates = result && hasUsableCoordinates(result.lat, result.lng)
+      ? { lat: result.lat, lng: result.lng, explicit: false }
+      : { lat: null, lng: null, explicit: false };
+    cache.set(cacheKey, coordinates);
+    return coordinates;
   } catch (error) {
     console.warn(`Không geocode được địa chỉ khách hàng ${address}:`, error);
+    const coordinates = { lat: null, lng: null, explicit: false };
+    cache.set(cacheKey, coordinates);
+    return coordinates;
   }
-  return { lat: null, lng: null, explicit: false };
 }
 
 export async function POST(request: NextRequest) {
@@ -142,6 +171,7 @@ export async function POST(request: NextRequest) {
     let gpsUpdatedCount = 0;
     let lifecycleUpdatedCount = 0;
     const errors: { row: number; message: string }[] = [];
+    const geocodeCache = new Map<string, Coordinates>();
 
     for (const { data: row, rowNumber } of parsedRows) {
       try {
@@ -161,7 +191,18 @@ export async function POST(request: NextRequest) {
         const warrantyMonths = integerOrNull(value(row, "Thời hạn BH", "Tháng bảo hành", "Bảo hành (tháng)", "Warranty months"));
         const inputLat = numberOrNull(value(row, "Vĩ độ", "Latitude", "lat"));
         const inputLng = numberOrNull(value(row, "Kinh độ", "Longitude", "lng"));
-        const coordinates = await coordinatesFromAddress(address, inputLat, inputLng);
+
+        const existingMachineLocation = machineKey
+          ? await prisma.machine.findFirst({ where: { OR: [{ id: machineKey }, { serial: machineKey }] }, select: { id: true, lat: true, lng: true } })
+          : null;
+        const shouldResolveGps = Boolean(machineKey) && (
+          hasUsableCoordinates(inputLat, inputLng)
+          || !existingMachineLocation
+          || !hasUsableCoordinates(existingMachineLocation.lat, existingMachineLocation.lng)
+        );
+        const coordinates = shouldResolveGps
+          ? await coordinatesFromAddress(address, inputLat, inputLng, geocodeCache)
+          : { lat: null, lng: null, explicit: false };
 
         const outcome = await prisma.$transaction(async (tx) => {
           const existed = await tx.customer.findUnique({ where: { phone }, select: { id: true } });
@@ -205,6 +246,7 @@ export async function POST(request: NextRequest) {
               ...(warrantyMonths !== null && warrantyMonths >= 0 ? { warrantyMonths } : {}),
               ...(machineModel ? { model: machineModel.toUpperCase() } : {}),
               ...(machineName ? { name: machineName } : {}),
+              ...(installDate || activationDate ? { status: "ACTIVE" } : {}),
             };
 
             let machineId: string;
