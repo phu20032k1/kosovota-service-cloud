@@ -13,9 +13,11 @@ type ImportResult = {
     updatedCount?: number;
     accountCreatedCount?: number;
     gpsUpdatedCount?: number;
+    gpsFailedCount?: number;
     technicianUpdatedCount?: number;
   };
   errors?: { row: number; message: string }[];
+  warnings?: { row: number; message: string }[];
 };
 
 export default function ImportDealersButton({ onComplete }: { onComplete?: () => void | Promise<void> }) {
@@ -55,7 +57,7 @@ export default function ImportDealersButton({ onComplete }: { onComplete?: () =>
           <h3 className="mt-1 text-lg font-black text-slate-950">Import danh sách đại lý</h3>
           <p className="mt-1 text-sm leading-6 text-slate-500">
             File mẫu có sẵn cột Số kỹ thuật viên, địa chỉ và GPS. Khi có địa chỉ nhưng chưa có tọa độ,
-            hệ thống tự ghim vị trí bằng MapTiler. Các dòng hợp lệ được đồng bộ theo Mã CRM và tự kích hoạt tài khoản.
+            hệ thống tự ghim vị trí bằng MapTiler. Mã bắt đầu bằng CTV được tự nhận đúng vai trò CTV kể cả file không có cột Loại đăng ký.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -68,9 +70,9 @@ export default function ImportDealersButton({ onComplete }: { onComplete?: () =>
         </div>
       </div>
       <div className="mt-4 grid gap-2 rounded-2xl border border-dashed border-blue-200 bg-blue-50/70 p-3 text-xs text-blue-900 sm:grid-cols-3">
-        <span><strong>1.</strong> Tải mẫu CSV, mở bằng Excel và điền dữ liệu.</span>
+        <span><strong>1.</strong> Tải mẫu CSV hoặc dùng trực tiếp file Excel hiện có.</span>
         <span><strong>2.</strong> Cột “Số kỹ thuật viên” được đồng bộ trực tiếp.</span>
-        <span><strong>3.</strong> Hỗ trợ .xlsx, .xlsm, .csv; địa chỉ có thể tự sinh GPS.</span>
+        <span><strong>3.</strong> Địa chỉ tự sinh GPS; nếu không ghim được sẽ báo đúng dòng.</span>
       </div>
       <input ref={inputRef} type="file" accept=".xlsx,.xlsm,.csv" onChange={handleUpload} disabled={loading} className="sr-only" />
       {fileName && <p className="mt-3 break-all rounded-xl bg-slate-50 px-3 py-2 text-xs font-bold text-slate-600">File: {fileName}</p>}
@@ -84,13 +86,21 @@ export default function ImportDealersButton({ onComplete }: { onComplete?: () =>
               {typeof result.summary.updatedCount === "number" ? ` · Cập nhật: ${result.summary.updatedCount}` : ""}
               {typeof result.summary.accountCreatedCount === "number" ? ` · Tạo tài khoản: ${result.summary.accountCreatedCount}` : ""}
               {typeof result.summary.technicianUpdatedCount === "number" ? ` · Số KTV: ${result.summary.technicianUpdatedCount}` : ""}
-              {typeof result.summary.gpsUpdatedCount === "number" ? ` · GPS: ${result.summary.gpsUpdatedCount}` : ""}
+              {typeof result.summary.gpsUpdatedCount === "number" ? ` · GPS đã ghim: ${result.summary.gpsUpdatedCount}` : ""}
+              {typeof result.summary.gpsFailedCount === "number" ? ` · GPS chưa ghim: ${result.summary.gpsFailedCount}` : ""}
               {` · Lỗi: ${result.summary.errorCount}`}
             </p>
           )}
           {!!result.errors?.length && (
-            <div className="mt-2 max-h-56 space-y-1 overflow-y-auto rounded-xl bg-white/70 p-2">
+            <div className="mt-2 max-h-56 space-y-1 overflow-y-auto rounded-xl bg-white/70 p-2 text-rose-900">
+              <strong>Lỗi dữ liệu:</strong>
               {result.errors.slice(0, 100).map((error) => <p key={`${error.row}-${error.message}`}>Dòng {error.row}: {error.message}</p>)}
+            </div>
+          )}
+          {!!result.warnings?.length && (
+            <div className="mt-2 max-h-56 space-y-1 overflow-y-auto rounded-xl border border-amber-200 bg-amber-50 p-2 text-amber-900">
+              <strong>Cảnh báo GPS:</strong>
+              {result.warnings.slice(0, 100).map((warning) => <p key={`${warning.row}-${warning.message}`}>Dòng {warning.row}: {warning.message}</p>)}
             </div>
           )}
         </div>
