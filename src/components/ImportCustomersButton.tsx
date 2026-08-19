@@ -12,10 +12,12 @@ type Result = {
     updatedCount: number;
     linkedMachineCount: number;
     gpsUpdatedCount?: number;
+    gpsFailedCount?: number;
     lifecycleUpdatedCount?: number;
     errorCount: number;
   };
   errors?: { row: number; message: string }[];
+  warnings?: { row: number; message: string }[];
 };
 
 export default function ImportCustomersButton({ onComplete }: { onComplete?: () => void | Promise<void> }) {
@@ -52,7 +54,7 @@ export default function ImportCustomersButton({ onComplete }: { onComplete?: () 
           <p className="mt-1 text-sm leading-6 text-slate-500">
             Bắt buộc: Tên khách hàng và Số điện thoại. File mẫu đã có sẵn các cột Seri, Model, Tên máy,
             Ngày SX, Ngày lắp đặt, Thời hạn BH, Kích hoạt bảo hành và GPS. Nếu có địa chỉ nhưng chưa có GPS,
-            hệ thống tự lấy tọa độ và chỉ bổ sung cho máy đang thiếu vị trí.
+            hệ thống chủ động thử lấy tọa độ; nếu không lấy được sẽ báo đúng dòng để kiểm tra địa chỉ/cấu hình bản đồ.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -66,9 +68,9 @@ export default function ImportCustomersButton({ onComplete }: { onComplete?: () 
       </div>
 
       <div className="mt-4 grid gap-2 rounded-2xl border border-dashed border-blue-200 bg-blue-50/60 p-3 text-xs text-blue-900 md:grid-cols-3">
-        <span><strong>1.</strong> Tải file mẫu CSV và mở bằng Excel.</span>
+        <span><strong>1.</strong> Tải file mẫu CSV hoặc dùng file Excel hiện có.</span>
         <span><strong>2.</strong> Không đổi tên các cột chính; để trống cột không có dữ liệu.</span>
-        <span><strong>3.</strong> Hỗ trợ .xlsx, .xlsm, .csv; lỗi sẽ chỉ rõ từng dòng.</span>
+        <span><strong>3.</strong> Hỗ trợ .xlsx, .xlsm, .csv; lỗi/GPS sẽ chỉ rõ từng dòng.</span>
       </div>
 
       <input ref={inputRef} type="file" accept=".xlsx,.xlsm,.csv" onChange={upload} className="sr-only" />
@@ -80,14 +82,22 @@ export default function ImportCustomersButton({ onComplete }: { onComplete?: () 
             <p className="mt-1 leading-6">
               Thành công: {result.summary.successCount} · Tạo mới: {result.summary.createdCount} · Cập nhật: {result.summary.updatedCount}
               {' · '}Gắn máy: {result.summary.linkedMachineCount}
-              {typeof result.summary.gpsUpdatedCount === "number" ? ` · GPS: ${result.summary.gpsUpdatedCount}` : ""}
+              {typeof result.summary.gpsUpdatedCount === "number" ? ` · GPS đã ghim: ${result.summary.gpsUpdatedCount}` : ""}
+              {typeof result.summary.gpsFailedCount === "number" ? ` · GPS chưa ghim: ${result.summary.gpsFailedCount}` : ""}
               {typeof result.summary.lifecycleUpdatedCount === "number" ? ` · Vòng đời/BH: ${result.summary.lifecycleUpdatedCount}` : ""}
               {` · Lỗi: ${result.summary.errorCount}`}
             </p>
           )}
           {!!result.errors?.length && (
-            <div className="mt-2 max-h-56 overflow-auto rounded-xl bg-white/70 p-2">
+            <div className="mt-2 max-h-56 overflow-auto rounded-xl bg-white/70 p-2 text-rose-900">
+              <strong>Lỗi dữ liệu:</strong>
               {result.errors.slice(0, 100).map((error) => <p key={`${error.row}-${error.message}`}>Dòng {error.row}: {error.message}</p>)}
+            </div>
+          )}
+          {!!result.warnings?.length && (
+            <div className="mt-2 max-h-56 overflow-auto rounded-xl border border-amber-200 bg-amber-50 p-2 text-amber-900">
+              <strong>Cảnh báo GPS:</strong>
+              {result.warnings.slice(0, 100).map((warning) => <p key={`${warning.row}-${warning.message}`}>Dòng {warning.row}: {warning.message}</p>)}
             </div>
           )}
         </div>
