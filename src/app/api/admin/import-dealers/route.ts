@@ -116,11 +116,13 @@ function dateOrNull(input: unknown) {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
-function registrationType(row: Record<string, unknown>) {
+function registrationType(row: Record<string, unknown>, dealerCode: string) {
   const source = value(row, "Loại đăng ký", "Loại", "Vai trò", "Registration Type", "registrationType");
-  if (!source) return "";
-  const raw = normalizedHeader(source);
-  return raw.includes("ctv") || raw.includes("cong tac") || raw.includes("collaborator") ? "collaborator" : "dealer";
+  if (source) {
+    const raw = normalizedHeader(source);
+    return raw.includes("ctv") || raw.includes("cong tac") || raw.includes("collaborator") ? "collaborator" : "dealer";
+  }
+  return /^CTV/i.test(dealerCode) ? "collaborator" : "dealer";
 }
 
 async function ensureApprovedAccount(
@@ -128,9 +130,12 @@ async function ensureApprovedAccount(
   dealer: { dealerCode: string; phone: string; name: string; representativeName?: string | null; registrationType?: string | null },
 ) {
   const phone = normalizePhone(dealer.phone);
-  const role = /ctv|collaborator|cộng tác/i.test(dealer.registrationType || "") ? "CTV" : "DEALER";
+  const role = /^CTV/i.test(dealer.dealerCode) || /ctv|collaborator|cộng tác/i.test(dealer.registrationType || "") ? "CTV" : "DEALER";
   const existing = await tx.user.findUnique({ where: { phone } });
   if (existing && !["DEALER", "CTV"].includes(existing.role)) throw new Error("SĐT đang thuộc tài khoản vai trò khác");
+  if (existing?.dealerCode && existing.dealerCode !== dealer.dealerCode) {
+    throw new Error(`SĐT đã thuộc hồ sơ ${existing.dealerCode}`);
+  }
   if (existing) {
     await tx.user.update({
       where: { id: existing.id },
@@ -178,8 +183,11 @@ export async function POST(request: NextRequest) {
     let updatedCount = 0;
     let accountCreatedCount = 0;
     let gpsUpdatedCount = 0;
+    let gpsFailedCount = 0;
     let technicianUpdatedCount = 0;
     const errors: { row: number; message: string }[] = [];
+    const warnings: { row: number; message: string }[] = [];
+    const geocodeCache = new Map<string, { lat: number; lng: number } | null>();
 
     for (const { data: row, rowNumber } of parsedRows) {
       try {
@@ -188,7 +196,6 @@ export async function POST(request: NextRequest) {
         const representativeName = value(row, "Đại diện", "Người đại diện", "Nguoi dai dien", "Representative", "Họ tên", "Ho ten");
         const phone = normalizePhone(value(row, "SĐT", "Số điện thoại", "Phone", "Điện thoại"));
         const province = value(row, "Tỉnh", "Province", "Tỉnh/Thành", "Tinh thanh");
-        const type = registrationType(row);
         const address = value(row, "Địa chỉ", "Address");
         const services = value(row, "Dịch vụ", "Năng lực dịch vụ", "Services");
         const technicianCount = integerCount(value(
@@ -220,6 +227,7 @@ export async function POST(request: NextRequest) {
         if (!/^[A-Z0-9][A-Z0-9._/-]{2,39}$/.test(dealerCode)) throw new Error("Mã CRM không hợp lệ");
         if (!name) throw new Error("Thiếu tên đại lý");
         if (!isValidVietnamPhone(phone)) throw new Error(`SĐT không hợp lệ: ${phone || "trống"}`);
+        const type = registrationType(row, dealerCode);
 
         const existed = await prisma.dealer.findUnique({
           where: { dealerCode },
@@ -236,19 +244,31 @@ export async function POST(request: NextRequest) {
           lng = inputLng;
           coordinatesShouldChange = true;
         } else if (address && (!existed || addressChanged || !hasUsableCoordinates(existed.lat, existed.lng))) {
-          coordinatesShouldChange = true;
-          lat = null;
-          lng = null;
-          if (process.env.GEOCODING_ENABLED === "true") {
+          const cacheKey = normalizedHeader(address);
+          let location = geocodeCache.get(cacheKey);
+          if (location === undefined) {
             try {
-              const location = await geocodeAddress(address);
-              if (location && hasUsableCoordinates(location.lat, location.lng)) {
-                lat = location.lat;
-                lng = location.lng;
-                gpsAutoFilled = true;
-              }
+              const result = await geocodeAddress(address);
+              location = result && hasUsableCoordinates(result.lat, result.lng) ? { lat: result.lat, lng: result.lng } : null;
             } catch (geocodeError) {
               console.warn(`Không tự lấy được GPS dòng ${rowNumber} (${dealerCode}):`, geocodeError);
+              location = null;
+            }
+            geocodeCache.set(cacheKey, location);
+          }
+
+          if (location) {
+            lat = location.lat;
+            lng = location.lng;
+            coordinatesShouldChange = true;
+            gpsAutoFilled = true;
+          } else {
+            gpsFailedCount += 1;
+            warnings.push({ row: rowNumber, message: `Không tự ghim được GPS từ địa chỉ của ${dealerCode}; hồ sơ vẫn được import.` });
+            if (addressChanged && hasUsableCoordinates(existed?.lat, existed?.lng)) {
+              coordinatesShouldChange = true;
+              lat = null;
+              lng = null;
             }
           }
         }
@@ -260,8 +280,8 @@ export async function POST(request: NextRequest) {
               name,
               phone,
               status: "APPROVED",
-              ...(representativeName ? { representativeName } : {}),
-              ...(type ? { registrationType: type } : {}),
+              representativeName: representativeName || name,
+              registrationType: type,
               ...(province ? { province } : {}),
               ...(address ? { address } : {}),
               ...(services ? { services } : {}),
@@ -287,7 +307,7 @@ export async function POST(request: NextRequest) {
               name,
               representativeName: representativeName || name,
               phone,
-              registrationType: type || "dealer",
+              registrationType: type,
               province: province || null,
               address: address || null,
               services: services || "Lắp đặt, bảo trì",
@@ -340,7 +360,7 @@ export async function POST(request: NextRequest) {
         userId: auth.user.id,
         action: "IMPORT_DEALERS_AUTO_APPROVED",
         target: file.name,
-        detail: `Tự động duyệt ${successCount}; tạo ${createdCount}; cập nhật ${updatedCount}; KTV ${technicianUpdatedCount}; GPS ${gpsUpdatedCount}; lỗi ${errors.length}`,
+        detail: `Tự động duyệt ${successCount}; tạo ${createdCount}; cập nhật ${updatedCount}; KTV ${technicianUpdatedCount}; GPS ${gpsUpdatedCount}; GPS chưa ghim ${gpsFailedCount}; lỗi ${errors.length}`,
       },
     });
     if (successCount > 0) await bumpDealerCacheVersion();
@@ -349,7 +369,9 @@ export async function POST(request: NextRequest) {
       success: true,
       message: errors.length
         ? `Đã xử lý ${successCount} hồ sơ; có ${errors.length} dòng lỗi cần kiểm tra.`
-        : `Đã import và tự động duyệt ${successCount} hồ sơ đại lý/CTV.`,
+        : gpsFailedCount
+          ? `Đã import và tự động duyệt ${successCount} hồ sơ. Có ${gpsFailedCount} địa chỉ chưa tự ghim được GPS; xem cảnh báo bên dưới.`
+          : `Đã import và tự động duyệt ${successCount} hồ sơ đại lý/CTV.`,
       summary: {
         successCount,
         errorCount: errors.length,
@@ -357,9 +379,11 @@ export async function POST(request: NextRequest) {
         updatedCount,
         accountCreatedCount,
         gpsUpdatedCount,
+        gpsFailedCount,
         technicianUpdatedCount,
       },
       errors,
+      warnings,
     });
   } catch (error) {
     console.error("import dealers failed", error);
