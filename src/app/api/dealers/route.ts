@@ -33,6 +33,9 @@ function isDealerStatus(value: string): value is DealerStatus {
 function statusErrorMessage(error: unknown, dealerCode: string) {
   const message = error instanceof Error ? error.message : "";
   if (message === "PHONE_ROLE_CONFLICT") return "Số điện thoại đang thuộc tài khoản vai trò khác.";
+  if (message.startsWith("PHONE_DEALER_CONFLICT:")) {
+    return `Số điện thoại đã thuộc hồ sơ ${message.split(":")[1] || "đại lý/CTV khác"}.`;
+  }
   if (message === "DEALER_NOT_FOUND") return `Không tìm thấy đại lý ${dealerCode}.`;
   return message && !message.startsWith("Prisma") ? message : "Không cập nhật được hồ sơ này.";
 }
@@ -52,8 +55,11 @@ async function updateOneDealerStatus(
     if (status === "APPROVED") {
       const phone = normalizePhone(updated.phone);
       const existing = await tx.user.findUnique({ where: { phone } });
-      const accountRole = /ctv|collaborator|cộng tác/i.test(updated.registrationType || "") ? "CTV" : "DEALER";
+      const accountRole = /^CTV/i.test(updated.dealerCode) || /ctv|collaborator|cộng tác/i.test(updated.registrationType || "") ? "CTV" : "DEALER";
       if (existing && !["DEALER", "CTV"].includes(existing.role)) throw new Error("PHONE_ROLE_CONFLICT");
+      if (existing?.dealerCode && existing.dealerCode !== updated.dealerCode) {
+        throw new Error(`PHONE_DEALER_CONFLICT:${existing.dealerCode}`);
+      }
 
       if (!existing) {
         initialPassword = `Ksv@${randomBytes(4).toString("hex")}`;
