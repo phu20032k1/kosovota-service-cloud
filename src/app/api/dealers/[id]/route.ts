@@ -30,7 +30,8 @@ export async function GET(request: NextRequest, { params }: Params) {
   const { id } = await params;
   const dealer = await prisma.dealer.findUnique({ where: { id }, include: { serviceOrders: { orderBy: { createdAt: "desc" }, take: 100 }, supportTickets: { orderBy: { createdAt: "desc" }, take: 100 }, paymentBatches: { orderBy: { createdAt: "desc" }, take: 50 } } });
   if (!dealer) return NextResponse.json({ success: false, message: "Không tìm thấy đại lý." }, { status: 404 });
-  return NextResponse.json({ success: true, data: dealer });
+  const data = hasUsableCoordinates(dealer.lat, dealer.lng) ? dealer : { ...dealer, lat: null, lng: null };
+  return NextResponse.json({ success: true, data });
 }
 
 export async function PUT(request: NextRequest, { params }: Params) {
