@@ -6,6 +6,8 @@ import { prisma } from "@/lib/prisma";
 import { hasRole } from "@/lib/auth";
 import { normalizePhone, isValidVietnamPhone } from "@/lib/phone";
 import { hashPassword } from "@/lib/password";
+import { geocodeAddress } from "@/lib/maps/geocode";
+import { bumpDealerCacheVersion } from "@/lib/redis";
 
 function normalizedHeader(value: unknown) {
   return String(value ?? "")
@@ -59,6 +61,13 @@ function numberOrNull(text: string) {
   if (!raw) return null;
   const parsed = Number(raw.replace(",", "."));
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function hasUsableCoordinates(lat: number | null | undefined, lng: number | null | undefined) {
+  if (lat === null || lat === undefined || lng === null || lng === undefined) return false;
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return false;
+  return !(Math.abs(lat) < 0.000001 && Math.abs(lng) < 0.000001);
 }
 
 function dateOrNull(input: unknown) {
@@ -134,6 +143,7 @@ export async function POST(request: NextRequest) {
     let createdCount = 0;
     let updatedCount = 0;
     let accountCreatedCount = 0;
+    let gpsUpdatedCount = 0;
     const errors: { row: number; message: string }[] = [];
 
     for (const { data: row, rowNumber } of parsedRows) {
@@ -161,15 +171,46 @@ export async function POST(request: NextRequest) {
         const storePhoto = value(row, "Ảnh cửa hàng", "Store Photo");
         const warehousePhoto = value(row, "Ảnh kho", "Warehouse Photo");
         const videoName = value(row, "Video", "Tên video", "Video Name");
-        const lat = numberOrNull(value(row, "Vĩ độ", "Latitude", "lat"));
-        const lng = numberOrNull(value(row, "Kinh độ", "Longitude", "lng"));
+        const inputLat = numberOrNull(value(row, "Vĩ độ", "Latitude", "lat"));
+        const inputLng = numberOrNull(value(row, "Kinh độ", "Longitude", "lng"));
 
         if (!dealerCode) throw new Error("Thiếu Mã đại lý/Mã CRM; hệ thống không tự sinh mã");
         if (!/^[A-Z0-9][A-Z0-9._/-]{2,39}$/.test(dealerCode)) throw new Error("Mã CRM không hợp lệ");
         if (!name) throw new Error("Thiếu tên đại lý");
         if (!isValidVietnamPhone(phone)) throw new Error("SĐT không hợp lệ");
 
-        const existed = await prisma.dealer.findUnique({ where: { dealerCode }, select: { id: true } });
+        const existed = await prisma.dealer.findUnique({
+          where: { dealerCode },
+          select: { id: true, address: true, lat: true, lng: true },
+        });
+        const addressChanged = Boolean(address) && address !== (existed?.address || "").trim();
+        let lat: number | null | undefined;
+        let lng: number | null | undefined;
+        let coordinatesShouldChange = false;
+        let gpsAutoFilled = false;
+
+        if (hasUsableCoordinates(inputLat, inputLng)) {
+          lat = inputLat;
+          lng = inputLng;
+          coordinatesShouldChange = true;
+        } else if (address && (!existed || addressChanged || !hasUsableCoordinates(existed.lat, existed.lng))) {
+          coordinatesShouldChange = true;
+          lat = null;
+          lng = null;
+          if (process.env.GEOCODING_ENABLED === "true") {
+            try {
+              const location = await geocodeAddress(address);
+              if (location && hasUsableCoordinates(location.lat, location.lng)) {
+                lat = location.lat;
+                lng = location.lng;
+                gpsAutoFilled = true;
+              }
+            } catch (geocodeError) {
+              console.warn(`Không tự lấy được GPS dòng ${rowNumber} (${dealerCode}):`, geocodeError);
+            }
+          }
+        }
+
         const result = await prisma.$transaction(async (tx) => {
           const dealer = await tx.dealer.upsert({
             where: { dealerCode },
@@ -197,8 +238,7 @@ export async function POST(request: NextRequest) {
               ...(storePhoto ? { storePhoto } : {}),
               ...(warehousePhoto ? { warehousePhoto } : {}),
               ...(videoName ? { videoName } : {}),
-              ...(lat !== null ? { lat } : {}),
-              ...(lng !== null ? { lng } : {}),
+              ...(coordinatesShouldChange ? { lat: lat ?? null, lng: lng ?? null } : {}),
             },
             create: {
               dealerCode,
@@ -225,8 +265,8 @@ export async function POST(request: NextRequest) {
               storePhoto: storePhoto || null,
               warehousePhoto: warehousePhoto || null,
               videoName: videoName || null,
-              lat,
-              lng,
+              lat: coordinatesShouldChange ? lat ?? null : null,
+              lng: coordinatesShouldChange ? lng ?? null : null,
             },
           });
           const initialPassword = await ensureApprovedAccount(tx, dealer);
@@ -246,6 +286,7 @@ export async function POST(request: NextRequest) {
         successCount += 1;
         if (existed) updatedCount += 1; else createdCount += 1;
         if (result.initialPassword) accountCreatedCount += 1;
+        if (gpsAutoFilled) gpsUpdatedCount += 1;
       } catch (error) {
         errors.push({ row: rowNumber, message: error instanceof Error ? error.message : "Dữ liệu không hợp lệ" });
       }
@@ -256,14 +297,15 @@ export async function POST(request: NextRequest) {
         userId: auth.user.id,
         action: "IMPORT_DEALERS_AUTO_APPROVED",
         target: file.name,
-        detail: `Tự động duyệt ${successCount}; tạo ${createdCount}; cập nhật ${updatedCount}; lỗi ${errors.length}`,
+        detail: `Tự động duyệt ${successCount}; tạo ${createdCount}; cập nhật ${updatedCount}; GPS từ địa chỉ ${gpsUpdatedCount}; lỗi ${errors.length}`,
       },
     });
+    if (successCount > 0) await bumpDealerCacheVersion();
 
     return NextResponse.json({
       success: true,
-      message: `Đã import, đồng bộ các cột có dữ liệu và tự động duyệt ${successCount} hồ sơ đại lý/CTV.`,
-      summary: { successCount, errorCount: errors.length, createdCount, updatedCount, accountCreatedCount },
+      message: `Đã import, đồng bộ các cột có dữ liệu và tự động duyệt ${successCount} hồ sơ đại lý/CTV.${gpsUpdatedCount ? ` Đã tự lấy GPS từ địa chỉ cho ${gpsUpdatedCount} hồ sơ.` : ""}`,
+      summary: { successCount, errorCount: errors.length, createdCount, updatedCount, accountCreatedCount, gpsUpdatedCount },
       errors,
     });
   } catch (error) {
