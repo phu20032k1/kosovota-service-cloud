@@ -48,6 +48,36 @@ function spreadsheetRows(cells: unknown[][]) {
   return rows;
 }
 
+function parseCsv(text: string) {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = "";
+  let quoted = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (char === '"') {
+      if (quoted && text[index + 1] === '"') { cell += '"'; index += 1; }
+      else quoted = !quoted;
+    } else if (char === "," && !quoted) {
+      row.push(cell); cell = "";
+    } else if ((char === "\n" || char === "\r") && !quoted) {
+      if (char === "\r" && text[index + 1] === "\n") index += 1;
+      row.push(cell); cell = "";
+      if (row.some((value) => value.trim())) rows.push(row);
+      row = [];
+    } else cell += char;
+  }
+  row.push(cell);
+  if (row.some((value) => value.trim())) rows.push(row);
+  return rows;
+}
+
+async function readRows(file: File) {
+  const buffer = Buffer.from(await file.arrayBuffer());
+  if (/\.csv$/i.test(file.name)) return spreadsheetRows(parseCsv(buffer.toString("utf8").replace(/^\uFEFF/, "")));
+  return spreadsheetRows(await readSheet(buffer));
+}
+
 function value(row: Record<string, unknown>, ...keys: string[]) {
   for (const key of keys) {
     const found = row[key] ?? row[normalizedHeader(key)];
@@ -61,6 +91,11 @@ function numberOrNull(text: string) {
   if (!raw) return null;
   const parsed = Number(raw.replace(",", "."));
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function integerCount(text: string) {
+  const value = numberOrNull(text);
+  return value === null ? null : Math.max(0, Math.round(value));
 }
 
 function hasUsableCoordinates(lat: number | null | undefined, lng: number | null | undefined) {
@@ -125,12 +160,11 @@ export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
     const file = formData.get("file");
-    if (!(file instanceof File)) return NextResponse.json({ success: false, message: "Chưa chọn file Excel." }, { status: 400 });
-    if (file.size > 15 * 1024 * 1024) return NextResponse.json({ success: false, message: "File Excel tối đa 15 MB." }, { status: 413 });
-    if (!/\.(xlsx|xlsm)$/i.test(file.name)) return NextResponse.json({ success: false, message: "Chỉ hỗ trợ file .xlsx hoặc .xlsm." }, { status: 415 });
+    if (!(file instanceof File)) return NextResponse.json({ success: false, message: "Chưa chọn file dữ liệu." }, { status: 400 });
+    if (file.size > 15 * 1024 * 1024) return NextResponse.json({ success: false, message: "File tối đa 15 MB." }, { status: 413 });
+    if (!/\.(xlsx|xlsm|csv)$/i.test(file.name)) return NextResponse.json({ success: false, message: "Chỉ hỗ trợ file .xlsx, .xlsm hoặc .csv." }, { status: 415 });
 
-    const cells = await readSheet(Buffer.from(await file.arrayBuffer()));
-    const parsedRows = spreadsheetRows(cells);
+    const parsedRows = await readRows(file);
     if (!parsedRows) {
       return NextResponse.json({
         success: false,
@@ -144,6 +178,7 @@ export async function POST(request: NextRequest) {
     let updatedCount = 0;
     let accountCreatedCount = 0;
     let gpsUpdatedCount = 0;
+    let technicianUpdatedCount = 0;
     const errors: { row: number; message: string }[] = [];
 
     for (const { data: row, rowNumber } of parsedRows) {
@@ -156,7 +191,14 @@ export async function POST(request: NextRequest) {
         const type = registrationType(row);
         const address = value(row, "Địa chỉ", "Address");
         const services = value(row, "Dịch vụ", "Năng lực dịch vụ", "Services");
-        const technicianCount = numberOrNull(value(row, "Số KTV", "Technician Count"));
+        const technicianCount = integerCount(value(
+          row,
+          "Số KTV",
+          "Số kỹ thuật viên",
+          "Số kỹ thuật viên hiện có",
+          "Kỹ thuật viên",
+          "Technician Count",
+        ));
         const serviceArea = value(row, "Khu vực phụ trách", "Service Area");
         const companyName = value(row, "Tên công ty", "Company");
         const email = value(row, "Email");
@@ -177,7 +219,7 @@ export async function POST(request: NextRequest) {
         if (!dealerCode) throw new Error("Thiếu Mã đại lý/Mã CRM; hệ thống không tự sinh mã");
         if (!/^[A-Z0-9][A-Z0-9._/-]{2,39}$/.test(dealerCode)) throw new Error("Mã CRM không hợp lệ");
         if (!name) throw new Error("Thiếu tên đại lý");
-        if (!isValidVietnamPhone(phone)) throw new Error("SĐT không hợp lệ");
+        if (!isValidVietnamPhone(phone)) throw new Error(`SĐT không hợp lệ: ${phone || "trống"}`);
 
         const existed = await prisma.dealer.findUnique({
           where: { dealerCode },
@@ -287,6 +329,7 @@ export async function POST(request: NextRequest) {
         if (existed) updatedCount += 1; else createdCount += 1;
         if (result.initialPassword) accountCreatedCount += 1;
         if (gpsAutoFilled) gpsUpdatedCount += 1;
+        if (technicianCount !== null) technicianUpdatedCount += 1;
       } catch (error) {
         errors.push({ row: rowNumber, message: error instanceof Error ? error.message : "Dữ liệu không hợp lệ" });
       }
@@ -297,19 +340,29 @@ export async function POST(request: NextRequest) {
         userId: auth.user.id,
         action: "IMPORT_DEALERS_AUTO_APPROVED",
         target: file.name,
-        detail: `Tự động duyệt ${successCount}; tạo ${createdCount}; cập nhật ${updatedCount}; GPS từ địa chỉ ${gpsUpdatedCount}; lỗi ${errors.length}`,
+        detail: `Tự động duyệt ${successCount}; tạo ${createdCount}; cập nhật ${updatedCount}; KTV ${technicianUpdatedCount}; GPS ${gpsUpdatedCount}; lỗi ${errors.length}`,
       },
     });
     if (successCount > 0) await bumpDealerCacheVersion();
 
     return NextResponse.json({
       success: true,
-      message: `Đã import, đồng bộ các cột có dữ liệu và tự động duyệt ${successCount} hồ sơ đại lý/CTV.${gpsUpdatedCount ? ` Đã tự lấy GPS từ địa chỉ cho ${gpsUpdatedCount} hồ sơ.` : ""}`,
-      summary: { successCount, errorCount: errors.length, createdCount, updatedCount, accountCreatedCount, gpsUpdatedCount },
+      message: errors.length
+        ? `Đã xử lý ${successCount} hồ sơ; có ${errors.length} dòng lỗi cần kiểm tra.`
+        : `Đã import và tự động duyệt ${successCount} hồ sơ đại lý/CTV.`,
+      summary: {
+        successCount,
+        errorCount: errors.length,
+        createdCount,
+        updatedCount,
+        accountCreatedCount,
+        gpsUpdatedCount,
+        technicianUpdatedCount,
+      },
       errors,
     });
   } catch (error) {
     console.error("import dealers failed", error);
-    return NextResponse.json({ success: false, message: "Không đọc được file Excel." }, { status: 500 });
+    return NextResponse.json({ success: false, message: "Không đọc được file đại lý." }, { status: 500 });
   }
 }
