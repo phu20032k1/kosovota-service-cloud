@@ -8,8 +8,8 @@ import { geocodeAddress } from "@/lib/maps/geocode";
 
 type Params = { params: Promise<{ id: string }> };
 
-function hasUsableCoordinates(lat: number | null, lng: number | null) {
-  if (lat === null || lng === null || !Number.isFinite(lat) || !Number.isFinite(lng)) return false;
+function hasUsableCoordinates(lat: number | null | undefined, lng: number | null | undefined) {
+  if (lat == null || lng == null || !Number.isFinite(lat) || !Number.isFinite(lng)) return false;
   if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return false;
   return !(Math.abs(lat) < 0.000001 && Math.abs(lng) < 0.000001);
 }
@@ -50,7 +50,43 @@ export async function GET(request: NextRequest, { params }: Params) {
       },
     });
     if (!customer) return NextResponse.json({ success: false, message: "Không tìm thấy khách hàng." }, { status: 404 });
-    return NextResponse.json({ success: true, data: customer });
+
+    const machinesMissingGps = customer.machines.filter((machine) => !hasUsableCoordinates(machine.lat, machine.lng));
+    let gpsBackfilledCount = 0;
+    let gpsWarning: string | undefined;
+
+    if (machinesMissingGps.length) {
+      const address = customer.address?.trim();
+      if (!address) {
+        gpsWarning = `${machinesMissingGps.length} máy chưa có GPS nhưng khách hàng chưa có địa chỉ để tự ghim.`;
+      } else {
+        const location = await geocodeCustomerAddress(address);
+        if (location) {
+          const machineIds = machinesMissingGps.map((machine) => machine.id);
+          const updated = await prisma.machine.updateMany({
+            where: { customerId: customer.id, id: { in: machineIds } },
+            data: { lat: location.lat, lng: location.lng },
+          });
+          gpsBackfilledCount = updated.count;
+          for (const machine of machinesMissingGps) {
+            machine.lat = location.lat;
+            machine.lng = location.lng;
+          }
+        } else {
+          gpsWarning = `Không tự ghim được GPS từ địa chỉ khách hàng: ${address}. Hãy kiểm tra lại địa chỉ hoặc cấu hình MapTiler/Google Maps.`;
+        }
+      }
+    }
+
+    return NextResponse.json({
+      success: true,
+      data: customer,
+      gpsBackfilledCount,
+      gpsWarning,
+      message: gpsBackfilledCount
+        ? `Đã tự ghim GPS cho ${gpsBackfilledCount} máy từ địa chỉ khách hàng.`
+        : undefined,
+    });
   } catch (error) {
     console.error("GET /api/crm/customers/[id] failed", error);
     return NextResponse.json({ success: false, message: databaseErrorMessage(error, "Không tải được hồ sơ khách hàng.") }, { status: 500 });
@@ -95,10 +131,15 @@ export async function PUT(request: NextRequest, { params }: Params) {
           where: { customerId: id },
           select: { id: true, lat: true, lng: true },
         });
-        for (const machine of machines) {
-          if (hasUsableCoordinates(machine.lat, machine.lng)) continue;
-          await tx.machine.update({ where: { id: machine.id }, data: { lat: location.lat, lng: location.lng } });
-          gpsUpdatedCount += 1;
+        const machineIds = machines
+          .filter((machine) => !hasUsableCoordinates(machine.lat, machine.lng))
+          .map((machine) => machine.id);
+        if (machineIds.length) {
+          const updated = await tx.machine.updateMany({
+            where: { customerId: id, id: { in: machineIds } },
+            data: { lat: location.lat, lng: location.lng },
+          });
+          gpsUpdatedCount = updated.count;
         }
       }
       return { customer, gpsUpdatedCount };
