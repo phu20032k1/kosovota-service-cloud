@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { hasRole } from "@/lib/auth";
 import { cachePart, getRedis, redisGet, redisSet } from "@/lib/redis";
 import { getDealerCacheFingerprint } from "@/lib/dealer-cache";
+import { geocodeAddress } from "@/lib/maps/geocode";
 
 function distanceKm(lat1: number, lng1: number, lat2: number, lng2: number) {
   const radius = 6371;
@@ -10,6 +11,12 @@ function distanceKm(lat1: number, lng1: number, lat2: number, lng2: number) {
   const dLng = ((lng2 - lng1) * Math.PI) / 180;
   const a = Math.sin(dLat / 2) ** 2 + Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
   return radius * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function hasUsableCoordinates(lat: number | null | undefined, lng: number | null | undefined) {
+  if (lat == null || lng == null || !Number.isFinite(lat) || !Number.isFinite(lng)) return false;
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return false;
+  return !(Math.abs(lat) < 0.000001 && Math.abs(lng) < 0.000001);
 }
 
 const STOP_WORDS = new Set(["kiem", "tra", "may", "dich", "vu", "va", "cho", "can", "lam"]);
@@ -48,12 +55,19 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, message: "Thiếu ID máy." }, { status: 400 });
   }
 
-  const machine = await prisma.machine.findUnique({
+  let machine = await prisma.machine.findUnique({
     where: { id: machineId },
-    select: { id: true, lat: true, lng: true, provinceCode: true, updatedAt: true },
+    select: {
+      id: true,
+      lat: true,
+      lng: true,
+      provinceCode: true,
+      updatedAt: true,
+      customer: { select: { address: true } },
+    },
   });
-  if (!machine || machine.lat === null || machine.lng === null) {
-    return NextResponse.json({ success: false, message: "Máy chưa có tọa độ GPS." }, { status: 404 });
+  if (!machine) {
+    return NextResponse.json({ success: false, message: "Không tìm thấy máy cần điều phối." }, { status: 404 });
   }
 
   const scopes = auth.user.provinceScope?.split(",").map((value: string) => value.trim()).filter(Boolean) || [];
@@ -61,11 +75,58 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, message: "Máy nằm ngoài phạm vi được phân công." }, { status: 403 });
   }
 
+  let machineLocationBackfilled = false;
+  if (!hasUsableCoordinates(machine.lat, machine.lng)) {
+    const address = machine.customer?.address?.trim();
+    if (!address) {
+      return NextResponse.json({
+        success: false,
+        message: "Máy chưa có GPS và khách hàng chưa có địa chỉ để tự ghim vị trí. Hãy cập nhật địa chỉ khách hàng trước khi tìm đại lý.",
+      }, { status: 422 });
+    }
+
+    try {
+      const location = await geocodeAddress(address);
+      if (!location || !hasUsableCoordinates(location.lat, location.lng)) {
+        return NextResponse.json({
+          success: false,
+          message: `Không tự ghim được vị trí máy từ địa chỉ khách hàng: ${address}. Hãy kiểm tra lại địa chỉ.`,
+        }, { status: 422 });
+      }
+
+      machine = await prisma.machine.update({
+        where: { id: machine.id },
+        data: { lat: location.lat, lng: location.lng },
+        select: {
+          id: true,
+          lat: true,
+          lng: true,
+          provinceCode: true,
+          updatedAt: true,
+          customer: { select: { address: true } },
+        },
+      });
+      machineLocationBackfilled = true;
+    } catch (error) {
+      console.warn(`Không tự ghim được GPS cho máy ${machine.id}:`, error);
+      return NextResponse.json({
+        success: false,
+        message: "Không tự lấy được GPS từ địa chỉ khách hàng. Hãy kiểm tra địa chỉ hoặc cấu hình MapTiler/Google Maps rồi thử lại.",
+      }, { status: 422 });
+    }
+  }
+
   const fingerprint = await getDealerCacheFingerprint();
   const key = cacheKey(fingerprint, machineId, machine.updatedAt, serviceType, limit);
   const cached = await redisGet<unknown[]>(key);
   if (Array.isArray(cached)) {
-    return NextResponse.json({ success: true, data: cached, cache: "HIT", cacheFingerprint: fingerprint });
+    return NextResponse.json({
+      success: true,
+      data: cached,
+      cache: "HIT",
+      cacheFingerprint: fingerprint,
+      machineLocation: { lat: machine.lat, lng: machine.lng, backfilled: machineLocationBackfilled },
+    });
   }
 
   const dealers = await prisma.dealer.findMany({
@@ -88,6 +149,7 @@ export async function POST(request: NextRequest) {
   });
 
   const shortlist = dealers
+    .filter((dealer) => hasUsableCoordinates(dealer.lat, dealer.lng))
     .filter(isTechnicalDealer)
     .map((dealer) => {
       const matchScore = serviceScore(serviceType, dealer.services);
@@ -108,5 +170,9 @@ export async function POST(request: NextRequest) {
     data: shortlist,
     cache: getRedis() ? (cachedSuccessfully ? "MISS" : "ERROR") : "DISABLED",
     cacheFingerprint: fingerprint,
+    machineLocation: { lat: machine.lat, lng: machine.lng, backfilled: machineLocationBackfilled },
+    message: machineLocationBackfilled
+      ? "Đã tự ghim vị trí máy từ địa chỉ khách hàng và tìm đại lý gần nhất."
+      : undefined,
   });
 }
