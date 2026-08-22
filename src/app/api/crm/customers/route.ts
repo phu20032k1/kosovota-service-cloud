@@ -30,7 +30,7 @@ export async function GET(request: NextRequest) {
       },
       include: {
         owner: { select: { id: true, name: true } },
-        machines: { select: { id: true, model: true, name: true, serial: true, status: true, installDate: true } },
+        machines: { select: { id: true, model: true, name: true, serial: true, status: true, installDate: true, lat: true, lng: true } },
         _count: { select: { activities: true, tickets: true } },
       },
       orderBy: [{ nextContactAt: "asc" }, { updatedAt: "desc" }],
