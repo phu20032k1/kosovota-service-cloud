@@ -15,7 +15,7 @@ function hasUsableCoordinates(lat: number | null, lng: number | null) {
 }
 
 async function geocodeCustomerAddress(address: string) {
-  if (!address || process.env.GEOCODING_ENABLED !== "true") return null;
+  if (!address) return null;
   try {
     const location = await geocodeAddress(address);
     return location && hasUsableCoordinates(location.lat, location.lng) ? location : null;
@@ -109,13 +109,15 @@ export async function PUT(request: NextRequest, { params }: Params) {
       userId: auth.user.id,
       action: "UPDATE_CUSTOMER_CRM",
       target: result.customer.phone,
-      detail: { ...body, gpsUpdatedCount: result.gpsUpdatedCount },
+      detail: { ...body, gpsUpdatedCount: result.gpsUpdatedCount, geocodeSucceeded: Boolean(location) },
     });
     return NextResponse.json({
       success: true,
       message: result.gpsUpdatedCount
         ? `Đã cập nhật hồ sơ khách hàng và tự bổ sung GPS cho ${result.gpsUpdatedCount} máy từ địa chỉ.`
-        : "Đã cập nhật hồ sơ khách hàng.",
+        : address && !location
+          ? "Đã cập nhật hồ sơ khách hàng nhưng chưa tự lấy được GPS từ địa chỉ. Hãy kiểm tra địa chỉ hoặc cấu hình MapTiler/Google Maps."
+          : "Đã cập nhật hồ sơ khách hàng.",
       data: result.customer,
     });
   } catch (error) {
