@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { hasRole } from "@/lib/auth";
+import { geocodeAddress } from "@/lib/maps/geocode";
 
 function text(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
@@ -14,6 +15,81 @@ function machineIdsFromBody(body: Record<string, unknown>) {
   if (Array.isArray(body.machineIds)) return uniqueStrings(body.machineIds);
   if (Array.isArray(body.ids)) return uniqueStrings(body.ids);
   return uniqueStrings([body.machineId, body.id]);
+}
+
+function hasUsableCoordinates(lat: number | null | undefined, lng: number | null | undefined) {
+  if (lat == null || lng == null || !Number.isFinite(lat) || !Number.isFinite(lng)) return false;
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return false;
+  return !(Math.abs(lat) < 0.000001 && Math.abs(lng) < 0.000001);
+}
+
+const ACTIVE_ORDER_STATUSES = new Set([
+  "NEW",
+  "ASSIGNED",
+  "ACCEPTED",
+  "IN_PROGRESS",
+  "CALLED_NO_ANSWER",
+  "CUSTOMER_ACCEPTED",
+  "RESCHEDULED",
+  "COMPLAINT",
+]);
+
+type ResolvedCoordinates = { lat: number; lng: number } | null;
+
+async function backfillMachineGpsFromCustomerAddress<T extends {
+  id: string;
+  lat: number | null;
+  lng: number | null;
+  customer: { address: string | null } | null;
+  serviceOrders: { status: string }[];
+}>(machines: T[]) {
+  const candidates = machines
+    .filter((machine) => !hasUsableCoordinates(machine.lat, machine.lng) && Boolean(machine.customer?.address?.trim()))
+    .sort((a, b) => {
+      const aActive = a.serviceOrders.some((order) => ACTIVE_ORDER_STATUSES.has(order.status)) ? 1 : 0;
+      const bActive = b.serviceOrders.some((order) => ACTIVE_ORDER_STATUSES.has(order.status)) ? 1 : 0;
+      return bActive - aActive;
+    })
+    .slice(0, 40);
+
+  if (!candidates.length) return 0;
+
+  const geocodeCache = new Map<string, Promise<ResolvedCoordinates>>();
+  const geocodeCached = (address: string) => {
+    const key = address.trim().toLowerCase();
+    const cached = geocodeCache.get(key);
+    if (cached) return cached;
+    const pending = geocodeAddress(address)
+      .then((location) => location && hasUsableCoordinates(location.lat, location.lng)
+        ? { lat: location.lat, lng: location.lng }
+        : null)
+      .catch((error) => {
+        console.warn(`Không tự ghim được GPS máy từ địa chỉ khách hàng ${address}:`, error);
+        return null;
+      });
+    geocodeCache.set(key, pending);
+    return pending;
+  };
+
+  let updatedCount = 0;
+  for (let index = 0; index < candidates.length; index += 5) {
+    const batch = candidates.slice(index, index + 5);
+    await Promise.all(batch.map(async (machine) => {
+      const address = machine.customer?.address?.trim();
+      if (!address) return;
+      const location = await geocodeCached(address);
+      if (!location) return;
+      await prisma.machine.update({
+        where: { id: machine.id },
+        data: { lat: location.lat, lng: location.lng },
+      });
+      machine.lat = location.lat;
+      machine.lng = location.lng;
+      updatedCount += 1;
+    }));
+  }
+
+  return updatedCount;
 }
 
 export async function GET(request: NextRequest) {
@@ -32,7 +108,17 @@ export async function GET(request: NextRequest) {
       },
       orderBy: { createdAt: "desc" },
     });
-    return NextResponse.json({ success: true, data: machines });
+
+    const gpsBackfilledCount = await backfillMachineGpsFromCustomerAddress(machines);
+
+    return NextResponse.json({
+      success: true,
+      data: machines,
+      gpsBackfilledCount,
+      message: gpsBackfilledCount
+        ? `Đã tự ghim GPS cho ${gpsBackfilledCount} máy từ địa chỉ khách hàng.`
+        : undefined,
+    });
   } catch (error) {
     console.error("GET /api/machines failed", error);
     return NextResponse.json({ success: false, message: "Không tải được danh sách máy." }, { status: 500 });
