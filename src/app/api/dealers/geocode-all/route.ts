@@ -15,10 +15,6 @@ function hasUsableCoordinates(lat: number | null, lng: number | null) {
 }
 
 function geocodingConfigurationError() {
-  if (process.env.GEOCODING_ENABLED !== "true") {
-    return "Dịch vụ geocoding đang tắt. Hãy đặt GEOCODING_ENABLED=true trên Vercel rồi redeploy.";
-  }
-
   const provider = (process.env.GEOCODING_PROVIDER || process.env.NEXT_PUBLIC_MAP_PROVIDER || "maptiler").toLowerCase();
   if (provider === "google") {
     if (!process.env.GOOGLE_MAPS_SERVER_API_KEY && !process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY) {
