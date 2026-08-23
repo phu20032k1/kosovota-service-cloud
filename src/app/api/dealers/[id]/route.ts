@@ -24,6 +24,15 @@ function hasUsableCoordinates(lat: number | null, lng: number | null) {
   return !(Math.abs(lat) < 0.000001 && Math.abs(lng) < 0.000001);
 }
 
+function fullAddress(address: string, province?: string | null) {
+  const trimmedAddress = address.trim();
+  const trimmedProvince = province?.trim() || "";
+  if (!trimmedProvince || trimmedAddress.toLocaleLowerCase("vi").includes(trimmedProvince.toLocaleLowerCase("vi"))) {
+    return trimmedAddress;
+  }
+  return `${trimmedAddress}, ${trimmedProvince}`;
+}
+
 export async function GET(request: NextRequest, { params }: Params) {
   const auth = await hasRole(request, ["ADMIN", "CSKH"]);
   if (!auth) return NextResponse.json({ success: false, message: "Chưa được cấp quyền." }, { status: 403 });
@@ -50,7 +59,8 @@ export async function PUT(request: NextRequest, { params }: Params) {
 
   try {
     const address = text(body.address);
-    const addressChanged = address !== (current.address || "").trim();
+    const province = text(body.province);
+    const addressChanged = address !== (current.address || "").trim() || province !== (current.province || "").trim();
     const requestedLat = numberOrNull(body.lat);
     const requestedLng = numberOrNull(body.lng);
     const manualCoordinates = hasUsableCoordinates(requestedLat, requestedLng);
@@ -64,23 +74,18 @@ export async function PUT(request: NextRequest, { params }: Params) {
       nextLng = null;
     } else if (!manualCoordinates && (addressChanged || !hasUsableCoordinates(current.lat, current.lng))) {
       geocodeAttempted = true;
-      if (process.env.GEOCODING_ENABLED === "true") {
-        try {
-          const location = await geocodeAddress(address);
-          if (location && hasUsableCoordinates(location.lat, location.lng)) {
-            nextLat = location.lat;
-            nextLng = location.lng;
-            gpsAutoFilled = true;
-          } else {
-            nextLat = null;
-            nextLng = null;
-          }
-        } catch (error) {
-          console.warn(`Không tự lấy được GPS cho đại lý ${current.dealerCode}:`, error);
+      try {
+        const location = await geocodeAddress(fullAddress(address, province));
+        if (location && hasUsableCoordinates(location.lat, location.lng)) {
+          nextLat = location.lat;
+          nextLng = location.lng;
+          gpsAutoFilled = true;
+        } else {
           nextLat = null;
           nextLng = null;
         }
-      } else if (addressChanged || !hasUsableCoordinates(current.lat, current.lng)) {
+      } catch (error) {
+        console.warn(`Không tự lấy được GPS cho đại lý ${current.dealerCode}:`, error);
         nextLat = null;
         nextLng = null;
       }
@@ -95,7 +100,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
         birthDate: text(body.birthDate) ? new Date(text(body.birthDate)) : null,
         locationType: text(body.locationType) || null,
         email: text(body.email) || null,
-        province: text(body.province) || null,
+        province: province || null,
         address: address || null,
         lat: nextLat,
         lng: nextLng,
@@ -124,9 +129,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
     let message = "Đã cập nhật hồ sơ và đồng bộ mã tài khoản đại lý/KTV.";
     if (gpsAutoFilled) message += " GPS đã tự cập nhật từ địa chỉ.";
     else if (geocodeAttempted && address && !hasUsableCoordinates(nextLat, nextLng)) {
-      message += process.env.GEOCODING_ENABLED === "true"
-        ? " Chưa xác định được GPS từ địa chỉ này."
-        : " GPS chưa được tự lấy vì dịch vụ geocoding đang tắt.";
+      message += " Chưa tự ghim được GPS từ địa chỉ này; hãy kiểm tra địa chỉ hoặc cấu hình geocoding.";
     }
 
     return NextResponse.json({ success: true, message, data: updated });
