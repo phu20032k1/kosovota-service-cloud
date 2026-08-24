@@ -58,20 +58,34 @@ td:has(> .status-pill) {
   white-space: nowrap;
 }
 
-/* Keep the large operations menu compact. Horizontal scrolling is cleaner than 2-3 wrapped rows. */
-.ops-nav {
-  flex-wrap: nowrap !important;
-  overflow-x: auto;
-  overscroll-behavior-x: contain;
-  scrollbar-width: none;
-  scroll-snap-type: x proximity;
-  -webkit-overflow-scrolling: touch;
+/* User-management status used a local Tailwind pill rather than status-pill, so it could fragment
+   into two painted lines when the status column became narrow. Keep the pill as one atomic unit. */
+.account-table-scroll td:nth-child(4) {
+  min-width: 132px;
+  white-space: nowrap;
 }
-.ops-nav::-webkit-scrollbar { display: none; }
+.account-table-scroll td:nth-child(4) > span {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap !important;
+  line-height: 1;
+  vertical-align: top;
+}
+
+/* The operations menu may wrap onto another row. Hiding/scrolling a single forced row made
+   later admin destinations look missing on common desktop widths. */
+.ops-nav {
+  flex-wrap: wrap !important;
+  overflow: visible;
+  row-gap: .35rem;
+  scrollbar-width: auto;
+  scroll-snap-type: none;
+}
 .ops-nav-link {
   position: relative;
   flex: 0 0 auto;
-  scroll-snap-align: start;
 }
 .ops-nav-badge {
   display: inline-flex;
