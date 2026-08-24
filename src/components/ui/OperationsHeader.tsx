@@ -10,6 +10,7 @@ import { homeForRole, ROLE_LABEL, type InternalRole } from "@/lib/access-control
 
 type SessionUser = { name: string; role: InternalRole };
 type NavItem = { href: string; label: string; icon: IconName };
+type ActivityResponse = { success?: boolean; data?: { counts?: Record<string, number> } };
 
 const ADMIN_NAV: NavItem[] = [
   { href: "/admin/executive", label: "Điều hành", icon: "activity" },
@@ -41,11 +42,16 @@ const CSKH_NAV: NavItem[] = [
   { href: "/scan", label: "Quét QR", icon: "qr" },
 ];
 
+function badgeLabel(count: number) {
+  return count > 99 ? "99+" : String(count);
+}
+
 export function OperationsHeader({ title, subtitle, actions }: { title: string; subtitle?: string; actions?: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const [user, setUser] = useState<SessionUser | null>(null);
   const [loggingOut, setLoggingOut] = useState(false);
+  const [activityCounts, setActivityCounts] = useState<Record<string, number>>({});
 
   useEffect(() => {
     let cancelled = false;
@@ -59,6 +65,39 @@ export function OperationsHeader({ title, subtitle, actions }: { title: string; 
       .catch(() => { if (!cancelled) router.replace("/login"); });
     return () => { cancelled = true; };
   }, [router]);
+
+  useEffect(() => {
+    if (!user || !["ADMIN", "CSKH"].includes(user.role)) {
+      setActivityCounts({});
+      return;
+    }
+
+    let cancelled = false;
+    let timer: number | undefined;
+
+    const loadActivity = async () => {
+      try {
+        const response = await fetch("/api/activity-counts", { cache: "no-store" });
+        const result = await response.json() as ActivityResponse;
+        if (!cancelled && response.ok && result.success) setActivityCounts(result.data?.counts || {});
+      } catch {
+        if (!cancelled) setActivityCounts((current) => current);
+      }
+    };
+
+    const onVisible = () => { if (document.visibilityState === "visible") void loadActivity(); };
+    void loadActivity();
+    timer = window.setInterval(() => void loadActivity(), 30_000);
+    window.addEventListener("focus", loadActivity);
+    document.addEventListener("visibilitychange", onVisible);
+
+    return () => {
+      cancelled = true;
+      if (timer) window.clearInterval(timer);
+      window.removeEventListener("focus", loadActivity);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [user?.role]);
 
   const nav = useMemo(() => user?.role === "ADMIN" ? ADMIN_NAV : user?.role === "CSKH" ? CSKH_NAV : [], [user?.role]);
   const home = homeForRole(user?.role);
@@ -91,7 +130,14 @@ export function OperationsHeader({ title, subtitle, actions }: { title: string; 
         <nav className="ops-nav" aria-label="Điều hướng vận hành">
           {nav.map((item) => {
             const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
-            return <Link key={item.href} href={item.href} className={`ops-nav-link ${active ? "is-active" : ""}`}><Icon name={item.icon} size={17}/><span>{item.label}</span></Link>;
+            const count = Math.max(0, activityCounts[item.href] || 0);
+            return (
+              <Link key={item.href} href={item.href} className={`ops-nav-link ${active ? "is-active" : ""}`}>
+                <Icon name={item.icon} size={17}/>
+                <span>{item.label}</span>
+                {count > 0 && <span className="ops-nav-badge" aria-label={`${count} mục cần chú ý`}>{badgeLabel(count)}</span>}
+              </Link>
+            );
           })}
         </nav>
       </div>
