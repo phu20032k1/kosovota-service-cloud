@@ -1,40 +1,57 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifySessionToken } from "@/lib/session-token";
-import { homeForRole, rolesForPath, type InternalRole } from "@/lib/access-control";
+import { homeForRole, isInternalRole, rolesForPath } from "@/lib/access-control";
 
 const SESSION_COOKIE = "kosovota_session";
-const AUTH_PAGES = new Set(["/login"]);
+const LOGIN_PAGE = "/login";
+const SUPER_ADMIN_LOGIN_PAGE = "/super-admin/login";
 
 function loginUrl(request: NextRequest) {
   const url = request.nextUrl.clone();
-  url.pathname = "/login";
+  url.pathname = request.nextUrl.pathname.startsWith("/super-admin")
+    ? SUPER_ADMIN_LOGIN_PAGE
+    : LOGIN_PAGE;
   url.search = "";
-  if (request.nextUrl.pathname !== "/") {
-    url.searchParams.set("next", `${request.nextUrl.pathname}${request.nextUrl.search}`);
-  }
+  url.searchParams.set(
+    "next",
+    `${request.nextUrl.pathname}${request.nextUrl.search}`,
+  );
+  return url;
+}
+
+function forbiddenUrl(request: NextRequest, role: string | null | undefined) {
+  const url = request.nextUrl.clone();
+  url.pathname = "/khong-co-quyen";
+  url.search = "";
+  url.searchParams.set("from", request.nextUrl.pathname);
+  url.searchParams.set("home", homeForRole(role));
   return url;
 }
 
 export async function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
+
+  // SUPER_ADMIN has a separate hidden login page. It must stay public so the
+  // protected /super-admin prefix does not send it to the normal login screen.
+  if (pathname === SUPER_ADMIN_LOGIN_PAGE) {
+    return NextResponse.next();
+  }
+
   const token = request.cookies.get(SESSION_COOKIE)?.value;
   const session = await verifySessionToken(token);
   const allowedRoles = rolesForPath(pathname);
 
   if (allowedRoles) {
-    const role = session?.role;
-    if (!session || !role || !allowedRoles.includes(role as InternalRole)) {
+    if (!session) {
       return NextResponse.redirect(loginUrl(request));
+    }
+
+    if (!isInternalRole(session.role) || !allowedRoles.includes(session.role)) {
+      return NextResponse.redirect(forbiddenUrl(request, session.role));
     }
   }
 
-  if (
-    AUTH_PAGES.has(pathname) &&
-    session &&
-    typeof session.role === "string" &&
-    session.role !== "CUSTOMER_PORTAL" &&
-    session.role !== "RESET"
-  ) {
+  if (pathname === LOGIN_PAGE && session && isInternalRole(session.role)) {
     const url = request.nextUrl.clone();
     url.pathname = homeForRole(session.role);
     url.search = "";
