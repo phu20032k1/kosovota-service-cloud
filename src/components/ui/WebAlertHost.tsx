@@ -8,6 +8,7 @@ type AlertItem = { id: number; message: string };
 export default function WebAlertHost() {
   const [queue, setQueue] = useState<AlertItem[]>([]);
   const counter = useRef(0);
+  const current = queue[0];
 
   useEffect(() => {
     const nativeAlert = window.alert;
@@ -15,7 +16,7 @@ export default function WebAlertHost() {
       const text = String(message ?? "").trim() || "Đã hoàn tất thao tác.";
       counter.current += 1;
       const id = counter.current;
-      setQueue((current) => [...current, { id, message: text }].slice(-4));
+      setQueue((items) => [...items, { id, message: text }].slice(-4));
     };
 
     return () => {
@@ -23,7 +24,22 @@ export default function WebAlertHost() {
     };
   }, []);
 
-  const current = queue[0];
+  useEffect(() => {
+    if (!current) return;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setQueue((items) => items.slice(1));
+    };
+    document.addEventListener("keydown", onKeyDown);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [current?.id]);
+
   if (!current) return null;
 
   const close = () => setQueue((items) => items.slice(1));
@@ -39,7 +55,7 @@ export default function WebAlertHost() {
     >
       <div className="web-dialog-panel max-w-md">
         <div className="flex items-start gap-4">
-          <span className="web-dialog-icon bg-emerald-50 text-emerald-700 ring-emerald-100">
+          <span className="web-dialog-icon bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100">
             <Icon name="check" size={22} />
           </span>
           <div className="min-w-0 flex-1">
