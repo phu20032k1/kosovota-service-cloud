@@ -13,19 +13,42 @@ export async function GET(request: NextRequest) {
   }
 
   const isAdmin = auth.user.role === "ADMIN";
+  const provinceScope = auth.user.provinceScope?.split(",").map((value) => value.trim()).filter(Boolean) || [];
+  const scopedCskh = !isAdmin && provinceScope.length > 0;
   const now = new Date();
   const nextSevenDays = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
 
   const [openTickets, activeOrders, dueMaintenance, dueCustomers, pendingDealers, pendingNotifications, pendingPayments, stockBalances] = await Promise.all([
-    prisma.supportTicket.count({ where: { status: { notIn: FINISHED_TICKET } } }),
-    prisma.serviceOrder.count({ where: { status: { notIn: FINISHED_ORDER } } }),
+    prisma.supportTicket.count({
+      where: {
+        status: { notIn: FINISHED_TICKET },
+        ...(scopedCskh ? {
+          OR: [
+            { assigneeId: auth.user.id },
+            { machine: { provinceCode: { in: provinceScope } } },
+          ],
+        } : {}),
+      },
+    }),
+    prisma.serviceOrder.count({
+      where: {
+        status: { notIn: FINISHED_ORDER },
+        ...(scopedCskh ? { machine: { provinceCode: { in: provinceScope } } } : {}),
+      },
+    }),
     prisma.maintenanceSchedule.count({
       where: {
         status: { notIn: FINISHED_MAINTENANCE },
         dueDate: { lte: nextSevenDays },
+        ...(scopedCskh ? { machine: { provinceCode: { in: provinceScope } } } : {}),
       },
     }),
-    prisma.customer.count({ where: { nextContactAt: { lte: now } } }),
+    prisma.customer.count({
+      where: {
+        nextContactAt: { lte: now },
+        ...(scopedCskh ? { machines: { some: { provinceCode: { in: provinceScope } } } } : {}),
+      },
+    }),
     isAdmin ? prisma.dealer.count({ where: { status: "PENDING" } }) : Promise.resolve(0),
     isAdmin ? prisma.notification.count({ where: { status: { in: ["PENDING", "FAILED"] } } }) : Promise.resolve(0),
     isAdmin ? prisma.paymentBatch.count({ where: { status: { in: ["SUBMITTED", "APPROVED"] } } }) : Promise.resolve(0),
