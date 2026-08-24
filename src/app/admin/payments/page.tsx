@@ -13,6 +13,7 @@ type Line = { id: string; totalAmount: number; serviceAmount: number; materialAm
 type Batch = { id: string; batchCode: string; status: string; periodStart: string; periodEnd: string; grossAmount: number; deductions: number; netAmount: number; bankReference?: string | null; createdAt: string; dealer: Dealer; lines: Line[] };
 type Order = { id: string; dealerId?: string | null; serviceFee?: number | null; dealer?: Dealer | null };
 type Data = { batches: Batch[]; eligibleOrders: Order[]; dealers: Dealer[]; summary: { total: number; paid: number; pending: number } };
+type PaymentPrompt = { id: string; bankReference: string };
 
 const money = (value = 0) => new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND", maximumFractionDigits: 0 }).format(value);
 const date = (value: string) => new Intl.DateTimeFormat("vi-VN", { dateStyle: "short" }).format(new Date(value));
@@ -24,6 +25,7 @@ export default function PaymentsPage() {
   const [error, setError] = useState("");
   const [open, setOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [paymentPrompt, setPaymentPrompt] = useState<PaymentPrompt | null>(null);
 
   const now = new Date();
   const first = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
@@ -72,8 +74,8 @@ export default function PaymentsPage() {
     await load();
   }
 
-  async function update(id: string, status: string) {
-    const bankReference = status === "PAID" ? prompt("Nhập mã giao dịch ngân hàng") || "" : undefined;
+  async function update(id: string, status: string, bankReference?: string) {
+    setError("");
     const response = await fetch(`/api/payments/${id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -86,6 +88,22 @@ export default function PaymentsPage() {
     }
     setMessage(result.message || "Đã cập nhật kỳ đối soát.");
     await load();
+  }
+
+  function requestUpdate(id: string, status: string) {
+    if (status === "PAID") {
+      setPaymentPrompt({ id, bankReference: "" });
+      return;
+    }
+    void update(id, status);
+  }
+
+  function submitPaymentReference(event: FormEvent) {
+    event.preventDefault();
+    if (!paymentPrompt?.bankReference.trim()) return;
+    const { id, bankReference } = paymentPrompt;
+    setPaymentPrompt(null);
+    void update(id, "PAID", bankReference.trim());
   }
 
   return (
@@ -132,14 +150,14 @@ export default function PaymentsPage() {
                 <table className="min-w-full text-sm">
                   <thead>
                     <tr>
-                      {['Mã kỳ', 'Đại lý', 'Thời gian', 'Số lệnh', 'Giá trị ròng', 'Trạng thái'].map((header) => (
+                      {["Mã kỳ", "Đại lý", "Thời gian", "Số lệnh", "Giá trị ròng", "Trạng thái"].map((header) => (
                         <th key={header} className="p-3 text-left">{header}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
                     {data.batches.map((batch) => (
-                      <tr key={batch.id} onClick={() => setSelectedId(batch.id)} className={`cursor-pointer ${selectedId === batch.id ? 'bg-emerald-50/70' : ''}`}>
+                      <tr key={batch.id} onClick={() => setSelectedId(batch.id)} className={`cursor-pointer ${selectedId === batch.id ? "bg-emerald-50/70" : ""}`}>
                         <td className="p-3 font-black text-slate-950">{batch.batchCode}</td>
                         <td className="p-3">
                           <strong>{batch.dealer.name}</strong>
@@ -178,17 +196,17 @@ export default function PaymentsPage() {
                 <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm">
                   <p className="font-black text-slate-900">Thông tin thanh toán</p>
                   <div className="mt-2 space-y-1 text-slate-600">
-                    <p><strong>Ngân hàng:</strong> {selectedBatch.dealer.bankName || 'Chưa cập nhật'}</p>
-                    <p><strong>Chủ tài khoản:</strong> {selectedBatch.dealer.accountHolder || 'Chưa cập nhật'}</p>
-                    <p><strong>Số tài khoản:</strong> {selectedBatch.dealer.bankAccount || 'Chưa cập nhật'}</p>
-                    <p><strong>Mã giao dịch:</strong> {selectedBatch.bankReference || 'Chưa có'}</p>
+                    <p><strong>Ngân hàng:</strong> {selectedBatch.dealer.bankName || "Chưa cập nhật"}</p>
+                    <p><strong>Chủ tài khoản:</strong> {selectedBatch.dealer.accountHolder || "Chưa cập nhật"}</p>
+                    <p><strong>Số tài khoản:</strong> {selectedBatch.dealer.bankAccount || "Chưa cập nhật"}</p>
+                    <p><strong>Mã giao dịch:</strong> {selectedBatch.bankReference || "Chưa có"}</p>
                   </div>
                 </div>
 
                 <div className="mt-4 flex flex-wrap gap-2">
-                  {selectedBatch.status === 'SUBMITTED' && <button type="button" onClick={() => update(selectedBatch.id, 'APPROVED')} className="btn-secondary px-3 py-2 text-sm">Duyệt kỳ này</button>}
-                  {selectedBatch.status === 'APPROVED' && <button type="button" onClick={() => update(selectedBatch.id, 'PAID')} className="btn-primary px-3 py-2 text-sm font-black text-white">Xác nhận thanh toán</button>}
-                  {['SUBMITTED', 'APPROVED'].includes(selectedBatch.status) && <button type="button" onClick={() => update(selectedBatch.id, 'REJECTED')} className="rounded-xl bg-rose-50 px-3 py-2 text-sm font-bold text-rose-700">Từ chối</button>}
+                  {selectedBatch.status === "SUBMITTED" && <button type="button" onClick={() => requestUpdate(selectedBatch.id, "APPROVED")} className="btn-secondary px-3 py-2 text-sm">Duyệt kỳ này</button>}
+                  {selectedBatch.status === "APPROVED" && <button type="button" onClick={() => requestUpdate(selectedBatch.id, "PAID")} className="btn-primary px-3 py-2 text-sm font-black text-white">Xác nhận thanh toán</button>}
+                  {["SUBMITTED", "APPROVED"].includes(selectedBatch.status) && <button type="button" onClick={() => requestUpdate(selectedBatch.id, "REJECTED")} className="rounded-xl bg-rose-50 px-3 py-2 text-sm font-bold text-rose-700">Từ chối</button>}
                 </div>
 
                 <div className="mt-5">
@@ -214,11 +232,12 @@ export default function PaymentsPage() {
         </>}
       </div>
 
-      {open && <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4">
-        <form onSubmit={create} className="w-full max-w-xl rounded-3xl bg-white p-6 shadow-2xl">
-          <div className="mb-5 flex items-center justify-between">
+      {open && <div className="web-dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setOpen(false); }}>
+        <form onSubmit={create} className="web-dialog-panel max-w-xl">
+          <div className="mb-5 flex items-center justify-between gap-3">
             <div>
-              <h3 className="text-xl font-black">Tạo kỳ đối soát</h3>
+              <p className="eyebrow">Đối soát</p>
+              <h3 className="mt-1 text-xl font-black">Tạo kỳ đối soát</h3>
               <p className="mt-1 text-sm text-slate-500">Hệ thống tự lấy các lệnh hoàn thành chưa thanh toán.</p>
             </div>
             <button type="button" onClick={() => setOpen(false)} className="icon-button"><Icon name="x" size={18}/></button>
@@ -245,7 +264,7 @@ export default function PaymentsPage() {
 
             <Notice kind="info">
               <div className="space-y-1">
-                <p><strong>Đại lý chọn:</strong> {draftDealer ? `${draftDealer.dealerCode} · ${draftDealer.name}` : 'Chưa chọn'}</p>
+                <p><strong>Đại lý chọn:</strong> {draftDealer ? `${draftDealer.dealerCode} · ${draftDealer.name}` : "Chưa chọn"}</p>
                 <p><strong>Lệnh đủ điều kiện:</strong> {eligible}</p>
               </div>
             </Notice>
@@ -256,6 +275,32 @@ export default function PaymentsPage() {
             </label>
 
             <button className="btn-primary w-full p-3 font-black text-white">Tạo và gửi duyệt</button>
+          </div>
+        </form>
+      </div>}
+
+      {paymentPrompt && <div className="web-dialog-backdrop" role="dialog" aria-modal="true" aria-labelledby="payment-reference-title" onMouseDown={(event) => { if (event.target === event.currentTarget) setPaymentPrompt(null); }}>
+        <form onSubmit={submitPaymentReference} className="web-dialog-panel max-w-md">
+          <div className="flex items-start gap-4">
+            <span className="web-dialog-icon bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100"><Icon name="wallet" size={22}/></span>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="eyebrow">Xác nhận thanh toán</p>
+                  <h2 id="payment-reference-title" className="mt-1 text-xl font-black text-slate-950">Nhập mã giao dịch</h2>
+                </div>
+                <button type="button" onClick={() => setPaymentPrompt(null)} className="icon-button !h-9 !w-9" aria-label="Đóng"><Icon name="x" size={16}/></button>
+              </div>
+              <p className="mt-3 text-sm leading-6 text-slate-600">Mã giao dịch giúp đối chiếu thanh toán và tra cứu lịch sử sau này.</p>
+            </div>
+          </div>
+          <label className="mt-5 block">
+            <span className="mb-2 block text-sm font-bold text-slate-700">Mã giao dịch ngân hàng</span>
+            <input autoFocus value={paymentPrompt.bankReference} onChange={(event) => setPaymentPrompt((current) => current ? { ...current, bankReference: event.target.value } : current)} placeholder="VD: FT260825123456" />
+          </label>
+          <div className="mt-6 grid gap-2 sm:grid-cols-2">
+            <button type="button" onClick={() => setPaymentPrompt(null)} className="btn-secondary justify-center">Hủy</button>
+            <button type="submit" disabled={!paymentPrompt.bankReference.trim()} className="btn-primary justify-center px-4 py-3 font-black text-white disabled:opacity-50"><Icon name="check" size={16}/>Xác nhận</button>
           </div>
         </form>
       </div>}
