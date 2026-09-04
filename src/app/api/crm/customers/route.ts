@@ -1,40 +1,78 @@
+import { Prisma } from "@prisma/client";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { hasRole } from "@/lib/auth";
 import { writeAudit } from "@/lib/audit";
 import { databaseErrorMessage } from "@/lib/database-errors";
+import { provinceNamesForScope } from "@/lib/province";
 
 export async function GET(request: NextRequest) {
   try {
     const auth = await hasRole(request, ["ADMIN", "CSKH"]);
     if (!auth) return NextResponse.json({ success: false, message: "Chưa được cấp quyền." }, { status: 401 });
 
-    const q = request.nextUrl.searchParams.get("q")?.trim();
+    const q = request.nextUrl.searchParams.get("q")?.trim().slice(0, 120) || "";
     const segment = request.nextUrl.searchParams.get("segment") || undefined;
     const provinceScope = auth.user.provinceScope?.split(",").map((value) => value.trim()).filter(Boolean) || [];
+    const provinceNames = provinceNamesForScope(provinceScope);
+    const and: Prisma.CustomerWhereInput[] = [];
+
+    if (q) {
+      and.push({
+        OR: [
+          { id: { contains: q, mode: "insensitive" } },
+          { name: { contains: q, mode: "insensitive" } },
+          { phone: { contains: q } },
+          { email: { contains: q, mode: "insensitive" } },
+          { address: { contains: q, mode: "insensitive" } },
+          {
+            machines: {
+              some: {
+                OR: [
+                  { id: { contains: q, mode: "insensitive" } },
+                  { serial: { contains: q, mode: "insensitive" } },
+                  { model: { contains: q, mode: "insensitive" } },
+                  { name: { contains: q, mode: "insensitive" } },
+                ],
+              },
+            },
+          },
+        ],
+      });
+    }
+
+    if (segment) and.push({ segment });
+
+    if (auth.user.role === "CSKH" && provinceScope.length) {
+      and.push({
+        OR: [
+          { machines: { some: { provinceCode: { in: provinceScope } } } },
+          ...provinceNames.map((province) => ({ address: { contains: province, mode: "insensitive" as const } })),
+        ],
+      });
+    }
 
     const customers = await prisma.customer.findMany({
-      where: {
-        ...(q ? {
-          OR: [
-            { name: { contains: q } },
-            { phone: { contains: q } },
-            { address: { contains: q } },
-            { machines: { some: { OR: [{ id: { contains: q } }, { serial: { contains: q } }] } } },
-          ],
-        } : {}),
-        ...(segment ? { segment } : {}),
-        ...(auth.user.role === "CSKH" && provinceScope.length
-          ? { machines: { some: { provinceCode: { in: provinceScope } } } }
-          : {}),
-      },
+      where: and.length ? { AND: and } : undefined,
       include: {
         owner: { select: { id: true, name: true } },
-        machines: { select: { id: true, model: true, name: true, serial: true, status: true, installDate: true } },
+        machines: {
+          select: {
+            id: true,
+            model: true,
+            name: true,
+            serial: true,
+            status: true,
+            provinceCode: true,
+            manufactureDate: true,
+            installDate: true,
+            warrantyMonths: true,
+          },
+        },
         _count: { select: { activities: true, tickets: true } },
       },
       orderBy: [{ nextContactAt: "asc" }, { updatedAt: "desc" }],
-      take: 1000,
+      take: q ? 500 : 1000,
     });
 
     const staff = await prisma.user.findMany({
@@ -42,7 +80,7 @@ export async function GET(request: NextRequest) {
       select: { id: true, name: true },
     });
 
-    return NextResponse.json({ success: true, data: { customers, staff } });
+    return NextResponse.json({ success: true, data: { customers, staff }, searchApplied: Boolean(q) });
   } catch (error) {
     console.error("GET /api/crm/customers failed", error);
     return NextResponse.json(
@@ -63,13 +101,7 @@ export async function DELETE(request: NextRequest) {
       : typeof body.customerId === "string"
         ? [body.customerId]
         : [];
-    const customerIds: string[] = Array.from(
-      new Set<string>(
-        rawIds
-          .map((value: unknown): string => String(value ?? "").trim())
-          .filter((value: string): boolean => value.length > 0),
-      ),
-    ).slice(0, 1000);
+    const customerIds = Array.from(new Set(rawIds.map((value) => String(value ?? "").trim()).filter(Boolean))).slice(0, 1000);
 
     if (!customerIds.length) {
       return NextResponse.json({ success: false, message: "Chưa chọn khách hàng cần xóa." }, { status: 400 });

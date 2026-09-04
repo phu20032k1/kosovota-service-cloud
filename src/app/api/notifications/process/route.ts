@@ -9,11 +9,28 @@ function hasCronSecret(request: NextRequest) {
   return request.headers.get("x-cron-secret") === configured || bearer === configured;
 }
 
-export async function POST(request: NextRequest) {
-  const cronAuthorized = hasCronSecret(request);
-  const auth = cronAuthorized ? true : Boolean(await hasRole(request, ["ADMIN"]));
-  if (!auth) return NextResponse.json({ success: false, message: "Chỉ Admin hoặc cron hợp lệ được xử lý hàng đợi." }, { status: 403 });
-  const body = await request.json().catch(() => ({}));
-  const summary = await processNotificationQueue(Math.min(Math.max(Number(body.limit) || 20, 1), 100));
+async function authorize(request: NextRequest) {
+  if (hasCronSecret(request)) return true;
+  return Boolean(await hasRole(request, ["ADMIN"]));
+}
+
+async function run(request: NextRequest, limitInput?: unknown) {
+  if (!(await authorize(request))) {
+    return NextResponse.json(
+      { success: false, message: "Chỉ Admin hoặc cron hợp lệ được xử lý hàng đợi." },
+      { status: 403 },
+    );
+  }
+  const limit = Math.min(Math.max(Number(limitInput) || 20, 1), 100);
+  const summary = await processNotificationQueue(limit);
   return NextResponse.json({ success: true, message: `Đã xử lý ${summary.total} thông báo.`, data: summary });
+}
+
+export async function GET(request: NextRequest) {
+  return run(request, request.nextUrl.searchParams.get("limit"));
+}
+
+export async function POST(request: NextRequest) {
+  const body = await request.json().catch(() => ({})) as Record<string, unknown>;
+  return run(request, body.limit);
 }

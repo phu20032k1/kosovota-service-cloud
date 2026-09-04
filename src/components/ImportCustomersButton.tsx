@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import { Icon } from "@/components/ui/Icon";
 
+type ImportIssue = { row: number; message: string; customerName?: string; phone?: string; serial?: string };
 type Result = {
   success: boolean;
   message: string;
@@ -16,9 +17,29 @@ type Result = {
     lifecycleUpdatedCount?: number;
     errorCount: number;
   };
-  errors?: { row: number; message: string }[];
-  warnings?: { row: number; message: string }[];
+  errors?: ImportIssue[];
+  warnings?: ImportIssue[];
 };
+
+function csvCell(value: unknown) {
+  const text = String(value ?? "");
+  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+function downloadIssues(items: ImportIssue[], filename: string) {
+  const rows = [
+    ["Dòng", "Tên khách hàng", "Số điện thoại", "Seri / ID máy", "Nguyên nhân"],
+    ...items.map((item) => [item.row, item.customerName || "", item.phone || "", item.serial || "", item.message]),
+  ];
+  const csv = `\uFEFF${rows.map((row) => row.map(csvCell).join(",")).join("\r\n")}`;
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
 
 export default function ImportCustomersButton({ onComplete }: { onComplete?: () => void | Promise<void> }) {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -52,9 +73,8 @@ export default function ImportCustomersButton({ onComplete }: { onComplete?: () 
           <p className="text-xs font-black uppercase tracking-[.18em] text-blue-700">Excel / CSV import</p>
           <h2 className="mt-1 text-lg font-black">Nhập khách hàng hàng loạt</h2>
           <p className="mt-1 text-sm leading-6 text-slate-500">
-            Bắt buộc: Tên khách hàng và Số điện thoại. File mẫu đã có sẵn các cột Seri, Model, Tên máy,
-            Ngày SX, Ngày lắp đặt, Thời hạn BH, Kích hoạt bảo hành và GPS. Nếu có địa chỉ nhưng chưa có GPS,
-            hệ thống chủ động thử lấy tọa độ; nếu không lấy được sẽ báo đúng dòng để kiểm tra địa chỉ/cấu hình bản đồ.
+            Đồng bộ Tên khách hàng, SĐT, địa chỉ, Seri/ID máy, Model, Tên máy, Ngày SX, Ngày lắp,
+            kích hoạt bảo hành, thời hạn bảo hành và GPS. Dòng lỗi được giữ riêng để không rollback các dòng hợp lệ.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -69,35 +89,48 @@ export default function ImportCustomersButton({ onComplete }: { onComplete?: () 
 
       <div className="mt-4 grid gap-2 rounded-2xl border border-dashed border-blue-200 bg-blue-50/60 p-3 text-xs text-blue-900 md:grid-cols-3">
         <span><strong>1.</strong> Tải file mẫu CSV hoặc dùng file Excel hiện có.</span>
-        <span><strong>2.</strong> Không đổi tên các cột chính; để trống cột không có dữ liệu.</span>
-        <span><strong>3.</strong> Hỗ trợ .xlsx, .xlsm, .csv; lỗi/GPS sẽ chỉ rõ từng dòng.</span>
+        <span><strong>2.</strong> Không đổi tên các cột chính; để trống cột chưa có dữ liệu.</span>
+        <span><strong>3.</strong> Hỗ trợ .xlsx, .xlsm, .csv; lỗi chỉ rõ dòng/KH/SĐT/Seri.</span>
       </div>
 
       <input ref={inputRef} type="file" accept=".xlsx,.xlsm,.csv" onChange={upload} className="sr-only" />
 
       {result && (
         <div className={`mt-4 rounded-2xl border p-3 text-sm ${result.success ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-rose-200 bg-rose-50 text-rose-900"}`}>
-          <strong>{result.message}</strong>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <strong>{result.message}</strong>
+            {!!result.errors?.length && (
+              <button type="button" onClick={() => downloadIssues(result.errors || [], "kosovota-loi-nhap-khach-hang.csv")} className="btn-secondary px-3 py-2 text-xs font-black">
+                <Icon name="file" size={15} /> TẢI CSV LỖI ({result.errors.length})
+              </button>
+            )}
+          </div>
           {result.summary && (
             <p className="mt-1 leading-6">
               Thành công: {result.summary.successCount} · Tạo mới: {result.summary.createdCount} · Cập nhật: {result.summary.updatedCount}
               {' · '}Gắn máy: {result.summary.linkedMachineCount}
               {typeof result.summary.gpsUpdatedCount === "number" ? ` · GPS đã ghim: ${result.summary.gpsUpdatedCount}` : ""}
-              {typeof result.summary.gpsFailedCount === "number" ? ` · GPS chưa ghim: ${result.summary.gpsFailedCount}` : ""}
+              {typeof result.summary.gpsFailedCount === "number" ? ` · GPS cần kiểm tra: ${result.summary.gpsFailedCount}` : ""}
               {typeof result.summary.lifecycleUpdatedCount === "number" ? ` · Vòng đời/BH: ${result.summary.lifecycleUpdatedCount}` : ""}
               {` · Lỗi: ${result.summary.errorCount}`}
             </p>
           )}
           {!!result.errors?.length && (
-            <div className="mt-2 max-h-56 overflow-auto rounded-xl bg-white/70 p-2 text-rose-900">
+            <div className="mt-2 max-h-64 overflow-auto rounded-xl bg-white/70 p-2 text-rose-900">
               <strong>Lỗi dữ liệu:</strong>
-              {result.errors.slice(0, 100).map((error) => <p key={`${error.row}-${error.message}`}>Dòng {error.row}: {error.message}</p>)}
+              {result.errors.slice(0, 100).map((error) => (
+                <p key={`${error.row}-${error.message}`}>
+                  Dòng {error.row} · {error.customerName || "Chưa có tên"} · {error.phone || "Chưa có SĐT"} · {error.serial || "Không có Seri"}: {error.message}
+                </p>
+              ))}
             </div>
           )}
           {!!result.warnings?.length && (
-            <div className="mt-2 max-h-56 overflow-auto rounded-xl border border-amber-200 bg-amber-50 p-2 text-amber-900">
+            <div className="mt-2 max-h-64 overflow-auto rounded-xl border border-amber-200 bg-amber-50 p-2 text-amber-900">
               <strong>Cảnh báo GPS:</strong>
-              {result.warnings.slice(0, 100).map((warning) => <p key={`${warning.row}-${warning.message}`}>Dòng {warning.row}: {warning.message}</p>)}
+              {result.warnings.slice(0, 100).map((warning) => (
+                <p key={`${warning.row}-${warning.message}`}>Dòng {warning.row} · {warning.customerName || ""} · {warning.serial || ""}: {warning.message}</p>
+              ))}
             </div>
           )}
         </div>
