@@ -105,7 +105,7 @@ export default function ExecutiveDashboardPage() {
     void fetch("/api/machines/geocode-all", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ batchSize: 80 }),
+      body: JSON.stringify({ batchSize: 10 }),
     }).then(async (response) => {
       const result = await response.json();
       if (response.ok && result.success && (result.data?.updated || 0) > 0) {
