@@ -137,7 +137,7 @@ export default function CustomersPage() {
 
       <section className="surface-card overflow-hidden">
         <div className="data-toolbar">
-          <label className="relative min-w-[260px] flex-1"><Icon name="search" size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Tìm tên, SĐT, địa chỉ, ID máy hoặc số Seri máy" className="pl-10" /></label>
+          <label className="relative min-w-0 flex-1"><Icon name="search" size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Tìm tên, SĐT, địa chỉ, ID máy hoặc số Seri máy" className="pl-10" /></label>
           <select value={segment} onChange={(event) => setSegment(event.target.value)} className="max-w-52"><option value="ALL">Tất cả phân khúc</option><option value="STANDARD">Tiêu chuẩn</option><option value="VIP">VIP</option><option value="AT_RISK">Có nguy cơ</option><option value="INTERNAL">Nội bộ</option></select>
         </div>
 
@@ -146,19 +146,42 @@ export default function CustomersPage() {
           <div className="flex flex-wrap gap-2"><span className="status-pill status-slate">Đã chọn: {selected.length}</span><button type="button" disabled={!selected.length || busy} onClick={() => setDeleteIds(selected)} className="danger-button text-sm disabled:opacity-50"><Icon name="trash" size={16} />Xóa đã chọn</button><button type="button" disabled={!items.length || busy} onClick={() => setDeleteIds(items.map((item) => item.id))} className="ghost-danger text-sm disabled:opacity-50">Xóa toàn bộ đang lọc</button></div>
         </div>
 
-        {loading ? <LoadingState label="Đang tải khách hàng..." /> : <div className="admin-data-scroll">
-          <table className="min-w-[1180px] w-full text-sm">
-            <thead><tr>{["Chọn", "Khách hàng", "Phân khúc", "Thiết bị", "Tương tác", "Ticket", "CSKH", "Liên hệ tiếp", "Đánh giá", "Thao tác"].map((header) => <th key={header} className="p-3 text-left">{header}</th>)}</tr></thead>
-            <tbody>{items.map((customer) => <tr key={customer.id} className="border-b align-top hover:bg-slate-50">
-              <td className="p-3"><input type="checkbox" checked={selected.includes(customer.id)} onChange={() => toggleOne(customer.id)} /></td>
-              <td className="p-3"><strong>{customer.name}</strong><div><a href={`tel:${customer.phone}`} className="text-emerald-700">{customer.phone}</a></div><div className="max-w-xs truncate text-xs text-slate-500">{customer.address || "Chưa có địa chỉ"}</div></td>
-              <td className="p-3"><span className="status-badge badge-slate">{customer.segment || "STANDARD"}</span></td>
-              <td className="p-3"><strong>{customer.machines.length}</strong><div className="max-w-64 text-xs text-slate-500">{customer.machines.slice(0, 3).map((machine) => `${machine.name || machine.model || machine.id}${machine.serial ? ` · Seri ${machine.serial}` : ""}`).join(", ")}</div></td>
-              <td className="p-3 font-bold">{customer._count.activities}</td><td className="p-3 font-bold">{customer._count.tickets}</td><td className="p-3">{customer.owner?.name || "Chưa giao"}</td><td className="p-3">{date(customer.nextContactAt)}</td><td className="p-3 font-black">{customer.satisfaction ? `${customer.satisfaction}/5` : "—"}</td>
-              <td className="sticky right-0 bg-white p-3 shadow-[-8px_0_12px_-12px_rgba(15,23,42,.4)]"><div className="flex gap-2 whitespace-nowrap"><Link href={`/admin/customers/${customer.id}`} className="btn-secondary px-3 py-2 text-xs"><Icon name="eye" size={15} />Xem</Link><button type="button" onClick={() => openEdit(customer)} className="btn-secondary px-3 py-2 text-xs"><Icon name="settings" size={15} />Sửa</button><button type="button" onClick={() => setDeleteIds([customer.id])} className="ghost-danger px-3 py-2 text-xs"><Icon name="trash" size={15} />Xóa</button></div></td>
-            </tr>)}{!items.length && <tr><td colSpan={10} className="p-10 text-center text-slate-500">Không có khách hàng phù hợp.</td></tr>}</tbody>
-          </table>
-        </div>}
+        {loading ? <LoadingState label="Đang tải khách hàng..." /> : <>
+          <div className="admin-data-scroll hidden md:block">
+            <table className="min-w-[1180px] w-full text-sm">
+              <thead><tr>{["Chọn", "Khách hàng", "Phân khúc", "Thiết bị", "Tương tác", "Ticket", "CSKH", "Liên hệ tiếp", "Đánh giá", "Thao tác"].map((header) => <th key={header} className="p-3 text-left">{header}</th>)}</tr></thead>
+              <tbody>{items.map((customer) => <tr key={customer.id} className="border-b align-top hover:bg-slate-50">
+                <td className="p-3"><input type="checkbox" checked={selected.includes(customer.id)} onChange={() => toggleOne(customer.id)} /></td>
+                <td className="p-3"><strong>{customer.name}</strong><div><a href={`tel:${customer.phone}`} className="text-emerald-700">{customer.phone}</a></div><div className="max-w-xs truncate text-xs text-slate-500">{customer.address || "Chưa có địa chỉ"}</div></td>
+                <td className="p-3"><span className="status-badge badge-slate">{customer.segment || "STANDARD"}</span></td>
+                <td className="p-3"><strong>{customer.machines.length}</strong><div className="max-w-64 text-xs text-slate-500">{customer.machines.slice(0, 3).map((machine) => `${machine.name || machine.model || machine.id}${machine.serial ? ` · Seri ${machine.serial}` : ""}`).join(", ")}</div></td>
+                <td className="p-3 font-bold">{customer._count.activities}</td><td className="p-3 font-bold">{customer._count.tickets}</td><td className="p-3">{customer.owner?.name || "Chưa giao"}</td><td className="p-3">{date(customer.nextContactAt)}</td><td className="p-3 font-black">{customer.satisfaction ? `${customer.satisfaction}/5` : "—"}</td>
+                <td className="sticky right-0 bg-white p-3 shadow-[-8px_0_12px_-12px_rgba(15,23,42,.4)]"><div className="flex gap-2 whitespace-nowrap"><Link href={`/admin/customers/${customer.id}`} className="btn-secondary px-3 py-2 text-xs"><Icon name="eye" size={15} />Xem</Link><button type="button" onClick={() => openEdit(customer)} className="btn-secondary px-3 py-2 text-xs"><Icon name="settings" size={15} />Sửa</button><button type="button" onClick={() => setDeleteIds([customer.id])} className="ghost-danger px-3 py-2 text-xs"><Icon name="trash" size={15} />Xóa</button></div></td>
+              </tr>)}{!items.length && <tr><td colSpan={10} className="p-10 text-center text-slate-500">Không có khách hàng phù hợp.</td></tr>}</tbody>
+            </table>
+          </div>
+          <div className="divide-y divide-slate-100 md:hidden">
+            {items.map((customer) => <article key={customer.id} className="p-4">
+              <div className="flex items-start gap-3">
+                <input type="checkbox" className="mt-1 h-5 w-5 shrink-0" checked={selected.includes(customer.id)} onChange={() => toggleOne(customer.id)} />
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2"><h3 className="break-words font-black text-slate-950">{customer.name}</h3><span className="status-badge badge-slate">{customer.segment || "STANDARD"}</span></div>
+                  <a href={`tel:${customer.phone}`} className="mt-1 block text-sm font-bold text-emerald-700">{customer.phone}</a>
+                  <p className="mt-1 break-words text-sm leading-6 text-slate-500">{customer.address || "Chưa có địa chỉ"}</p>
+                </div>
+              </div>
+              <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                <div className="rounded-xl bg-slate-50 p-3"><span className="text-xs text-slate-500">Thiết bị</span><p className="mt-1 text-lg font-black">{customer.machines.length}</p></div>
+                <div className="rounded-xl bg-slate-50 p-3"><span className="text-xs text-slate-500">Ticket</span><p className="mt-1 text-lg font-black">{customer._count.tickets}</p></div>
+                <div className="rounded-xl bg-slate-50 p-3"><span className="text-xs text-slate-500">CSKH</span><p className="mt-1 break-words font-bold">{customer.owner?.name || "Chưa giao"}</p></div>
+                <div className="rounded-xl bg-slate-50 p-3"><span className="text-xs text-slate-500">Liên hệ tiếp</span><p className="mt-1 font-bold">{date(customer.nextContactAt)}</p></div>
+              </div>
+              {customer.machines.length > 0 && <p className="mt-3 break-words rounded-xl bg-blue-50 p-3 text-xs leading-5 text-blue-800">{customer.machines.slice(0, 3).map((machine) => `${machine.name || machine.model || machine.id}${machine.serial ? ` · Seri ${machine.serial}` : ""}`).join(", ")}</p>}
+              <div className="mt-3 grid grid-cols-2 gap-2"><Link href={`/admin/customers/${customer.id}`} className="btn-primary col-span-2 px-3 py-3 text-sm font-black text-white"><Icon name="eye" size={15}/>Xem hồ sơ</Link><button type="button" onClick={() => openEdit(customer)} className="btn-secondary px-3 py-3 text-sm font-black"><Icon name="settings" size={15}/>Sửa</button><button type="button" onClick={() => setDeleteIds([customer.id])} className="ghost-danger px-3 py-3 text-sm"><Icon name="trash" size={15}/>Xóa</button></div>
+            </article>)}
+            {!items.length && <p className="p-8 text-center text-slate-500">Không có khách hàng phù hợp.</p>}
+          </div>
+        </>}
       </section>
     </div>
 
