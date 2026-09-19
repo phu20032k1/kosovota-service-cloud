@@ -81,7 +81,7 @@ export default function CustomerMapPage() {
 
   return (
     <main className="min-h-screen bg-slate-50/70">
-      <OperationsHeader title="Bản đồ máy khách hàng" subtitle="Theo dõi vị trí, trạng thái và vòng đời thiết bị" actions={<button type="button" onClick={load} className="icon-button" title="Tải lại"><Icon name="refresh" size={18}/></button>} />
+      <OperationsHeader title="Bản đồ máy khách hàng" subtitle="Theo dõi vị trí, trạng thái và vòng đời thiết bị" actions={<button type="button" onClick={() => void load()} className="icon-button" title="Tải lại"><Icon name="refresh" size={18}/></button>} />
       <section className="mx-auto max-w-[1480px] space-y-4 p-3 sm:p-5">
         {error && <Notice kind="error">{error}</Notice>}
 
