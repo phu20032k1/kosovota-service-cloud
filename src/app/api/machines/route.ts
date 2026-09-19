@@ -51,7 +51,7 @@ async function backfillMachineGpsFromCustomerAddress<T extends {
       const bActive = b.serviceOrders.some((order) => ACTIVE_ORDER_STATUSES.has(order.status)) ? 1 : 0;
       return bActive - aActive;
     })
-    .slice(0, 40);
+    .slice(0, 10);
 
   if (!candidates.length) return 0;
 
