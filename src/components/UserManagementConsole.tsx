@@ -111,7 +111,7 @@ export function UserManagementConsole({ mode }: { mode: Mode }) {
     users.forEach((user) => {
       if (user.role === "CSKH" && user.provinceScope)
         values.add(`Tỉnh: ${user.provinceScope}`);
-      if (user.role === "CTV" && user.dealerCode?.startsWith("CTV-")) values.add("CTV độc lập");
+      if (user.role === "CTV" && (!user.dealerCode || user.dealerCode.startsWith("CTV-"))) values.add("CTV độc lập");
       else if (["DEALER", "CTV", "KTV"].includes(user.role) && user.dealerCode)
         values.add(`Đại lý: ${user.dealerCode}`);
     });
@@ -124,7 +124,7 @@ export function UserManagementConsole({ mode }: { mode: Mode }) {
       const scopeText =
         user.role === "CSKH"
           ? `Tỉnh: ${user.provinceScope || ""}`
-          : user.role === "CTV" && user.dealerCode?.startsWith("CTV-")
+          : user.role === "CTV" && (!user.dealerCode || user.dealerCode.startsWith("CTV-"))
             ? "CTV độc lập"
           : ["DEALER", "CTV", "KTV"].includes(user.role)
             ? `Đại lý: ${user.dealerCode || ""}`
@@ -251,7 +251,7 @@ export function UserManagementConsole({ mode }: { mode: Mode }) {
     setEditName(user.name);
     setEditPhone(user.phone);
     setEditProvinceScope(user.provinceScope || "");
-    setEditDealerCode(user.role === "CTV" && user.dealerCode?.startsWith("CTV-") ? "" : user.dealerCode || "");
+    setEditDealerCode(user.role === "CTV" && (!user.dealerCode || user.dealerCode.startsWith("CTV-")) ? "" : user.dealerCode || "");
     setEditPassword("");
     setEditPasswordConfirm("");
     setShowPassword(false);
@@ -366,8 +366,8 @@ export function UserManagementConsole({ mode }: { mode: Mode }) {
           <h2 className="text-lg font-black">Tạo tài khoản</h2>
           <p className="mt-2 text-sm leading-6 text-slate-500">
             {mode === "super"
-              ? "Super Admin tạo được Admin, CSKH, Đại lý và KTV."
-              : "Admin tạo được CSKH, Đại lý và KTV."}
+              ? "Super Admin tạo được Admin, CSKH, Đại lý, CTV và KTV."
+              : "Admin tạo được CSKH, Đại lý, CTV và KTV."}
           </p>
 
           <label className="mt-5 block">
@@ -606,7 +606,7 @@ export function UserManagementConsole({ mode }: { mode: Mode }) {
                     <td className="px-4 py-3 text-slate-600">
                       {user.role === "CSKH"
                         ? `Tỉnh: ${user.provinceScope || "—"}`
-                        : user.role === "CTV" && user.dealerCode?.startsWith("CTV-")
+                        : user.role === "CTV" && (!user.dealerCode || user.dealerCode.startsWith("CTV-"))
                           ? "CTV độc lập"
                         : ["DEALER", "CTV", "KTV"].includes(user.role)
                           ? `Đại lý: ${user.dealerCode || "—"}`
@@ -671,7 +671,7 @@ export function UserManagementConsole({ mode }: { mode: Mode }) {
       ) : (
         <OperationsHeader
           title="Tài khoản vận hành"
-          subtitle="Tạo và quản lý CSKH, Đại lý, KTV"
+          subtitle="Tạo và quản lý CSKH, Đại lý, CTV, KTV"
         />
       )}
       {content}
