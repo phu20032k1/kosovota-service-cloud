@@ -588,3 +588,87 @@ main .table-shell:has(> table) > table > thead > tr > th {
     padding: .85rem;
   }
 }
+
+
+/* Overflow safety */
+.surface-card,
+.soft-card,
+.metric-card,
+.table-shell,
+.modal-panel,
+.report-dialog-panel,
+.web-dialog-panel,
+.notice {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.surface-card :where(p, h1, h2, h3, h4, li, dd, dt),
+.soft-card :where(p, h1, h2, h3, h4, li, dd, dt),
+.metric-card :where(p, h1, h2, h3, h4),
+.modal-panel :where(p, h1, h2, h3, h4, li, dd, dt),
+.report-dialog-panel :where(p, h1, h2, h3, h4, li, dd, dt),
+.web-dialog-panel :where(p, h1, h2, h3, h4, li, dd, dt),
+.notice {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.status-pill,
+.status-badge,
+.mini-chip {
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.btn-primary,
+.btn-secondary,
+.ghost-danger,
+.warning-button {
+  max-width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+pre {
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+code {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.admin-data-scroll,
+.report-table-wrap,
+.overflow-x-auto {
+  max-width: 100%;
+  scrollbar-width: thin;
+}
+
+@media (max-width: 640px) {
+  .status-pill,
+  .status-badge,
+  .mini-chip {
+    white-space: normal;
+    text-overflow: clip;
+    overflow-wrap: anywhere;
+  }
+
+  .mobile-stack-actions > * {
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .surface-card,
+  .soft-card,
+  .metric-card,
+  .table-shell {
+    overflow-wrap: anywhere;
+  }
+}
