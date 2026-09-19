@@ -225,6 +225,12 @@ export default function ActivationStepOnePage() {
       return;
     }
 
+    if (!bankAccount.trim() || !accountHolder.trim() || !bankName.trim()) {
+      setSubmitError("Thông tin nhận quà là bắt buộc: cần số tài khoản, chủ tài khoản và ngân hàng.");
+      window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
+      return;
+    }
+
     setSubmitting(true);
     try {
       const buildingPhoto = await uploadPhoto(photos.building);
