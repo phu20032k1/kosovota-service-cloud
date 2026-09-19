@@ -1,11 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { PRODUCTS } from "@/data/products";
 import { OperationsHeader } from "@/components/ui/OperationsHeader";
 import { Icon } from "@/components/ui/Icon";
-
-const TARGET_MODELS = ["RO_UNDER_30", "BCN_HOT_COLD", "BCN_COLUMN", "INDUSTRIAL"] as const;
 
 type Schedule = {
   id: string;
@@ -27,7 +24,23 @@ type Schedule = {
   serviceOrder?: { id: string; orderCode?: string | null; status?: string | null } | null;
 };
 
-function intervalLabel(item: { monthsAfterInstallation?: number; daysAfterInstallation?: number }) {
+type PlanItem = {
+  title: string;
+  monthsAfterInstallation?: number;
+  daysAfterInstallation?: number;
+  customerCare?: boolean;
+};
+
+type PlanConfig = {
+  modelCode: string;
+  name: string;
+  category: string;
+  items: PlanItem[];
+  source: "default" | "custom";
+  updatedAt?: string | null;
+};
+
+function intervalLabel(item: PlanItem) {
   if (item.daysAfterInstallation) return `${item.daysAfterInstallation} ngày sau lắp đặt`;
   if (item.monthsAfterInstallation) return `${item.monthsAfterInstallation} tháng sau lắp đặt`;
   return "Theo cấu hình";
@@ -39,7 +52,7 @@ function dateOnly(value: string | Date) {
   return date;
 }
 
-function formatDate(value: string) {
+function formatDate(value: string | Date) {
   return new Date(value).toLocaleDateString("vi-VN");
 }
 
@@ -47,20 +60,29 @@ function isReplacementTask(title: string) {
   return /thay|lõi|loi|màng|mang|vật liệu|vat lieu|bảo trì|bao tri/i.test(title);
 }
 
+function cloneItems(items: PlanItem[]) {
+  return items.map((item) => ({ ...item }));
+}
+
 export default function MaintenancePlansPage() {
-  const plans = TARGET_MODELS.map((modelCode) => PRODUCTS.find((product) => product.modelCode === modelCode)).filter(Boolean);
   const [schedules, setSchedules] = useState<Schedule[]>([]);
+  const [plans, setPlans] = useState<PlanConfig[]>([]);
   const [loading, setLoading] = useState(true);
+  const [plansLoading, setPlansLoading] = useState(true);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [syncing, setSyncing] = useState(false);
   const [generatingOrders, setGeneratingOrders] = useState(false);
   const [savingId, setSavingId] = useState("");
+  const [editingModel, setEditingModel] = useState("");
+  const [draftItems, setDraftItems] = useState<PlanItem[]>([]);
+  const [savingPlan, setSavingPlan] = useState(false);
+  const [applyExisting, setApplyExisting] = useState(true);
   const automationRunning = useRef(false);
 
   const loadSchedules = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
-    setError("");
+    if (!silent) setError("");
     try {
       const response = await fetch("/api/maintenance-schedules?status=PENDING", { cache: "no-store" });
       const result = await response.json();
@@ -73,11 +95,28 @@ export default function MaintenancePlansPage() {
     }
   }, []);
 
+  const loadPlans = useCallback(async (silent = false) => {
+    if (!silent) setPlansLoading(true);
+    try {
+      const response = await fetch("/api/maintenance-plan-config", { cache: "no-store" });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.message || "Không tải được cấu hình chu kỳ.");
+      setPlans(result.data || []);
+    } catch (value) {
+      setError(value instanceof Error ? value.message : "Không tải được cấu hình chu kỳ.");
+    } finally {
+      if (!silent) setPlansLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
-    void loadSchedules();
+    void Promise.all([loadSchedules(), loadPlans()]);
 
     const refresh = () => {
-      if (document.visibilityState === "visible") void loadSchedules(true);
+      if (document.visibilityState === "visible") {
+        void loadSchedules(true);
+        void loadPlans(true);
+      }
     };
     const timer = window.setInterval(refresh, 30_000);
     window.addEventListener("focus", refresh);
@@ -87,7 +126,7 @@ export default function MaintenancePlansPage() {
       window.removeEventListener("focus", refresh);
       document.removeEventListener("visibilitychange", refresh);
     };
-  }, [loadSchedules]);
+  }, [loadPlans, loadSchedules]);
 
   useEffect(() => {
     let cancelled = false;
@@ -189,6 +228,61 @@ export default function MaintenancePlansPage() {
     }
   }
 
+  function startEdit(plan: PlanConfig) {
+    setEditingModel(plan.modelCode);
+    setDraftItems(cloneItems(plan.items));
+    setApplyExisting(true);
+    setError("");
+    setNotice("");
+    window.setTimeout(() => document.getElementById("maintenance-plan-editor")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
+  }
+
+  function updateDraft(index: number, patch: Partial<PlanItem>) {
+    setDraftItems((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item));
+  }
+
+  function changeUnit(index: number, unit: "days" | "months") {
+    setDraftItems((current) => current.map((item, itemIndex) => {
+      if (itemIndex !== index) return item;
+      const currentValue = item.daysAfterInstallation || item.monthsAfterInstallation || 1;
+      return unit === "days"
+        ? { title: item.title, customerCare: item.customerCare, daysAfterInstallation: currentValue }
+        : { title: item.title, customerCare: item.customerCare, monthsAfterInstallation: currentValue };
+    }));
+  }
+
+  function addMilestone() {
+    setDraftItems((current) => [...current, {
+      title: "Kiểm tra / bảo trì định kỳ",
+      monthsAfterInstallation: 1,
+      customerCare: false,
+    }]);
+  }
+
+  async function savePlan() {
+    if (!editingModel || savingPlan) return;
+    setSavingPlan(true);
+    setError("");
+    setNotice("");
+    try {
+      const response = await fetch("/api/maintenance-plan-config", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ modelCode: editingModel, items: draftItems, applyExisting }),
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.message || "Không lưu được chu kỳ.");
+      setNotice(result.message);
+      setEditingModel("");
+      setDraftItems([]);
+      await Promise.all([loadPlans(true), loadSchedules(true)]);
+    } catch (value) {
+      setError(value instanceof Error ? value.message : "Không lưu được chu kỳ.");
+    } finally {
+      setSavingPlan(false);
+    }
+  }
+
   const { dueNow, upcoming } = useMemo(() => {
     const today = dateOnly(new Date());
     const next7 = new Date(today);
@@ -204,60 +298,59 @@ export default function MaintenancePlansPage() {
     };
   }, [schedules]);
 
+  const editingPlan = plans.find((plan) => plan.modelCode === editingModel) || null;
+
   return (
     <main className="min-h-screen bg-slate-100">
       <OperationsHeader
         title="Lịch thay lõi"
-        subtitle="4 bảng chu kỳ theo dòng máy và danh sách máy đã đến hạn cần xử lý"
-        actions={<div className="flex flex-wrap gap-2">
+        subtitle="Theo dõi lịch thực tế, tự sinh lệnh và chỉnh chu kỳ chăm sóc theo từng dòng máy"
+        actions={<div className="mobile-stack-actions flex flex-wrap gap-2">
           <button type="button" onClick={() => void syncMissingSchedules()} disabled={syncing || generatingOrders} className="btn-primary px-4 py-2 text-sm font-black text-white disabled:opacity-50">
             <Icon name={syncing ? "refresh" : "calendar"} size={17} /> {syncing ? "Đang đồng bộ..." : "Sinh lịch máy bị thiếu"}
           </button>
           <button type="button" onClick={() => void generateDueOrders()} disabled={generatingOrders || syncing} className="btn-secondary px-4 py-2 text-sm font-black disabled:opacity-50">
             <Icon name={generatingOrders ? "refresh" : "activity"} size={17} /> {generatingOrders ? "Đang sinh lệnh..." : "Sinh lệnh đến hạn"}
           </button>
-          <button type="button" onClick={() => void loadSchedules()} className="icon-button" title="Tải lại lịch">
+          <button type="button" onClick={() => void Promise.all([loadSchedules(), loadPlans()])} className="icon-button" title="Tải lại lịch">
             <Icon name="refresh" size={18} />
           </button>
         </div>}
       />
 
-      <div className="mx-auto max-w-7xl space-y-5 p-4 sm:p-6">
-        {notice && <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 font-bold text-emerald-800">{notice}</div>}
+      <div className="mx-auto max-w-7xl space-y-5 p-3 sm:p-6">
+        {notice && <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-bold text-emerald-800">{notice}</div>}
+        {error && <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-bold text-red-700">{error}</div>}
+
         <section className="surface-card overflow-hidden">
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-5">
-            <div>
+          <div className="flex flex-col gap-3 border-b border-slate-100 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+            <div className="min-w-0">
               <p className="eyebrow">Theo dõi thực tế</p>
               <h2 className="mt-1 text-xl font-black text-slate-950">Máy cần thay lõi / bảo trì</h2>
-              <p className="mt-1 text-sm text-slate-500">Máy quá hạn hoặc đến hạn hôm nay được đưa lên đầu; máy trong 7 ngày tới hiển thị ở phần sắp đến hạn.</p>
+              <p className="mt-1 text-sm leading-6 text-slate-500">Quá hạn và hôm nay nằm bên trái; lịch trong 7 ngày tới nằm bên phải. Dữ liệu tự làm mới.</p>
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <span className="status-pill status-rose">Đến hạn: {dueNow.length}</span>
               <span className="status-pill status-slate">7 ngày tới: {upcoming.length}</span>
             </div>
           </div>
 
-          {error && <div className="m-4 rounded-xl border border-red-200 bg-red-50 p-4 font-bold text-red-700">{error}</div>}
           {loading ? (
             <div className="p-6 text-sm font-semibold text-slate-500">Đang tải máy đến hạn...</div>
           ) : (
             <div className="grid gap-0 xl:grid-cols-2 xl:divide-x xl:divide-slate-100">
-              <div className="p-4 sm:p-5">
+              <div className="p-3 sm:p-5">
                 <h3 className="mb-3 font-black text-red-700">CẦN XỬ LÝ NGAY</h3>
                 <div className="space-y-3">
-                  {dueNow.map((item) => (
-                    <ScheduleCard key={item.id} item={item} tone="due" saving={savingId === item.id} onSave={saveDueDate} />
-                  ))}
+                  {dueNow.map((item) => <ScheduleCard key={item.id} item={item} tone="due" saving={savingId === item.id} onSave={saveDueDate} />)}
                   {dueNow.length === 0 && <p className="rounded-xl border border-dashed p-5 text-sm text-slate-500">Hiện chưa có máy đến hạn thay lõi.</p>}
                 </div>
               </div>
 
-              <div className="p-4 sm:p-5">
+              <div className="p-3 sm:p-5">
                 <h3 className="mb-3 font-black text-amber-700">SẮP ĐẾN HẠN TRONG 7 NGÀY</h3>
                 <div className="space-y-3">
-                  {upcoming.map((item) => (
-                    <ScheduleCard key={item.id} item={item} tone="upcoming" saving={savingId === item.id} onSave={saveDueDate} />
-                  ))}
+                  {upcoming.map((item) => <ScheduleCard key={item.id} item={item} tone="upcoming" saving={savingId === item.id} onSave={saveDueDate} />)}
                   {upcoming.length === 0 && <p className="rounded-xl border border-dashed p-5 text-sm text-slate-500">Không có máy sắp đến hạn trong 7 ngày tới.</p>}
                 </div>
               </div>
@@ -265,57 +358,124 @@ export default function MaintenancePlansPage() {
           )}
         </section>
 
-        <section className="surface-card p-5 sm:p-6">
+        {editingPlan && (
+          <section id="maintenance-plan-editor" className="surface-card scroll-mt-24 overflow-hidden">
+            <div className="data-toolbar">
+              <div>
+                <p className="section-kicker">Chỉnh chu kỳ</p>
+                <h2 className="page-section-title">{editingPlan.name}</h2>
+                <p className="page-section-subtitle">Thay đổi này được lưu thành phiên bản cấu hình mới, không mất lịch sử cấu hình cũ.</p>
+              </div>
+              <button type="button" onClick={() => { setEditingModel(""); setDraftItems([]); }} className="btn-secondary px-4 py-2 text-sm font-black">
+                <Icon name="x" size={16}/>Đóng
+              </button>
+            </div>
+            <div className="space-y-3 p-3 sm:p-5">
+              {draftItems.map((item, index) => {
+                const usesDays = typeof item.daysAfterInstallation === "number";
+                const value = item.daysAfterInstallation || item.monthsAfterInstallation || 1;
+                return (
+                  <article key={index} className="rounded-2xl border border-slate-200 bg-slate-50 p-3 sm:p-4">
+                    <div className="grid min-w-0 gap-3 lg:grid-cols-[minmax(0,1fr)_120px_120px_auto_auto] lg:items-end">
+                      <label className="min-w-0">
+                        <span className="field-label">Nội dung mốc {index + 1}</span>
+                        <input value={item.title} onChange={(event) => updateDraft(index, { title: event.target.value })} className="w-full min-w-0" />
+                      </label>
+                      <label>
+                        <span className="field-label">Đơn vị</span>
+                        <select value={usesDays ? "days" : "months"} onChange={(event) => changeUnit(index, event.target.value as "days" | "months")} className="w-full">
+                          <option value="days">Ngày</option>
+                          <option value="months">Tháng</option>
+                        </select>
+                      </label>
+                      <label>
+                        <span className="field-label">Sau lắp đặt</span>
+                        <input
+                          type="number"
+                          min={1}
+                          max={usesDays ? 3650 : 120}
+                          value={value}
+                          onChange={(event) => updateDraft(index, usesDays
+                            ? { daysAfterInstallation: Math.max(1, Number(event.target.value) || 1) }
+                            : { monthsAfterInstallation: Math.max(1, Number(event.target.value) || 1) })}
+                          className="w-full"
+                        />
+                      </label>
+                      <label className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700">
+                        <input type="checkbox" checked={Boolean(item.customerCare)} onChange={(event) => updateDraft(index, { customerCare: event.target.checked })} />
+                        Chăm sóc
+                      </label>
+                      <button type="button" disabled={draftItems.length <= 1} onClick={() => setDraftItems((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="ghost-danger disabled:opacity-40">
+                        <Icon name="trash" size={16}/>Bỏ
+                      </button>
+                    </div>
+                  </article>
+                );
+              })}
+              <button type="button" onClick={addMilestone} className="btn-secondary w-full px-4 py-3 text-sm font-black sm:w-auto">
+                <Icon name="plus" size={16}/>Thêm mốc
+              </button>
+              <label className="flex items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm leading-6 text-emerald-900">
+                <input type="checkbox" checked={applyExisting} onChange={(event) => setApplyExisting(event.target.checked)} className="mt-1 shrink-0" />
+                <span><strong>Áp dụng cho lịch tương lai của máy đang có.</strong> Các lịch đã tạo lệnh hoặc đã xử lý được giữ nguyên; chỉ lịch PENDING trong tương lai được tính lại.</span>
+              </label>
+              <div className="mobile-stack-actions flex flex-wrap justify-end gap-2 border-t border-slate-100 pt-4">
+                <button type="button" onClick={() => { setEditingModel(""); setDraftItems([]); }} className="btn-secondary px-5 py-3 font-black">Hủy</button>
+                <button type="button" disabled={savingPlan} onClick={() => void savePlan()} className="btn-primary px-5 py-3 font-black text-white disabled:opacity-50">
+                  <Icon name={savingPlan ? "refresh" : "check"} size={17}/>{savingPlan ? "Đang lưu..." : "Lưu chu kỳ"}
+                </button>
+              </div>
+            </div>
+          </section>
+        )}
+
+        <section className="surface-card p-4 sm:p-6">
           <p className="eyebrow">KOSOVOTA · Định mức bảo trì</p>
-          <h2 className="mt-2 text-2xl font-black text-slate-950">4 bảng lịch nhắc thay lõi theo dòng máy</h2>
+          <h2 className="mt-2 text-xl font-black text-slate-950 sm:text-2xl">Chu kỳ chăm sóc có thể chỉnh trực tiếp</h2>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
-            Mỗi model dùng đúng cấu hình vật tư và chu kỳ riêng. Lịch thực tế của từng máy được tính từ ngày lắp đặt.
+            Máy mới sẽ dùng cấu hình mới nhất. Khi cần, có thể áp dụng cấu hình mới cho các lịch tương lai của máy đang hoạt động.
           </p>
         </section>
 
-        <section className="grid gap-5 xl:grid-cols-2">
-          {plans.map((product, planIndex) => product && (
-            <article key={product.modelCode} className="surface-card overflow-hidden">
-              <div className="border-b border-slate-100 p-5">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-xs font-black uppercase tracking-wider text-emerald-700">Bảng {planIndex + 1}</p>
-                    <h2 className="mt-1 text-lg font-black text-slate-950">{product.name}</h2>
-                    <p className="mt-1 text-sm text-slate-500">Model: <strong>{product.modelCode}</strong></p>
+        {plansLoading ? <div className="surface-card p-6 text-sm font-semibold text-slate-500">Đang tải cấu hình chu kỳ...</div> : (
+          <section className="grid min-w-0 gap-4 xl:grid-cols-2">
+            {plans.map((plan, planIndex) => (
+              <article key={plan.modelCode} className="surface-card min-w-0 overflow-hidden">
+                <div className="border-b border-slate-100 p-4 sm:p-5">
+                  <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0">
+                      <p className="text-xs font-black uppercase tracking-wider text-emerald-700">Bảng {planIndex + 1}</p>
+                      <h2 className="mt-1 break-words text-lg font-black text-slate-950">{plan.name}</h2>
+                      <div className="mt-2 flex flex-wrap items-center gap-2 text-xs font-bold text-slate-500">
+                        <span>Model: {plan.modelCode}</span>
+                        <span className={plan.source === "custom" ? "status-pill status-green" : "status-pill status-slate"}>
+                          {plan.source === "custom" ? "Đã tùy chỉnh" : "Mặc định"}
+                        </span>
+                        {plan.updatedAt && <span>Cập nhật {formatDate(plan.updatedAt)}</span>}
+                      </div>
+                    </div>
+                    <button type="button" onClick={() => startEdit(plan)} className="btn-secondary shrink-0 px-4 py-2 text-sm font-black">
+                      <Icon name="settings" size={16}/>Sửa chu kỳ
+                    </button>
                   </div>
-                  <span className="status-pill status-slate">{product.category}</span>
                 </div>
-              </div>
 
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[560px] text-sm">
-                  <thead className="bg-slate-800 text-left text-white">
-                    <tr>
-                      <th className="p-3">STT</th>
-                      <th className="p-3">Mốc</th>
-                      <th className="p-3">Nội dung / vật tư</th>
-                      <th className="p-3">Loại</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {product.maintenancePlan.map((item, index) => (
-                      <tr key={`${product.modelCode}-${index}`}>
-                        <td className="p-3 font-bold">{index + 1}</td>
-                        <td className="p-3 font-semibold text-slate-700">{intervalLabel(item)}</td>
-                        <td className="p-3 font-bold text-slate-950">{item.title}</td>
-                        <td className="p-3">
-                          <span className={item.customerCare ? "status-pill status-slate" : "status-pill status-emerald"}>
-                            {item.customerCare ? "Chăm sóc" : "Thay lõi / bảo trì"}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </article>
-          ))}
-        </section>
+                <div className="divide-y divide-slate-100">
+                  {plan.items.map((item, index) => (
+                    <div key={`${plan.modelCode}-${index}`} className="grid min-w-0 gap-2 p-4 sm:grid-cols-[42px_170px_minmax(0,1fr)_auto] sm:items-center">
+                      <span className="grid h-8 w-8 place-items-center rounded-lg bg-slate-100 text-xs font-black text-slate-600">{index + 1}</span>
+                      <p className="text-sm font-bold text-slate-600">{intervalLabel(item)}</p>
+                      <p className="min-w-0 break-words text-sm font-black text-slate-950">{item.title}</p>
+                      <span className={item.customerCare ? "status-pill status-slate" : "status-pill status-green"}>
+                        {item.customerCare ? "Chăm sóc" : "Thay lõi / bảo trì"}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </article>
+            ))}
+          </section>
+        )}
       </div>
     </main>
   );
@@ -329,20 +489,20 @@ function ScheduleCard({ item, tone, saving, onSave }: {
 }) {
   const [dueDate, setDueDate] = useState(() => new Date(item.dueDate).toISOString().slice(0, 10));
   return (
-    <article className={`rounded-2xl border p-4 ${tone === "due" ? "border-red-200 bg-red-50/60" : "border-amber-200 bg-amber-50/60"}`}>
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <p className="font-black text-slate-950">{item.machineId}</p>
-          <p className="mt-1 text-sm text-slate-600">{item.machine.model} · {item.machine.customer?.name || "Chưa có khách hàng"}</p>
+    <article className={`min-w-0 rounded-2xl border p-3 sm:p-4 ${tone === "due" ? "border-red-200 bg-red-50/60" : "border-amber-200 bg-amber-50/60"}`}>
+      <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <p className="break-all font-black text-slate-950">{item.machineId}</p>
+          <p className="mt-1 break-words text-sm text-slate-600">{item.machine.model} · {item.machine.customer?.name || "Chưa có khách hàng"}</p>
           {item.machine.customer?.phone && <p className="mt-1 text-sm font-bold text-slate-700">SĐT: {item.machine.customer.phone}</p>}
         </div>
-        <span className={`status-pill ${tone === "due" ? "status-rose" : "status-slate"}`}>{formatDate(item.dueDate)}</span>
+        <span className={`status-pill w-fit ${tone === "due" ? "status-rose" : "status-slate"}`}>{formatDate(item.dueDate)}</span>
       </div>
-      <p className={`mt-3 font-bold ${tone === "due" ? "text-red-800" : "text-amber-800"}`}>{item.title}</p>
-      <div className="mt-3 flex flex-wrap items-end gap-2 border-t border-black/5 pt-3">
-        <label className="min-w-44 flex-1 text-xs font-black text-slate-600">
+      <p className={`mt-3 break-words font-bold ${tone === "due" ? "text-red-800" : "text-amber-800"}`}>{item.title}</p>
+      <div className="mt-3 grid min-w-0 gap-2 border-t border-black/5 pt-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+        <label className="min-w-0 text-xs font-black text-slate-600">
           Điều chỉnh ngày đến hạn
-          <input type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} className="form-input mt-1" />
+          <input type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} className="form-input mt-1 w-full min-w-0 max-w-full" />
         </label>
         <button type="button" disabled={saving || !dueDate} onClick={() => void onSave(item, dueDate)} className="btn-secondary px-4 py-3 text-sm font-black disabled:opacity-50">
           {saving ? "Đang lưu..." : "Lưu hạn mới"}
