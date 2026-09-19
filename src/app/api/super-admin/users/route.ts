@@ -223,7 +223,16 @@ export async function PATCH(request: NextRequest) {
   }
 
   try {
-    const updated = await prisma.user.update({ where: { id }, data });
+    const updated = await prisma.$transaction(async (tx) => {
+      const saved = await tx.user.update({ where: { id }, data });
+      if (saved.role === "DEALER" && typeof body.active === "boolean" && saved.dealerCode) {
+        await tx.dealer.updateMany({
+          where: { dealerCode: saved.dealerCode },
+          data: { status: body.active ? "APPROVED" : "SUSPENDED" },
+        });
+      }
+      return saved;
+    });
     await prisma.adminLog.create({ data: { userId: auth.user.id, action: "SUPER_UPDATE_USER", target: id, detail: JSON.stringify(Object.keys(data)) } });
     return NextResponse.json({ success: true, data: safeUser(updated), ...(initialPassword ? { initialPassword } : {}) });
   } catch (error) {
