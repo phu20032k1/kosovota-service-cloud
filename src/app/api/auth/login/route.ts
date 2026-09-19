@@ -34,7 +34,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, message: "Vai trò đăng nhập không hợp lệ." }, { status: 400 });
     }
 
-    const user = await prisma.user.findUnique({ where: { phone } });
+    let user = await prisma.user.findUnique({ where: { phone } });
     if (!user?.active || !verifyPassword(password, user.password)) {
       return NextResponse.json({ success: false, message: "Sai số điện thoại hoặc mật khẩu." }, { status: 401 });
     }
@@ -43,6 +43,35 @@ export async function POST(request: NextRequest) {
     }
     if (!isInternalRole(user.role)) {
       return NextResponse.json({ success: false, message: "Tài khoản chưa được cấu hình đúng vai trò." }, { status: 403 });
+    }
+
+    if (user.role === "CTV" && !user.dealerCode) {
+      const standaloneCode = `CTV-${user.phone}`;
+      user = await prisma.$transaction(async (tx) => {
+        await tx.dealer.upsert({
+          where: { dealerCode: standaloneCode },
+          update: {
+            name: `CTV độc lập - ${user!.name}`,
+            phone: user!.phone,
+            representativeName: user!.name,
+            registrationType: "collaborator",
+            status: "APPROVED",
+          },
+          create: {
+            dealerCode: standaloneCode,
+            name: `CTV độc lập - ${user!.name}`,
+            phone: user!.phone,
+            representativeName: user!.name,
+            registrationType: "collaborator",
+            technicianCount: 1,
+            status: "APPROVED",
+          },
+        });
+        return tx.user.update({
+          where: { id: user!.id },
+          data: { dealerCode: standaloneCode },
+        });
+      });
     }
 
     if (!user.password.startsWith("scrypt$")) {
