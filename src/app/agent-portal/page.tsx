@@ -186,7 +186,6 @@ export default function AgentPortalPage() {
         <section className="table-shell">
           <div className="border-b p-4 sm:p-5">
             <h2 className="text-xl font-black">Lệnh dịch vụ được giao</h2>
-            <p className="mt-1 text-sm text-slate-500">Trên điện thoại, mỗi lệnh được hiển thị thành thẻ để không phải kéo ngang.</p>
           </div>
 
           <div className="hidden overflow-x-auto md:block"><table className="min-w-full text-sm"><thead className="text-left"><tr>{["Mã lệnh", "Khách hàng", "Địa chỉ", "Thiết bị", "Dịch vụ", "KTV phụ trách", "Hạn xử lý", "Trạng thái", "Thao tác"].map((item) => <th key={item} className="p-3">{item}</th>)}</tr></thead><tbody>
