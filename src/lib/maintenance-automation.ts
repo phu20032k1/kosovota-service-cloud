@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
-import { buildMaintenanceSchedules } from "@/lib/maintenance";
+import { buildMaintenanceSchedulesFromTemplates, type MaintenanceTemplate } from "@/lib/maintenance";
+import { getConfiguredMaintenanceTemplates } from "@/lib/maintenance-config";
 import { createOrderCode } from "@/lib/order-code";
 import { queueServiceOrderCreatedNotifications } from "@/lib/notifications/events";
 
@@ -21,15 +22,22 @@ export async function syncMissingMaintenanceSchedules(limitInput = 500) {
   let createdSchedules = 0;
   const syncedMachineIds: string[] = [];
   const failed: Array<{ machineId: string; reason: string }> = [];
+  const templateCache = new Map<string, MaintenanceTemplate[]>();
 
   for (const machine of machines) {
     if (!machine.installDate) continue;
     try {
+      const cacheKey = machine.model.trim().toUpperCase();
+      let templates = templateCache.get(cacheKey);
+      if (!templates) {
+        templates = await getConfiguredMaintenanceTemplates(machine.model);
+        templateCache.set(cacheKey, templates);
+      }
       const created = await prisma.$transaction(async (tx) => {
         const existing = await tx.maintenanceSchedule.count({ where: { machineId: machine.id } });
         if (existing) return 0;
         const result = await tx.maintenanceSchedule.createMany({
-          data: buildMaintenanceSchedules(machine.id, machine.installDate!, machine.model),
+          data: buildMaintenanceSchedulesFromTemplates(machine.id, machine.installDate!, templates!),
         });
         return result.count;
       });
