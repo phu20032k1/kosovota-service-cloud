@@ -272,7 +272,7 @@ export default function AdminReportsPage() {
           </div>
         </div>
 
-        <div className="max-h-[68vh] overflow-auto pb-24 pr-4">
+        <div className="hidden max-h-[68vh] overflow-auto pb-24 pr-4 md:block">
           <table className="min-w-[1480px] text-sm">
             <thead className="sticky top-0 z-10 bg-white text-left shadow-sm">
               <tr>{["Chọn", "Loại", "ID/Seri", "Tên máy", "Model", "Công suất", "Bảo hành", "Năm SX", "Khách hàng", "SĐT", "Tỉnh", "Trạng thái", "Ngày lắp", "Chăm sóc tiếp theo", "Thao tác"].map((h) => <th key={h} className={h === "Thao tác" ? "sticky right-0 z-20 whitespace-nowrap bg-white p-3 shadow-[-8px_0_12px_-12px_rgba(15,23,42,0.45)]" : "whitespace-nowrap p-3"}>{h}</th>)}</tr>
@@ -308,6 +308,41 @@ export default function AdminReportsPage() {
               {!loading && machines.length === 0 && <tr><td colSpan={15} className="p-10 text-center text-slate-500">Không có dữ liệu phù hợp.</td></tr>}
             </tbody>
           </table>
+        </div>
+
+        <div className="divide-y divide-slate-100 md:hidden">
+          {machines.map((machine) => {
+            const next = nextSchedule(machine);
+            return <article key={machine.id} className="p-4">
+              <div className="flex min-w-0 items-start gap-3">
+                <input type="checkbox" className="mt-1 h-5 w-5 shrink-0" checked={selectedMachineIds.includes(machine.id)} onChange={() => toggleMachine(machine.id)} aria-label={`Chọn ${machine.id}`} />
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-extrabold ${machineKindClass(machine)}`}>{machineKindLabel(machine)}</span>
+                    <span className="status-pill status-slate">{machine.status}</span>
+                  </div>
+                  <p className="mt-2 break-all font-black text-blue-700">{machine.id}</p>
+                  <h3 className="mt-1 break-words font-black text-slate-950">{machine.name || "Thiết bị KOSOVOTA"}</h3>
+                  <p className="mt-1 break-words text-sm text-slate-500">{machine.model}{machine.capacity ? ` · ${machine.capacity}` : ""}</p>
+                </div>
+              </div>
+
+              <div className="mt-3 space-y-2 rounded-2xl bg-slate-50 p-3 text-sm leading-6 text-slate-600">
+                <p><strong className="text-slate-800">Khách:</strong> {machine.customer?.name || "Chưa có"}{machine.customer?.phone ? <> · <a href={`tel:${machine.customer.phone}`} className="font-bold text-emerald-700">{machine.customer.phone}</a></> : null}</p>
+                <p><strong className="text-slate-800">Tỉnh:</strong> {machine.provinceCode || "—"} · <strong className="text-slate-800">Ngày lắp:</strong> {date(machine.installDate)}</p>
+                <p><strong className="text-slate-800">Bảo hành:</strong> {machine.warrantyMonths ? `${machine.warrantyMonths} tháng` : "—"} · <strong className="text-slate-800">Năm SX:</strong> {machine.manufactureDate ? new Date(machine.manufactureDate).getFullYear() : "—"}</p>
+                <p className="break-words"><strong className="text-slate-800">Chăm sóc tiếp:</strong> {next ? `${next.title} · ${date(next.dueDate)}` : "Không còn lịch mở"}</p>
+              </div>
+
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <Link href={`/admin/machines/${encodeURIComponent(machine.id)}`} className="btn-primary col-span-2 px-3 py-3 text-sm font-black text-white">Xem chi tiết</Link>
+                <Link href={`/qr/${encodeURIComponent(machine.id)}`} className="btn-secondary px-3 py-3 text-sm font-black">In QR</Link>
+                <Link href={`/service-report/${encodeURIComponent(machine.id)}`} className="btn-secondary px-3 py-3 text-sm font-black">Dịch vụ</Link>
+                <button type="button" disabled={busy} onClick={() => setDeleteRequest([machine.id])} className="ghost-danger col-span-2 px-3 py-3 text-sm disabled:opacity-50"><Icon name="trash" size={14}/>Xóa máy</button>
+              </div>
+            </article>;
+          })}
+          {!loading && machines.length === 0 && <p className="p-10 text-center text-slate-500">Không có dữ liệu phù hợp.</p>}
         </div>
       </section>
 
@@ -349,11 +384,18 @@ export default function AdminReportsPage() {
 
       <section className="surface-card">
         <div className="border-b p-5"><h2 className="text-xl font-black">SOS ưu tiên cao</h2></div>
-        <div className="overflow-x-auto">
+        <div className="hidden overflow-x-auto md:block">
           <table className="min-w-full text-sm">
             <thead className="text-left"><tr>{["Máy", "Khách hàng", "SĐT", "Tiếp nhận", "Trạng thái"].map((h) => <th key={h} className="p-3">{h}</th>)}</tr></thead>
             <tbody>{(data?.sosTickets || []).map((ticket) => <tr key={ticket.id} className="border-b"><td className="p-3 font-black">{ticket.machineId}</td><td className="p-3">{ticket.customerName}</td><td className="p-3"><a href={`tel:${ticket.customerPhone}`} className="text-emerald-700">{ticket.customerPhone}</a></td><td className="p-3">{date(ticket.createdAt)}</td><td className="p-3 font-bold">{ticket.status}</td></tr>)}</tbody>
           </table>
+        </div>
+        <div className="divide-y divide-slate-100 md:hidden">
+          {(data?.sosTickets || []).map((ticket) => <article key={ticket.id} className="p-4">
+            <div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="break-all font-black text-slate-950">Máy {ticket.machineId}</p><p className="mt-1 break-words font-bold text-slate-700">{ticket.customerName}</p><a href={`tel:${ticket.customerPhone}`} className="mt-1 block text-sm font-bold text-emerald-700">{ticket.customerPhone}</a></div><span className="status-pill status-red">{ticket.status}</span></div>
+            <p className="mt-3 rounded-xl bg-slate-50 p-3 text-sm text-slate-600">Tiếp nhận: <strong>{date(ticket.createdAt)}</strong></p>
+          </article>)}
+          {!(data?.sosTickets || []).length && <p className="p-8 text-center text-slate-500">Không có SOS.</p>}
         </div>
       </section>
     </div>
