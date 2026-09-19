@@ -54,7 +54,12 @@ async function updateOneDealerStatus(
 
     if (status === "APPROVED") {
       const phone = normalizePhone(updated.phone);
-      const existing = await tx.user.findUnique({ where: { phone } });
+      const linkedAccount = await tx.user.findFirst({
+        where: { dealerCode: updated.dealerCode, role: { in: ["DEALER", "CTV"] } },
+        orderBy: { createdAt: "asc" },
+      });
+      const existingByPhone = await tx.user.findUnique({ where: { phone } });
+      const existing = linkedAccount || existingByPhone;
       const accountRole = /^CTV/i.test(updated.dealerCode) || /ctv|collaborator|cộng tác/i.test(updated.registrationType || "") ? "CTV" : "DEALER";
       if (existing && !["DEALER", "CTV"].includes(existing.role)) throw new Error("PHONE_ROLE_CONFLICT");
       if (existing?.dealerCode && existing.dealerCode !== updated.dealerCode) {
