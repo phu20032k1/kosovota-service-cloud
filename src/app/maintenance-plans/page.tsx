@@ -380,12 +380,9 @@ export default function MaintenancePlansPage() {
           <div className="grid gap-6 p-5 sm:p-7 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
             <div className="min-w-0">
               <div className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1.5 text-xs font-black uppercase tracking-[.14em] text-emerald-100">
-                <Icon name="calendar" size={15}/> Lịch vận hành thực tế
+                <Icon name="calendar" size={15}/> Quản lý bảo trì
               </div>
-              <h1 className="mt-4 text-2xl font-black tracking-tight sm:text-3xl">Không bỏ sót máy đến kỳ thay lõi</h1>
-              <p className="mt-2 max-w-2xl text-sm leading-6 text-emerald-50/80">
-                Trang này hiển thị cả lịch đang chờ và lịch đã tự sinh lệnh dịch vụ, nên máy đến hạn sẽ không còn “biến mất” khỏi màn hình.
-              </p>
+              <h1 className="mt-4 text-2xl font-black tracking-tight sm:text-3xl">Lịch thay lõi & bảo trì</h1>
             </div>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-5 lg:min-w-[600px]">
               <StatTile label="Quá hạn" value={stats.overdue} tone="rose"/>
@@ -404,7 +401,7 @@ export default function MaintenancePlansPage() {
                 <div>
                   <p className="eyebrow">Ưu tiên xử lý</p>
                   <h2 className="mt-1 text-xl font-black text-slate-950">Đến hạn và quá hạn</h2>
-                  <p className="mt-1 text-sm leading-6 text-slate-500">Lịch đã tạo lệnh vẫn giữ ở đây để Admin theo dõi xuyên suốt.</p>
+
                 </div>
                 <span className="rounded-full bg-rose-100 px-3 py-1.5 text-xs font-black text-rose-700">{urgentSchedules.length} việc cần chú ý</span>
               </div>
@@ -446,7 +443,7 @@ export default function MaintenancePlansPage() {
               <div>
                 <p className="eyebrow">Lịch sắp tới</p>
                 <h2 className="mt-1 text-xl font-black text-slate-950">Danh sách thay lõi theo thời gian</h2>
-                <p className="mt-1 text-sm leading-6 text-slate-500">Hiển thị toàn bộ lịch tương lai thay vì chỉ 7 ngày như trước.</p>
+
               </div>
               <div className="grid gap-2 sm:grid-cols-[minmax(240px,1fr)_auto]">
                 <label className="relative min-w-0">
@@ -525,7 +522,7 @@ export default function MaintenancePlansPage() {
           <div className="border-b border-slate-100 p-4 sm:p-5">
             <p className="eyebrow">Cấu hình chu kỳ</p>
             <h2 className="mt-1 text-xl font-black text-slate-950">Chu kỳ theo từng dòng máy</h2>
-            <p className="mt-1 text-sm leading-6 text-slate-500">Phần này chỉ dùng để chỉnh định mức. Lịch thực tế của từng máy nằm ở phía trên.</p>
+
           </div>
 
           {plansLoading ? <LoadingBlock text="Đang tải cấu hình chu kỳ..."/> : (
