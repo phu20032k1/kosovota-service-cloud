@@ -184,8 +184,12 @@ export default function AgentPortalPage() {
         <section className="grid gap-4 md:grid-cols-2"><article className="surface-card p-5"><p className="font-bold text-slate-500">Đã thanh toán</p><p className="mt-1 text-2xl font-black text-emerald-700">{money(summary.paid)}</p></article><article className="surface-card p-5"><p className="font-bold text-slate-500">Chờ duyệt thanh toán</p><p className="mt-1 text-2xl font-black text-amber-700">{money(summary.pending)}</p></article></section>
 
         <section className="table-shell">
-          <div className="border-b p-5"><h2 className="text-xl font-black">Lệnh dịch vụ được giao</h2></div>
-          <div className="overflow-x-auto"><table className="min-w-full text-sm"><thead className="text-left"><tr>{["Mã lệnh", "Khách hàng", "Địa chỉ", "Thiết bị", "Dịch vụ", "KTV phụ trách", "Hạn xử lý", "Trạng thái", "Thao tác"].map((item) => <th key={item} className="p-3">{item}</th>)}</tr></thead><tbody>
+          <div className="border-b p-4 sm:p-5">
+            <h2 className="text-xl font-black">Lệnh dịch vụ được giao</h2>
+            <p className="mt-1 text-sm text-slate-500">Trên điện thoại, mỗi lệnh được hiển thị thành thẻ để không phải kéo ngang.</p>
+          </div>
+
+          <div className="hidden overflow-x-auto md:block"><table className="min-w-full text-sm"><thead className="text-left"><tr>{["Mã lệnh", "Khách hàng", "Địa chỉ", "Thiết bị", "Dịch vụ", "KTV phụ trách", "Hạn xử lý", "Trạng thái", "Thao tác"].map((item) => <th key={item} className="p-3">{item}</th>)}</tr></thead><tbody>
             {orders.map((order) => <tr key={order.id} className="border-b align-top"><td className="p-3 font-black">{order.orderCode}</td><td className="p-3"><strong>{order.customerName}</strong><br/><a href={`tel:${order.customerPhone}`} className="text-emerald-700">{order.customerPhone}</a></td><td className="max-w-xs p-3">{order.address || "Chưa cập nhật"}</td><td className="p-3"><Link href={`/qr/${order.machine?.id || ""}`} className="font-bold text-blue-700">{order.machine?.id}</Link><div className="mt-2 flex gap-2">{order.machine?.buildingPhoto && <a href={order.machine.buildingPhoto} target="_blank" className="text-xs underline">Mặt tiền</a>}{order.machine?.machinePhoto && <a href={order.machine.machinePhoto} target="_blank" className="text-xs underline">Vị trí máy</a>}</div></td><td className="p-3">{order.serviceType}</td><td className="min-w-48 p-3"><select value={order.technician?.id || ""} onChange={(event) => void assignTechnician(order.id, event.target.value)} disabled={["COMPLETED","CANCELLED"].includes(order.status)} className="rounded-lg border p-2 text-xs"><option value="">Chưa giao KTV</option>{technicians.map((technician)=><option key={technician.id} value={technician.id}>{technician.name} · {technician.phone}</option>)}</select></td><td className="p-3">{formatDate(order.dueDate)}</td><td className="p-3"><StatusBadge value={order.status}/></td><td className="p-3"><div className="flex min-w-40 flex-col gap-2">
               {order.status === "ASSIGNED" && <><button type="button" onClick={() => updateOrder(order.id, { status: "ACCEPTED" }).catch((e: Error) => setNotice({ kind: "error", text: e.message }))} className="rounded-lg bg-emerald-600 px-3 py-2 font-bold text-white">Đồng ý</button><button type="button" onClick={() => setRejectOrder(order)} className="rounded-lg bg-rose-600 px-3 py-2 font-bold text-white">Từ chối</button></>}
               {order.status === "ACCEPTED" && <button type="button" onClick={() => updateOrder(order.id, { status: "IN_PROGRESS" }).catch((e: Error) => setNotice({ kind: "error", text: e.message }))} className="rounded-lg bg-blue-600 px-3 py-2 font-bold text-white">Bắt đầu xử lý</button>}
@@ -193,6 +197,48 @@ export default function AgentPortalPage() {
             </div></td></tr>)}
             {!loading && orders.length === 0 && <tr><td colSpan={9} className="p-10 text-center text-slate-500">Chưa có lệnh dịch vụ.</td></tr>}
           </tbody></table></div>
+
+          <div className="divide-y divide-slate-100 md:hidden">
+            {orders.map((order) => (
+              <article key={order.id} className="p-4">
+                <div className="flex min-w-0 items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="break-all text-base font-black text-slate-950">{order.orderCode}</p>
+                    <p className="mt-1 break-words text-sm font-bold text-slate-700">{order.customerName}</p>
+                    <a href={`tel:${order.customerPhone}`} className="mt-1 block text-sm font-bold text-emerald-700">{order.customerPhone}</a>
+                  </div>
+                  <StatusBadge value={order.status}/>
+                </div>
+
+                <div className="mt-3 space-y-2 rounded-2xl bg-slate-50 p-3 text-sm leading-6 text-slate-600">
+                  <p><strong className="text-slate-800">Máy:</strong> <Link href={`/qr/${order.machine?.id || ""}`} className="break-all font-bold text-blue-700">{order.machine?.id || "—"}</Link></p>
+                  <p><strong className="text-slate-800">Dịch vụ:</strong> {order.serviceType}</p>
+                  <p><strong className="text-slate-800">Hạn:</strong> {formatDate(order.dueDate)}</p>
+                  <p className="break-words"><strong className="text-slate-800">Địa chỉ:</strong> {order.address || "Chưa cập nhật"}</p>
+                </div>
+
+                <label className="mt-3 block">
+                  <span className="field-label">KTV phụ trách</span>
+                  <select value={order.technician?.id || ""} onChange={(event) => void assignTechnician(order.id, event.target.value)} disabled={["COMPLETED","CANCELLED"].includes(order.status)} className="w-full rounded-xl border p-3 text-sm">
+                    <option value="">Chưa giao KTV</option>
+                    {technicians.map((technician)=><option key={technician.id} value={technician.id}>{technician.name} · {technician.phone}</option>)}
+                  </select>
+                </label>
+
+                {(order.machine?.buildingPhoto || order.machine?.machinePhoto) && <div className="mt-3 flex flex-wrap gap-2 text-xs">
+                  {order.machine?.buildingPhoto && <a href={order.machine.buildingPhoto} target="_blank" className="btn-secondary px-3 py-2">Ảnh mặt tiền</a>}
+                  {order.machine?.machinePhoto && <a href={order.machine.machinePhoto} target="_blank" className="btn-secondary px-3 py-2">Ảnh vị trí máy</a>}
+                </div>}
+
+                <div className="mobile-stack-actions mt-3 flex gap-2">
+                  {order.status === "ASSIGNED" && <><button type="button" onClick={() => updateOrder(order.id, { status: "ACCEPTED" }).catch((e: Error) => setNotice({ kind: "error", text: e.message }))} className="btn-primary px-3 py-3 font-black text-white">Đồng ý nhận lệnh</button><button type="button" onClick={() => setRejectOrder(order)} className="warning-button px-3 py-3">Từ chối</button></>}
+                  {order.status === "ACCEPTED" && <button type="button" onClick={() => updateOrder(order.id, { status: "IN_PROGRESS" }).catch((e: Error) => setNotice({ kind: "error", text: e.message }))} className="btn-primary px-3 py-3 font-black text-white">Bắt đầu xử lý</button>}
+                  {order.status === "IN_PROGRESS" && <button type="button" onClick={() => { setReportError(""); setReportOrder(order); }} className="w-full rounded-xl bg-slate-900 px-3 py-3 font-black text-white">Gửi báo cáo</button>}
+                </div>
+              </article>
+            ))}
+            {!loading && orders.length === 0 && <p className="p-8 text-center text-sm text-slate-500">Chưa có lệnh dịch vụ.</p>}
+          </div>
         </section>
       </div>
 
