@@ -7,11 +7,15 @@ export async function GET(request: NextRequest) {
   if (!auth) return NextResponse.json({ success: false, message: "Chưa được cấp quyền." }, { status: 401 });
   try {
     const machineId = request.nextUrl.searchParams.get("machineId")?.trim();
-    const status = request.nextUrl.searchParams.get("status")?.trim();
+    const statusParam = request.nextUrl.searchParams.get("status")?.trim();
+    const statuses = statusParam
+      ? statusParam.split(",").map((value) => value.trim()).filter(Boolean)
+      : [];
     const scopes = auth.user.provinceScope?.split(",").map((value: string) => value.trim()).filter(Boolean) || [];
     const schedules = await prisma.maintenanceSchedule.findMany({
       where: {
-        ...(machineId ? { machineId } : {}), ...(status ? { status } : {}),
+        ...(machineId ? { machineId } : {}),
+        ...(statuses.length === 1 ? { status: statuses[0] } : statuses.length > 1 ? { status: { in: statuses } } : {}),
         ...(auth.user.role === "CSKH" && scopes.length ? { machine: { provinceCode: { in: scopes } } } : {}),
       },
       include: { machine: { include: { customer: true } }, serviceOrder: true },

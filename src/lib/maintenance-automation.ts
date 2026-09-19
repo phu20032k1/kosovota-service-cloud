@@ -10,11 +10,35 @@ function prismaCode(error: unknown) {
     : "";
 }
 
+function isReplacementTask(title: string) {
+  return /thay|lõi|loi|màng|mang|vật liệu|vat lieu|bảo trì|bao tri/i.test(title);
+}
+
 export async function syncMissingMaintenanceSchedules(limitInput = 500) {
   const limit = Math.min(1_000, Math.max(1, Number(limitInput) || 500));
+  const replacementTitleFilters = [
+    { title: { contains: "thay", mode: "insensitive" as const } },
+    { title: { contains: "lõi", mode: "insensitive" as const } },
+    { title: { contains: "loi", mode: "insensitive" as const } },
+    { title: { contains: "màng", mode: "insensitive" as const } },
+    { title: { contains: "mang", mode: "insensitive" as const } },
+    { title: { contains: "vật liệu", mode: "insensitive" as const } },
+    { title: { contains: "vat lieu", mode: "insensitive" as const } },
+    { title: { contains: "bảo trì", mode: "insensitive" as const } },
+    { title: { contains: "bao tri", mode: "insensitive" as const } },
+  ];
+
   const machines = await prisma.machine.findMany({
-    where: { installDate: { not: null }, maintenanceSchedules: { none: {} } },
-    select: { id: true, model: true, installDate: true },
+    where: {
+      installDate: { not: null },
+      maintenanceSchedules: { none: { OR: replacementTitleFilters } },
+    },
+    select: {
+      id: true,
+      model: true,
+      installDate: true,
+      maintenanceSchedules: { select: { title: true, dueDate: true } },
+    },
     orderBy: { installDate: "asc" },
     take: limit,
   });
@@ -33,14 +57,19 @@ export async function syncMissingMaintenanceSchedules(limitInput = 500) {
         templates = await getConfiguredMaintenanceTemplates(machine.model);
         templateCache.set(cacheKey, templates);
       }
-      const created = await prisma.$transaction(async (tx) => {
-        const existing = await tx.maintenanceSchedule.count({ where: { machineId: machine.id } });
-        if (existing) return 0;
-        const result = await tx.maintenanceSchedule.createMany({
-          data: buildMaintenanceSchedulesFromTemplates(machine.id, machine.installDate!, templates!),
-        });
-        return result.count;
+      const desired = buildMaintenanceSchedulesFromTemplates(machine.id, machine.installDate!, templates!);
+      const existingKeys = new Set(
+        machine.maintenanceSchedules.map((item) => `${item.title.trim().toLowerCase()}|${item.dueDate.toISOString()}`),
+      );
+      const hasAnySchedules = machine.maintenanceSchedules.length > 0;
+      const missing = desired.filter((item) => {
+        if (hasAnySchedules && !isReplacementTask(item.title)) return false;
+        return !existingKeys.has(`${item.title.trim().toLowerCase()}|${item.dueDate.toISOString()}`);
       });
+
+      const created = missing.length
+        ? (await prisma.maintenanceSchedule.createMany({ data: missing })).count
+        : 0;
       if (created) {
         createdSchedules += created;
         syncedMachineIds.push(machine.id);
@@ -54,7 +83,10 @@ export async function syncMissingMaintenanceSchedules(limitInput = 500) {
   }
 
   const remaining = await prisma.machine.count({
-    where: { installDate: { not: null }, maintenanceSchedules: { none: {} } },
+    where: {
+      installDate: { not: null },
+      maintenanceSchedules: { none: { OR: replacementTitleFilters } },
+    },
   });
 
   return {
