@@ -37,12 +37,12 @@ export function getMaintenanceTemplates(model: string): MaintenanceTemplate[] {
   return configured.length ? configured : DEFAULT_MAINTENANCE_TEMPLATES;
 }
 
-export function buildMaintenanceSchedules(
+export function buildMaintenanceSchedulesFromTemplates(
   machineId: string,
   installDate: Date,
-  model: string,
+  templates: MaintenanceTemplate[],
 ) {
-  return getMaintenanceTemplates(model).map((template) => ({
+  return templates.map((template) => ({
     machineId,
     title: template.title,
     dueDate:
@@ -51,4 +51,12 @@ export function buildMaintenanceSchedules(
         : addMonths(installDate, template.monthsAfterInstallation || 0),
     status: "PENDING",
   }));
+}
+
+export function buildMaintenanceSchedules(
+  machineId: string,
+  installDate: Date,
+  model: string,
+) {
+  return buildMaintenanceSchedulesFromTemplates(machineId, installDate, getMaintenanceTemplates(model));
 }
