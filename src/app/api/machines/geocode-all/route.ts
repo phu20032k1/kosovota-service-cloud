@@ -47,7 +47,7 @@ export async function POST(request: NextRequest) {
   if (!auth) return NextResponse.json({ success: false, message: "Chưa được cấp quyền." }, { status: 401 });
 
   const body = await request.json().catch(() => ({}));
-  const batchSize = Math.min(500, Math.max(1, Number(body.batchSize) || 100));
+  const batchSize = Math.min(20, Math.max(1, Number(body.batchSize) || 10));
   const scope = auth.user.provinceScope?.split(",").map((value) => value.trim()).filter(Boolean) || [];
   const scoped = scopeWhere(auth.user.role, scope);
   const where = needsLocationData(scoped);
