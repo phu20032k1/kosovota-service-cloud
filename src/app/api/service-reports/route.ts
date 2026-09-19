@@ -37,6 +37,23 @@ export async function POST(request: NextRequest) {
       if (auth.user.role === "KTV" && order.technicianId !== auth.user.id) return NextResponse.json({ success: false, message: "Lệnh chưa được giao cho KTV này." }, { status: 403 });
       if (order.status === "COMPLETED" || order.reports.length) return NextResponse.json({ success: false, message: "Lệnh đã có báo cáo hoàn thành." }, { status: 409 });
       if (!["ACCEPTED", "IN_PROGRESS"].includes(order.status)) return NextResponse.json({ success: false, message: "Cần nhận và bắt đầu lệnh trước khi báo cáo." }, { status: 400 });
+    } else {
+      const duplicate = await prisma.serviceReport.findFirst({
+        where: {
+          machineId,
+          dealerCode,
+          serviceType,
+          createdAt: { gte: new Date(Date.now() - 5 * 60_000) },
+        },
+        orderBy: { createdAt: "desc" },
+        select: { id: true },
+      });
+      if (duplicate) {
+        return NextResponse.json(
+          { success: false, message: `Báo cáo vừa được ghi nhận (${duplicate.id}); hệ thống đã chặn bản ghi trùng.`, data: duplicate },
+          { status: 409 },
+        );
+      }
     }
 
     const report = await prisma.$transaction(async (tx) => {

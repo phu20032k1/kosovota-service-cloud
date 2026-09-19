@@ -36,7 +36,9 @@ export async function POST(request: NextRequest) {
 
   return NextResponse.json({
     success: true,
-    message: "Mã OTP đã được gửi.",
+    message: otp.dryRun
+      ? "OTP đang ở chế độ thử (DRY RUN), chưa gửi ra điện thoại. Bật gửi thật trong trang Tích hợp trước khi nghiệm thu."
+      : `Mã OTP đã được gửi qua ${otp.channel}.`,
     expiresAt: otp.expiresAt,
     ...(otp.debugCode ? { debugCode: otp.debugCode } : {}),
   });

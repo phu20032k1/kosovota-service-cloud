@@ -49,12 +49,9 @@ export async function proxy(request: NextRequest) {
     }
   }
 
-  if (pathname === LOGIN_PAGE && session && isInternalRole(session.role)) {
-    const url = request.nextUrl.clone();
-    url.pathname = homeForRole(session.role);
-    url.search = "";
-    return NextResponse.redirect(url);
-  }
+  // Luôn cho phép mở trang đăng nhập. Trạng thái active được kiểm tra lại từ DB
+  // trong /api/auth/login và mọi API nghiệp vụ; không tin riêng token cũ để tránh
+  // vòng lặp chuyển hướng sau khi Admin vừa khóa tài khoản.
 
   return NextResponse.next();
 }

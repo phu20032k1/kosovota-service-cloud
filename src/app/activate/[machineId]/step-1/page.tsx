@@ -81,6 +81,8 @@ export default function ActivationStepOnePage() {
   const [accountHolder, setAccountHolder] = useState("");
   const [bankName, setBankName] = useState("");
   const [completed, setCompleted] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState("");
   const [workHome, setWorkHome] = useState("/agent-portal");
 
   useEffect(() => {
@@ -194,31 +196,36 @@ export default function ActivationStepOnePage() {
 
   async function submitActivation(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (submitting) return;
+    setSubmitError("");
 
     if (!location && !allowTestMode) {
-      alert(
-        "Anh/chị cần bấm BẬT GPS trước khi gửi. Nếu đang test trên máy tính, bật Chế độ test.",
-      );
+      setSubmitError("Anh/chị cần bấm BẬT GPS trước khi gửi. Nếu đang test trên máy tính, bật Chế độ test.");
+      window.scrollTo({ top: 0, behavior: "smooth" });
       return;
     }
 
     if (!allowTestMode) {
       if (mode === "normal" && (!photos.building || !photos.machine)) {
-        alert("Chế độ bình thường yêu cầu ảnh mặt tiền và ảnh vị trí máy.");
+        setSubmitError("Chế độ bình thường yêu cầu ảnh mặt tiền và ảnh vị trí máy.");
+        window.scrollTo({ top: 0, behavior: "smooth" });
         return;
       }
 
       if (mode === "quick" && !photos.summary) {
-        alert("Chế độ cực nhanh yêu cầu ảnh tóm tắt.");
+        setSubmitError("Chế độ cực nhanh yêu cầu ảnh tóm tắt.");
+        window.scrollTo({ top: 0, behavior: "smooth" });
         return;
       }
     }
 
     if (installerPhone && installerPhone.length < 9) {
-      alert("Số điện thoại người lắp chưa hợp lệ.");
+      setSubmitError("Số điện thoại người lắp chưa hợp lệ.");
+      window.scrollTo({ top: 0, behavior: "smooth" });
       return;
     }
 
+    setSubmitting(true);
     try {
       const buildingPhoto = await uploadPhoto(photos.building);
       const machinePhoto = await uploadPhoto(photos.machine);
@@ -247,10 +254,8 @@ export default function ActivationStepOnePage() {
 
       const stepOneResult = await stepOneResponse.json();
       if (!stepOneResponse.ok || !stepOneResult.success) {
-        alert(
-          stepOneResult.message ||
-            "Không lưu được thông tin khách hàng/lắp đặt.",
-        );
+        setSubmitError(stepOneResult.message || "Không lưu được thông tin khách hàng/lắp đặt.");
+        window.scrollTo({ top: 0, behavior: "smooth" });
         return;
       }
 
@@ -274,17 +279,18 @@ export default function ActivationStepOnePage() {
 
       const stepTwoResult = await stepTwoResponse.json();
       if (!stepTwoResponse.ok || !stepTwoResult.success) {
-        alert(
-          stepTwoResult.message ||
-            "Đã lưu thông tin khách hàng nhưng chưa lưu được phần hoàn tất kích hoạt.",
-        );
+        setSubmitError(stepTwoResult.message || "Đã lưu thông tin khách hàng nhưng chưa lưu được phần hoàn tất kích hoạt.");
+        window.scrollTo({ top: 0, behavior: "smooth" });
         return;
       }
 
       setCompleted(true);
     } catch (error) {
       console.error(error);
-      alert("Có lỗi khi gửi kích hoạt máy.");
+      setSubmitError(error instanceof Error ? error.message : "Có lỗi khi gửi kích hoạt máy.");
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -340,6 +346,12 @@ export default function ActivationStepOnePage() {
             kích hoạt trên cùng một màn hình.
           </p>
         </header>
+
+        {submitError && (
+          <div role="alert" className="rounded-2xl border border-red-200 bg-red-50 p-4 font-bold text-red-700">
+            {submitError}
+          </div>
+        )}
 
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <h2 className="text-lg font-bold text-slate-900">Thông tin máy</h2>
@@ -585,9 +597,10 @@ export default function ActivationStepOnePage() {
             />
           </FormField>
 
-          <FormField label="Mã đại lý">
+          <FormField label="Mã đại lý" required>
             <input
               type="text"
+              required
               value={dealerCode}
               onChange={(event) => setDealerCode(event.target.value)}
               placeholder="Mã đại lý hoặc mã khu vực"
@@ -652,9 +665,10 @@ export default function ActivationStepOnePage() {
             </p>
           </div>
 
-          <FormField label="Số tài khoản nhận quà">
+          <FormField label="Số tài khoản nhận quà" required>
             <input
               type="text"
+              required
               value={bankAccount}
               onChange={(event) =>
                 setBankAccount(event.target.value.replace(/\D/g, ""))
@@ -664,9 +678,10 @@ export default function ActivationStepOnePage() {
             />
           </FormField>
 
-          <FormField label="Chủ tài khoản">
+          <FormField label="Chủ tài khoản" required>
             <input
               type="text"
+              required
               value={accountHolder}
               onChange={(event) =>
                 setAccountHolder(event.target.value.toUpperCase())
@@ -676,9 +691,10 @@ export default function ActivationStepOnePage() {
             />
           </FormField>
 
-          <FormField label="Ngân hàng">
+          <FormField label="Ngân hàng" required>
             <input
               type="text"
+              required
               value={bankName}
               onChange={(event) => setBankName(event.target.value)}
               placeholder="Nhập tên ngân hàng"
@@ -689,9 +705,10 @@ export default function ActivationStepOnePage() {
 
         <button
           type="submit"
-          className="w-full rounded-2xl bg-green-600 px-6 py-4 text-lg font-bold text-white shadow-lg transition hover:bg-green-700"
+          disabled={submitting}
+          className="w-full rounded-2xl bg-green-600 px-6 py-4 text-lg font-bold text-white shadow-lg transition hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          LƯU VÀ KÍCH HOẠT MÁY
+          {submitting ? "ĐANG LƯU, VUI LÒNG CHỜ..." : "LƯU VÀ KÍCH HOẠT MÁY"}
         </button>
 
         <p className="text-center text-xs text-slate-400">

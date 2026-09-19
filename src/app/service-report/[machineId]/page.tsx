@@ -68,6 +68,8 @@ export default function ServiceReportPage() {
 
   const [generatedReportId, setGeneratedReportId] =
     useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [formError, setFormError] = useState("");
 
   function prepareSignatureCanvas() {
     const canvas = canvasRef.current;
@@ -291,22 +293,27 @@ export default function ServiceReportPage() {
 
 async function handleSubmit(event: FormEvent<HTMLFormElement>) {
   event.preventDefault();
+  if (submitting) return;
+  setFormError("");
 
   if (!photos.oldFilter) {
-    alert("Anh/chị cần chụp ảnh lõi cũ.");
+    setFormError("Thiếu ảnh lõi cũ. Hãy chụp hoặc chọn ảnh trước khi gửi.");
+    document.getElementById("service-report-photos")?.scrollIntoView({ behavior: "smooth", block: "center" });
     return;
   }
 
   if (!photos.newFilter) {
-    alert("Anh/chị cần chụp ảnh lõi mới.");
+    setFormError("Thiếu ảnh lõi mới. Hãy chụp hoặc chọn ảnh trước khi gửi.");
+    document.getElementById("service-report-photos")?.scrollIntoView({ behavior: "smooth", block: "center" });
     return;
   }
 
   if (!signatureDrawn && !signatureUpload) {
-    alert("Khách hàng cần ký trực tiếp hoặc tải ảnh chữ ký.");
+    setFormError("Khách hàng cần ký trực tiếp hoặc tải ảnh chữ ký trước khi gửi.");
     return;
   }
 
+  setSubmitting(true);
   try {
     const oldCorePhoto = await uploadFile(photos.oldFilter.file);
     const newCorePhoto = await uploadFile(photos.newFilter.file);
@@ -355,7 +362,10 @@ async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     });
   } catch (error) {
     console.error(error);
-    alert("Không gửi được báo cáo. Vui lòng thử lại.");
+    setFormError(error instanceof Error ? error.message : "Không gửi được báo cáo. Vui lòng thử lại.");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  } finally {
+    setSubmitting(false);
   }
 }
 
@@ -444,6 +454,12 @@ async function handleSubmit(event: FormEvent<HTMLFormElement>) {
             bảo trì máy.
           </p>
         </header>
+
+        {formError && (
+          <div role="alert" className="rounded-2xl border border-red-200 bg-red-50 p-4 font-bold text-red-700">
+            {formError}
+          </div>
+        )}
 
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <h2 className="text-lg font-bold text-slate-900">
@@ -546,7 +562,7 @@ async function handleSubmit(event: FormEvent<HTMLFormElement>) {
           </FormField>
         </section>
 
-        <section className="space-y-7 rounded-2xl bg-white p-5 shadow-sm">
+        <section id="service-report-photos" className="space-y-7 rounded-2xl bg-white p-5 shadow-sm">
           <div>
             <h2 className="text-lg font-bold text-slate-900">
               Ảnh báo cáo
@@ -701,9 +717,10 @@ async function handleSubmit(event: FormEvent<HTMLFormElement>) {
 
         <button
           type="submit"
-          className="w-full rounded-2xl bg-green-600 px-6 py-4 text-lg font-bold text-white shadow-lg hover:bg-green-700"
+          disabled={submitting}
+          className="w-full rounded-2xl bg-green-600 px-6 py-4 text-lg font-bold text-white shadow-lg hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          GỬI BÁO CÁO
+          {submitting ? "ĐANG GỬI, VUI LÒNG CHỜ..." : "GỬI BÁO CÁO"}
         </button>
 
         <Link

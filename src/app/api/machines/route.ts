@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { hasRole } from "@/lib/auth";
 import { geocodeAddress } from "@/lib/maps/geocode";
+import { provinceFromAddress, provinceLetterCodeOrNull } from "@/lib/province";
 
 function text(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
@@ -34,7 +35,7 @@ const ACTIVE_ORDER_STATUSES = new Set([
   "COMPLAINT",
 ]);
 
-type ResolvedCoordinates = { lat: number; lng: number } | null;
+type ResolvedCoordinates = { lat: number; lng: number; provinceCode?: string } | null;
 
 async function backfillMachineGpsFromCustomerAddress<T extends {
   id: string;
@@ -61,7 +62,7 @@ async function backfillMachineGpsFromCustomerAddress<T extends {
     if (cached) return cached;
     const pending = geocodeAddress(address)
       .then((location) => location && hasUsableCoordinates(location.lat, location.lng)
-        ? { lat: location.lat, lng: location.lng }
+        ? { lat: location.lat, lng: location.lng, provinceCode: location.provinceCode }
         : null)
       .catch((error) => {
         console.warn(`Không tự ghim được GPS máy từ địa chỉ khách hàng ${address}:`, error);
@@ -81,7 +82,13 @@ async function backfillMachineGpsFromCustomerAddress<T extends {
       if (!location) return;
       await prisma.machine.update({
         where: { id: machine.id },
-        data: { lat: location.lat, lng: location.lng },
+        data: {
+          lat: location.lat,
+          lng: location.lng,
+          ...(provinceLetterCodeOrNull(location.provinceCode) || provinceFromAddress(address)?.[1]
+            ? { provinceCode: provinceLetterCodeOrNull(location.provinceCode) || provinceFromAddress(address)![1] }
+            : {}),
+        },
       });
       machine.lat = location.lat;
       machine.lng = location.lng;
@@ -144,7 +151,7 @@ export async function POST(request: NextRequest) {
         specification: typeof body.specification === "string" ? body.specification.trim() || null : null,
         warrantyMonths: Number.isInteger(body.warrantyMonths) ? body.warrantyMonths : null,
         serial: typeof body.serial === "string" ? body.serial.trim() || null : null,
-        provinceCode: typeof body.provinceCode === "string" ? body.provinceCode.trim() || null : null,
+        provinceCode: provinceLetterCodeOrNull(typeof body.provinceCode === "string" ? body.provinceCode : null),
         status: typeof body.status === "string" ? body.status : "NEW",
         manufactureDate,
       },

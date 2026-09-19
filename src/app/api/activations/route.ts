@@ -4,6 +4,7 @@ import { buildMaintenanceSchedules } from "@/lib/maintenance";
 import { hasRole } from "@/lib/auth";
 import { normalizePhone as normalizeVietnamPhone, isValidVietnamPhone } from "@/lib/phone";
 import { queueActivationCompletedNotifications } from "@/lib/notifications/events";
+import { provinceFromAddress } from "@/lib/province";
 type JsonObject = Record<string, unknown>;
 
 function errorResponse(message: string, status = 400, detail?: unknown) {
@@ -221,6 +222,7 @@ async function saveStepOne(body: JsonObject, machineId: string) {
   const finalBuildingPhoto = mode === "quick" ? summaryPhoto : buildingPhoto;
   const finalMachinePhoto = mode === "quick" ? summaryPhoto : machinePhoto;
 
+  const inferredProvince = provinceFromAddress(address)?.[1];
   const result = await prisma.$transaction(async (tx) => {
     const customer = await tx.customer.upsert({
       where: { phone: ownerPhone },
@@ -264,6 +266,7 @@ async function saveStepOne(body: JsonObject, machineId: string) {
         customerId: customer.id,
         lat: latitude,
         lng: longitude,
+        ...(inferredProvince ? { provinceCode: inferredProvince } : {}),
         buildingPhoto: finalBuildingPhoto,
         machinePhoto: finalMachinePhoto,
         status: "ACTIVATING",
@@ -355,56 +358,11 @@ async function saveStepTwo(body: JsonObject, machineId: string, model: string) {
   const status = machineStatusFromForm(body.machineStatus);
   const scheduleData = buildMaintenanceSchedules(machineId, installationDate, model);
 
-  const result = await prisma.$transaction(async (tx) => {
-    const activation = await tx.activation.upsert({
-      where: {
-        machineId_step: {
-          machineId,
-          step: 2,
-        },
-      },
-      create: {
-        machineId,
-        step: 2,
-        dealerCode,
-        installerName,
-        installerPhone,
-        bankAccount,
-        bankOwner,
-        bankName,
-        note,
-      },
-      update: {
-        dealerCode,
-        installerName,
-        installerPhone,
-        bankAccount,
-        bankOwner,
-        bankName,
-        note,
-      },
-    });
-
-    await tx.machine.update({
-      where: { id: machineId },
-      data: {
-        installDate: installationDate,
-        status,
-      },
-    });
-
-    await tx.maintenanceSchedule.deleteMany({ where: { machineId } });
-    await tx.maintenanceSchedule.createMany({ data: scheduleData });
-
-    await tx.adminLog.create({
-      data: {
-        action: "ACTIVATION_COMPLETED",
-        target: machineId,
-        detail: `Hoàn tất kích hoạt máy ${machineId}, đại lý ${dealerCode}`,
-      },
-    });
-
-    const completedMachine = await tx.machine.findUniqueOrThrow({
+  const existingActivation = await prisma.activation.findUnique({
+    where: { machineId_step: { machineId, step: 2 } },
+  });
+  if (existingActivation) {
+    const completedMachine = await prisma.machine.findUniqueOrThrow({
       where: { id: machineId },
       include: {
         customer: true,
@@ -412,9 +370,86 @@ async function saveStepTwo(body: JsonObject, machineId: string, model: string) {
         maintenanceSchedules: { orderBy: { dueDate: "asc" } },
       },
     });
+    return NextResponse.json({
+      success: true,
+      message: "Máy đã được kích hoạt trước đó; hệ thống không tạo thêm bản ghi trùng.",
+      data: { activation: existingActivation, machine: completedMachine, duplicate: true },
+      duplicate: true,
+    });
+  }
 
-    return { activation, machine: completedMachine };
-  });
+  let result;
+  try {
+    result = await prisma.$transaction(async (tx) => {
+      // Dùng create thay vì upsert để unique(machineId, step) làm khóa idempotency.
+      // Hai request đồng thời: chỉ một request được tạo lịch và gửi thông báo.
+      const activation = await tx.activation.create({
+        data: {
+          machineId,
+          step: 2,
+          dealerCode,
+          installerName,
+          installerPhone,
+          bankAccount,
+          bankOwner,
+          bankName,
+          note,
+        },
+      });
+
+      await tx.machine.update({
+        where: { id: machineId },
+        data: {
+          installDate: installationDate,
+          status,
+        },
+      });
+
+      await tx.maintenanceSchedule.deleteMany({ where: { machineId } });
+      await tx.maintenanceSchedule.createMany({ data: scheduleData });
+
+      await tx.adminLog.create({
+        data: {
+          action: "ACTIVATION_COMPLETED",
+          target: machineId,
+          detail: `Hoàn tất kích hoạt máy ${machineId}, đại lý ${dealerCode}`,
+        },
+      });
+
+      const completedMachine = await tx.machine.findUniqueOrThrow({
+        where: { id: machineId },
+        include: {
+          customer: true,
+          activations: { orderBy: { step: "asc" } },
+          maintenanceSchedules: { orderBy: { dueDate: "asc" } },
+        },
+      });
+
+      return { activation, machine: completedMachine };
+    });
+  } catch (error) {
+    const code = error && typeof error === "object" && "code" in error
+      ? String((error as { code?: unknown }).code || "")
+      : "";
+    if (code !== "P2002") throw error;
+    const [activation, completedMachine] = await Promise.all([
+      prisma.activation.findUniqueOrThrow({ where: { machineId_step: { machineId, step: 2 } } }),
+      prisma.machine.findUniqueOrThrow({
+        where: { id: machineId },
+        include: {
+          customer: true,
+          activations: { orderBy: { step: "asc" } },
+          maintenanceSchedules: { orderBy: { dueDate: "asc" } },
+        },
+      }),
+    ]);
+    return NextResponse.json({
+      success: true,
+      message: "Máy đã được kích hoạt trước đó; hệ thống không tạo thêm bản ghi trùng.",
+      data: { activation, machine: completedMachine, duplicate: true },
+      duplicate: true,
+    });
+  }
 
   await queueActivationCompletedNotifications({
     machineId,

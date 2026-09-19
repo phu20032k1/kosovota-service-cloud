@@ -1,6 +1,7 @@
 import { createHash, randomInt } from "crypto";
 import { prisma } from "@/lib/prisma";
 import { normalizePhone } from "@/lib/phone";
+import { deliverNotification } from "@/lib/notifications/providers";
 
 const OTP_TTL_MINUTES = 5;
 const MAX_ATTEMPTS = 5;
@@ -50,7 +51,7 @@ export async function issueOtp(options: {
   const content = options.message(code);
   const templateId = process.env.ZALO_ZBS_OTP_TEMPLATE_ID || process.env.ZALO_ZBS_TEMPLATE_ID;
 
-  await prisma.$transaction(async (tx) => {
+  const notification = await prisma.$transaction(async (tx) => {
     await tx.otpCode.updateMany({
       where: { phone, purpose: options.purpose, consumedAt: null },
       data: { consumedAt: new Date() },
@@ -65,7 +66,7 @@ export async function issueOtp(options: {
       },
     });
 
-    await tx.notification.create({
+    return tx.notification.create({
       data: {
         phone,
         channel,
@@ -87,8 +88,33 @@ export async function issueOtp(options: {
     });
   });
 
+  try {
+    const delivery = await deliverNotification(notification);
+    await prisma.notification.update({
+      where: { id: notification.id },
+      data: {
+        status: "SENT",
+        attempts: 1,
+        providerMessageId: delivery.providerMessageId,
+        sentAt: new Date(),
+        error: null,
+      },
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Nhà cung cấp OTP từ chối yêu cầu.";
+    await prisma.notification.update({
+      where: { id: notification.id },
+      // Không để cron gửi lại một OTP mà giao diện đã báo lỗi; người dùng sẽ
+      // yêu cầu mã mới và mã cũ đã bị vô hiệu hóa ở lần cấp tiếp theo.
+      data: { status: "FAILED", attempts: 1, error: message.slice(0, 1_000) },
+    });
+    throw new Error(`Không gửi được OTP qua ${channel}: ${message}`);
+  }
+
   return {
     expiresAt,
+    channel,
+    dryRun: process.env.NOTIFICATION_DRY_RUN !== "false",
     ...(process.env.OTP_DEBUG === "true" ? { debugCode: code } : {}),
   };
 }

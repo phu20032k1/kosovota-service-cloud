@@ -9,6 +9,7 @@ export default function WebAlertHost() {
   const [queue, setQueue] = useState<AlertItem[]>([]);
   const counter = useRef(0);
   const current = queue[0];
+  const currentId = current?.id;
 
   useEffect(() => {
     const nativeAlert = window.alert;
@@ -25,7 +26,7 @@ export default function WebAlertHost() {
   }, []);
 
   useEffect(() => {
-    if (!current) return;
+    if (!currentId) return;
 
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -38,7 +39,7 @@ export default function WebAlertHost() {
       document.body.style.overflow = previousOverflow;
       document.removeEventListener("keydown", onKeyDown);
     };
-  }, [current?.id]);
+  }, [currentId]);
 
   if (!current) return null;
 

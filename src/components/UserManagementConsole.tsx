@@ -30,7 +30,7 @@ const ROLE_NOTE: Record<string, string> = {
   ADMIN: "Quản trị toàn bộ hoạt động vận hành.",
   CSKH: "Chăm sóc dữ liệu trong phạm vi tỉnh được giao.",
   DEALER: "Quản lý lệnh, kho và đội KTV của một đại lý.",
-  CTV: "Nhận và theo dõi lệnh cộng tác theo mã CRM được giao.",
+  CTV: "Có thể hoạt động độc lập hoặc liên kết với một đại lý.",
   KTV: "Nhận lệnh và gửi báo cáo kỹ thuật của đại lý.",
 };
 
@@ -111,7 +111,8 @@ export function UserManagementConsole({ mode }: { mode: Mode }) {
     users.forEach((user) => {
       if (user.role === "CSKH" && user.provinceScope)
         values.add(`Tỉnh: ${user.provinceScope}`);
-      if (["DEALER", "CTV", "KTV"].includes(user.role) && user.dealerCode)
+      if (user.role === "CTV" && user.dealerCode?.startsWith("CTV-")) values.add("CTV độc lập");
+      else if (["DEALER", "CTV", "KTV"].includes(user.role) && user.dealerCode)
         values.add(`Đại lý: ${user.dealerCode}`);
     });
     return Array.from(values).sort((a, b) => a.localeCompare(b));
@@ -123,6 +124,8 @@ export function UserManagementConsole({ mode }: { mode: Mode }) {
       const scopeText =
         user.role === "CSKH"
           ? `Tỉnh: ${user.provinceScope || ""}`
+          : user.role === "CTV" && user.dealerCode?.startsWith("CTV-")
+            ? "CTV độc lập"
           : ["DEALER", "CTV", "KTV"].includes(user.role)
             ? `Đại lý: ${user.dealerCode || ""}`
             : "Toàn hệ thống";
@@ -248,7 +251,7 @@ export function UserManagementConsole({ mode }: { mode: Mode }) {
     setEditName(user.name);
     setEditPhone(user.phone);
     setEditProvinceScope(user.provinceScope || "");
-    setEditDealerCode(user.dealerCode || "");
+    setEditDealerCode(user.role === "CTV" && user.dealerCode?.startsWith("CTV-") ? "" : user.dealerCode || "");
     setEditPassword("");
     setEditPasswordConfirm("");
     setShowPassword(false);
@@ -291,7 +294,7 @@ export function UserManagementConsole({ mode }: { mode: Mode }) {
     };
     if (editRole === "CSKH")
       updates.provinceScope = editProvinceScope.trim();
-    if (["DEALER", "CTV", "KTV"].includes(editRole)) updates.dealerCode = editDealerCode.trim();
+    if (["DEALER", "CTV", "KTV"].includes(editRole)) updates.dealerCode = editRole === "CTV" && editDealerCode.startsWith("CTV-") ? "" : editDealerCode.trim();
     if (editPassword) updates.resetPassword = editPassword;
 
     setSaving(true);
@@ -422,7 +425,7 @@ export function UserManagementConsole({ mode }: { mode: Mode }) {
             </label>
           )}
 
-          {["DEALER", "CTV"].includes(role) && (
+          {role === "DEALER" && (
             <>
               <label className="mt-4 block">
                 <span className="mb-2 block text-sm font-bold">Mã đại lý</span>
@@ -452,6 +455,23 @@ export function UserManagementConsole({ mode }: { mode: Mode }) {
                 liên kết tài khoản.
               </span>
             </>
+          )}
+
+          {role === "CTV" && (
+            <label className="mt-4 block">
+              <span className="mb-2 block text-sm font-bold">Liên kết đại lý (không bắt buộc)</span>
+              <select value={dealerCode} onChange={(event) => setDealerCode(event.target.value)} className="w-full">
+                <option value="">CTV độc lập</option>
+                {dealers.map((dealer) => (
+                  <option key={dealer.dealerCode} value={dealer.dealerCode}>
+                    {dealer.dealerCode} — {dealer.name}
+                  </option>
+                ))}
+              </select>
+              <span className="mt-2 block text-xs leading-5 text-slate-500">
+                Để trống nếu CTV hoạt động độc lập; hệ thống vẫn tạo hồ sơ cộng tác viên đầy đủ.
+              </span>
+            </label>
           )}
 
           {role === "KTV" && (
@@ -586,6 +606,8 @@ export function UserManagementConsole({ mode }: { mode: Mode }) {
                     <td className="px-4 py-3 text-slate-600">
                       {user.role === "CSKH"
                         ? `Tỉnh: ${user.provinceScope || "—"}`
+                        : user.role === "CTV" && user.dealerCode?.startsWith("CTV-")
+                          ? "CTV độc lập"
                         : ["DEALER", "CTV", "KTV"].includes(user.role)
                           ? `Đại lý: ${user.dealerCode || "—"}`
                           : "Toàn hệ thống"}
@@ -732,9 +754,9 @@ export function UserManagementConsole({ mode }: { mode: Mode }) {
                 )}
                 {["DEALER", "CTV", "KTV"].includes(editRole) && (
                   <label className="block">
-                    <span className="text-sm font-bold text-slate-700">Thuộc đại lý</span>
+                    <span className="text-sm font-bold text-slate-700">{editRole === "CTV" ? "Liên kết đại lý (không bắt buộc)" : "Thuộc đại lý"}</span>
                     <select className="mt-2 w-full" value={editDealerCode} onChange={(event) => setEditDealerCode(event.target.value)}>
-                      <option value="">Chọn đại lý đã duyệt</option>
+                      <option value="">{editRole === "CTV" ? "CTV độc lập" : "Chọn đại lý đã duyệt"}</option>
                       {dealers.map((dealer) => (
                         <option key={dealer.dealerCode} value={dealer.dealerCode}>
                           {dealer.dealerCode} — {dealer.name}

@@ -4,48 +4,14 @@ import { ChangeEvent, FormEvent, useState } from "react";
 import { Brand } from "@/components/ui/Brand";
 import { Notice } from "@/components/ui/Notice";
 import { SmartBackButton } from "@/components/ui/SmartBackButton";
+import { PROVINCE_CHOICES } from "@/lib/province";
 
 type RegistrationType = "commercial" | "service" | "collaborator";
 type LocationData = { latitude: number; longitude: number };
 type PhotoData = { name: string; preview: string; file: File };
 type PhotoKey = "portrait" | "store" | "warehouse";
 
-const provinces = [
-  { name: "Hà Nội", code: "HN" },
-  { name: "Hà Giang", code: "HG" },
-  { name: "Cao Bằng", code: "CB" },
-  { name: "Bắc Kạn", code: "BK" },
-  { name: "Tuyên Quang", code: "TQ" },
-  { name: "Lào Cai", code: "LC" },
-  { name: "Điện Biên", code: "DB" },
-  { name: "Lai Châu", code: "LCH" },
-  { name: "Sơn La", code: "SL" },
-  { name: "Yên Bái", code: "YB" },
-  { name: "Hòa Bình", code: "HB" },
-  { name: "Thái Nguyên", code: "TN" },
-  { name: "Lạng Sơn", code: "LS" },
-  { name: "Quảng Ninh", code: "QN" },
-  { name: "Bắc Giang", code: "BG" },
-  { name: "Phú Thọ", code: "PT" },
-  { name: "Vĩnh Phúc", code: "VP" },
-  { name: "Bình Định", code: "BDI" },
-  { name: "Phú Yên", code: "PY" },
-  { name: "Khánh Hòa", code: "KH" },
-  { name: "Ninh Thuận", code: "NT" },
-  { name: "Bình Thuận", code: "BT" },
-  { name: "Kon Tum", code: "KT" },
-  { name: "Gia Lai", code: "GL" },
-  { name: "Đắk Lắk", code: "DL" },
-  { name: "Đắk Nông", code: "DN" },
-  { name: "Lâm Đồng", code: "LD" },
-  { name: "Bình Phước", code: "BP" },
-  { name: "Tây Ninh", code: "TNI" },
-  { name: "Bình Dương", code: "BD" },
-  { name: "Đồng Nai", code: "DNA" },
-  { name: "Bà Rịa - Vũng Tàu", code: "VT" },
-  { name: "Hồ Chí Minh", code: "HCM" },
-  { name: "Cà Mau", code: "CM" },
-];
+const provinces = PROVINCE_CHOICES;
 
 const serviceOptions = [
   "Lắp đặt máy lọc nước nóng lạnh",

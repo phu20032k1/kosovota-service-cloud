@@ -5,6 +5,7 @@ import { normalizePhone } from "@/lib/phone";
 import { buildMaintenanceSchedules } from "@/lib/maintenance";
 import { readSheet } from "read-excel-file/node";
 import { geocodeAddress } from "@/lib/maps/geocode";
+import { provinceFromAddress, provinceLetterCodeOrNull } from "@/lib/province";
 
 function normalizedHeader(value: unknown) {
   return String(value ?? "")
@@ -168,18 +169,27 @@ export async function POST(request: NextRequest) {
         const customerName = value(row, "Tên khách hàng", "Họ tên khách hàng");
         const address = value(row, "Địa chỉ", "Địa chỉ khách hàng");
         const installDate = parseExcelDate(row["Ngày lắp"] ?? row["Ngày lắp đặt"] ?? row["ngay lap"] ?? row["ngay lap dat"]);
-        const provinceCode = value(row, "Mã tỉnh", "Tỉnh", "Tỉnh/Thành", "Tỉnh/Thành phố", "Province");
+        const provinceInput = value(row, "Mã tỉnh", "Tỉnh", "Tỉnh/Thành", "Tỉnh/Thành phố", "Province");
         const status = value(row, "Trạng thái", "Status");
         let lat = numberValue(row, "Vĩ độ", "Latitude", "lat");
         let lng = numberValue(row, "Kinh độ", "Longitude", "lng");
+        let geocodedProvinceCode: string | undefined;
         if ((lat === null || lng === null) && address && process.env.GEOCODING_ENABLED === "true") {
           try {
             const location = await geocodeAddress(address);
-            if (location) { lat = location.lat; lng = location.lng; }
+            if (location) {
+              lat = location.lat;
+              lng = location.lng;
+              geocodedProvinceCode = location.provinceCode;
+            }
           } catch (geocodeError) {
             console.warn(`Không geocode được dòng ${rowNumber}:`, geocodeError);
           }
         }
+        const provinceCode = provinceLetterCodeOrNull(provinceInput)
+          || provinceFromAddress(address)?.[1]
+          || geocodedProvinceCode
+          || "";
 
         const outcome = await prisma.$transaction(async (tx) => {
           const customer = phone ? await tx.customer.upsert({

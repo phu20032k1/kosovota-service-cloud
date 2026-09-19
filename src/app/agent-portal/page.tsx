@@ -40,12 +40,13 @@ export default function AgentPortalPage() {
   const [dealer, setDealer] = useState<Dealer | null>(null);
   const [summary, setSummary] = useState<Summary>({ revenue: 0, paid: 0, pending: 0 });
   const [loading, setLoading] = useState(true);
-  const [message, setMessage] = useState("");
+  const [notice, setNotice] = useState<{ kind: "success" | "error"; text: string } | null>(null);
   const [reportOrder, setReportOrder] = useState<Order | null>(null);
   const [rejectOrder, setRejectOrder] = useState<Order | null>(null);
   const [rejectReason, setRejectReason] = useState("Bận");
   const [report, setReport] = useState({ products: "", note: "", oldCorePhoto: "", newCorePhoto: "", finalPhoto: "", signature: "" });
   const [uploading, setUploading] = useState(false);
+  const [submittingReport, setSubmittingReport] = useState(false);
   const [inventoryItems, setInventoryItems] = useState<InventoryOption[]>([]);
   const [materials, setMaterials] = useState<MaterialRow[]>([]);
   const [technicians, setTechnicians] = useState<Technician[]>([]);
@@ -79,7 +80,7 @@ export default function AgentPortalPage() {
         setInventoryItems(options);
       }
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Không tải được dữ liệu");
+      setNotice({ kind: "error", text: error instanceof Error ? error.message : "Không tải được dữ liệu" });
     } finally {
       setLoading(false);
     }
@@ -101,8 +102,8 @@ export default function AgentPortalPage() {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ technicianId: technicianId || null }),
     });
     const result = await response.json();
-    if (!response.ok || !result.success) { setMessage(result.message || "Không giao được KTV"); return; }
-    setMessage(result.message);
+    if (!response.ok || !result.success) { setNotice({ kind: "error", text: result.message || "Không giao được KTV" }); return; }
+    setNotice({ kind: "success", text: result.message });
     await loadOrders();
   }
 
@@ -115,25 +116,33 @@ export default function AgentPortalPage() {
       if (!response.ok || !result.success) throw new Error(result.message || "Tải ảnh thất bại");
       setReport((current) => ({ ...current, [field]: result.url }));
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Tải ảnh thất bại");
+      setNotice({ kind: "error", text: error instanceof Error ? error.message : "Tải ảnh thất bại" });
     } finally { setUploading(false); }
   }
 
   async function submitReport() {
-    if (!reportOrder) return;
+    if (!reportOrder || submittingReport) return;
     if (!report.oldCorePhoto || !report.newCorePhoto || !report.signature.trim()) {
-      setMessage("Cần ảnh lõi cũ, ảnh lõi mới và chữ ký khách hàng."); return;
+      setNotice({ kind: "error", text: "Cần ảnh lõi cũ, ảnh lõi mới và chữ ký khách hàng." }); return;
     }
-    const response = await fetch(`/api/service-orders/${reportOrder.id}/report`, {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...report, materials }),
-    });
-    const result = await response.json();
-    if (!response.ok || !result.success) { setMessage(result.message || "Không gửi được báo cáo"); return; }
-    setReportOrder(null);
-    setReport({ products: "", note: "", oldCorePhoto: "", newCorePhoto: "", finalPhoto: "", signature: "" });
-    setMaterials([]);
-    setMessage("Báo cáo đã được ghi nhận và lệnh đã hoàn thành.");
-    await loadOrders();
+    setSubmittingReport(true);
+    setNotice(null);
+    try {
+      const response = await fetch(`/api/service-orders/${reportOrder.id}/report`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...report, materials }),
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.message || "Không gửi được báo cáo");
+      setReportOrder(null);
+      setReport({ products: "", note: "", oldCorePhoto: "", newCorePhoto: "", finalPhoto: "", signature: "" });
+      setMaterials([]);
+      setNotice({ kind: "success", text: result.message || "Báo cáo đã được ghi nhận và lệnh đã hoàn thành." });
+      await loadOrders();
+    } catch (error) {
+      setNotice({ kind: "error", text: error instanceof Error ? error.message : "Không gửi được báo cáo" });
+    } finally {
+      setSubmittingReport(false);
+    }
   }
 
   const stats = useMemo(() => ({
@@ -152,7 +161,7 @@ export default function AgentPortalPage() {
       </PortalHeader>
 
       <div className="mx-auto max-w-7xl space-y-6 p-4 sm:p-6">
-        {message && <Notice kind="success">{message}</Notice>}
+        {notice && <Notice kind={notice.kind}>{notice.text}</Notice>}
         <section className="surface-card border-2 border-emerald-100 bg-emerald-50/60 p-5">
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div>
@@ -175,8 +184,8 @@ export default function AgentPortalPage() {
           <div className="border-b p-5"><h2 className="text-xl font-black">Lệnh dịch vụ được giao</h2></div>
           <div className="overflow-x-auto"><table className="min-w-full text-sm"><thead className="text-left"><tr>{["Mã lệnh", "Khách hàng", "Địa chỉ", "Thiết bị", "Dịch vụ", "KTV phụ trách", "Hạn xử lý", "Trạng thái", "Thao tác"].map((item) => <th key={item} className="p-3">{item}</th>)}</tr></thead><tbody>
             {orders.map((order) => <tr key={order.id} className="border-b align-top"><td className="p-3 font-black">{order.orderCode}</td><td className="p-3"><strong>{order.customerName}</strong><br/><a href={`tel:${order.customerPhone}`} className="text-emerald-700">{order.customerPhone}</a></td><td className="max-w-xs p-3">{order.address || "Chưa cập nhật"}</td><td className="p-3"><Link href={`/qr/${order.machine?.id || ""}`} className="font-bold text-blue-700">{order.machine?.id}</Link><div className="mt-2 flex gap-2">{order.machine?.buildingPhoto && <a href={order.machine.buildingPhoto} target="_blank" className="text-xs underline">Mặt tiền</a>}{order.machine?.machinePhoto && <a href={order.machine.machinePhoto} target="_blank" className="text-xs underline">Vị trí máy</a>}</div></td><td className="p-3">{order.serviceType}</td><td className="min-w-48 p-3"><select value={order.technician?.id || ""} onChange={(event) => void assignTechnician(order.id, event.target.value)} disabled={["COMPLETED","CANCELLED"].includes(order.status)} className="rounded-lg border p-2 text-xs"><option value="">Chưa giao KTV</option>{technicians.map((technician)=><option key={technician.id} value={technician.id}>{technician.name} · {technician.phone}</option>)}</select></td><td className="p-3">{formatDate(order.dueDate)}</td><td className="p-3"><StatusBadge value={order.status}/></td><td className="p-3"><div className="flex min-w-40 flex-col gap-2">
-              {order.status === "ASSIGNED" && <><button type="button" onClick={() => updateOrder(order.id, { status: "ACCEPTED" }).catch((e: Error) => setMessage(e.message))} className="rounded-lg bg-emerald-600 px-3 py-2 font-bold text-white">Đồng ý</button><button type="button" onClick={() => setRejectOrder(order)} className="rounded-lg bg-rose-600 px-3 py-2 font-bold text-white">Từ chối</button></>}
-              {order.status === "ACCEPTED" && <button type="button" onClick={() => updateOrder(order.id, { status: "IN_PROGRESS" }).catch((e: Error) => setMessage(e.message))} className="rounded-lg bg-blue-600 px-3 py-2 font-bold text-white">Bắt đầu xử lý</button>}
+              {order.status === "ASSIGNED" && <><button type="button" onClick={() => updateOrder(order.id, { status: "ACCEPTED" }).catch((e: Error) => setNotice({ kind: "error", text: e.message }))} className="rounded-lg bg-emerald-600 px-3 py-2 font-bold text-white">Đồng ý</button><button type="button" onClick={() => setRejectOrder(order)} className="rounded-lg bg-rose-600 px-3 py-2 font-bold text-white">Từ chối</button></>}
+              {order.status === "ACCEPTED" && <button type="button" onClick={() => updateOrder(order.id, { status: "IN_PROGRESS" }).catch((e: Error) => setNotice({ kind: "error", text: e.message }))} className="rounded-lg bg-blue-600 px-3 py-2 font-bold text-white">Bắt đầu xử lý</button>}
               {order.status === "IN_PROGRESS" && <button type="button" onClick={() => setReportOrder(order)} className="rounded-lg bg-slate-900 px-3 py-2 font-bold text-white">Gửi báo cáo</button>}
             </div></td></tr>)}
             {!loading && orders.length === 0 && <tr><td colSpan={9} className="p-10 text-center text-slate-500">Chưa có lệnh dịch vụ.</td></tr>}
@@ -184,7 +193,7 @@ export default function AgentPortalPage() {
         </section>
       </div>
 
-      {rejectOrder && <Modal title={`Từ chối ${rejectOrder.orderCode}`} onClose={() => setRejectOrder(null)}><select value={rejectReason} onChange={(e) => setRejectReason(e.target.value)} className="w-full rounded-xl border p-3"><option>Bận</option><option>Xa quá</option><option>Không đúng chuyên môn</option><option>Thiếu vật tư</option><option>Khác</option></select><button type="button" onClick={() => updateOrder(rejectOrder.id, { status: "NEW", dealerId: null, rejectReason }).then(() => setRejectOrder(null)).catch((e: Error) => setMessage(e.message))} className="mt-4 w-full rounded-xl bg-rose-600 p-3 font-bold text-white">Xác nhận từ chối</button></Modal>}
+      {rejectOrder && <Modal title={`Từ chối ${rejectOrder.orderCode}`} onClose={() => setRejectOrder(null)}><select value={rejectReason} onChange={(e) => setRejectReason(e.target.value)} className="w-full rounded-xl border p-3"><option>Bận</option><option>Xa quá</option><option>Không đúng chuyên môn</option><option>Thiếu vật tư</option><option>Khác</option></select><button type="button" onClick={() => updateOrder(rejectOrder.id, { status: "NEW", dealerId: null, rejectReason }).then(() => setRejectOrder(null)).catch((e: Error) => setNotice({ kind: "error", text: e.message }))} className="mt-4 w-full rounded-xl bg-rose-600 p-3 font-bold text-white">Xác nhận từ chối</button></Modal>}
       {reportOrder && <Modal title={`Báo cáo ${reportOrder.orderCode}`} onClose={() => { setReportOrder(null); setMaterials([]); }}><div className="space-y-4">
         <Field label="Vật tư xuất từ kho đại lý">
           <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
@@ -202,7 +211,7 @@ export default function AgentPortalPage() {
             <p className="text-xs text-slate-500">Khi gửi báo cáo, hệ thống kiểm tra tồn rồi tự tạo phiếu xuất gắn với lệnh này.</p>
           </div>
         </Field>
-        <Field label="Mô tả sản phẩm/vật tư khác"><input value={report.products} onChange={(e) => setReport((c) => ({ ...c, products: e.target.value }))} placeholder="Chỉ nhập khi có vật tư chưa nằm trong kho" className="w-full rounded-xl border p-3" /></Field><UploadField label="Ảnh lõi cũ" value={report.oldCorePhoto} onChange={(file) => uploadFile(file, "oldCorePhoto")} /><UploadField label="Ảnh lõi mới" value={report.newCorePhoto} onChange={(file) => uploadFile(file, "newCorePhoto")} /><UploadField label="Ảnh toàn cảnh sau hoàn thành" value={report.finalPhoto} onChange={(file) => uploadFile(file, "finalPhoto")} /><Field label="Xác nhận chữ ký khách hàng"><input value={report.signature} onChange={(e) => setReport((c) => ({ ...c, signature: e.target.value }))} placeholder="Nhập họ tên khách hàng đã xác nhận" className="w-full rounded-xl border p-3" /></Field><Field label="Ghi chú"><textarea value={report.note} onChange={(e) => setReport((c) => ({ ...c, note: e.target.value }))} className="w-full rounded-xl border p-3" /></Field><button type="button" disabled={uploading} onClick={submitReport} className="w-full rounded-xl bg-emerald-600 p-3 font-black text-white disabled:opacity-50">{uploading ? "Đang tải ảnh..." : "Gửi báo cáo hoàn thành"}</button></div></Modal>}
+        <Field label="Mô tả sản phẩm/vật tư khác"><input value={report.products} onChange={(e) => setReport((c) => ({ ...c, products: e.target.value }))} placeholder="Chỉ nhập khi có vật tư chưa nằm trong kho" className="w-full rounded-xl border p-3" /></Field><UploadField label="Ảnh lõi cũ *" value={report.oldCorePhoto} onChange={(file) => uploadFile(file, "oldCorePhoto")} /><UploadField label="Ảnh lõi mới *" value={report.newCorePhoto} onChange={(file) => uploadFile(file, "newCorePhoto")} /><UploadField label="Ảnh toàn cảnh sau hoàn thành" value={report.finalPhoto} onChange={(file) => uploadFile(file, "finalPhoto")} /><Field label="Xác nhận chữ ký khách hàng *"><input required value={report.signature} onChange={(e) => setReport((c) => ({ ...c, signature: e.target.value }))} placeholder="Nhập họ tên khách hàng đã xác nhận" className="w-full rounded-xl border p-3" /></Field><Field label="Ghi chú"><textarea value={report.note} onChange={(e) => setReport((c) => ({ ...c, note: e.target.value }))} className="w-full rounded-xl border p-3" /></Field><button type="button" disabled={uploading || submittingReport} onClick={submitReport} className="w-full rounded-xl bg-emerald-600 p-3 font-black text-white disabled:opacity-50">{uploading ? "Đang tải ảnh..." : submittingReport ? "Đang gửi báo cáo..." : "Gửi báo cáo hoàn thành"}</button></div></Modal>}
     </main>
   );
 }

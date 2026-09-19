@@ -63,6 +63,8 @@ export default function ExecutiveDashboardPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [activeReport, setActiveReport] = useState<ExecutiveReportKey | null>(null);
+  const [locationSyncing, setLocationSyncing] = useState(false);
+  const [notice, setNotice] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -81,6 +83,27 @@ export default function ExecutiveDashboardPage() {
 
   useEffect(() => { void load(); }, [load]);
 
+  async function syncMachineLocations() {
+    setLocationSyncing(true);
+    setError("");
+    setNotice("");
+    try {
+      const response = await fetch("/api/machines/geocode-all", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ batchSize: 500 }),
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.message || "Không đồng bộ được vị trí máy.");
+      setNotice(result.message);
+      await load();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Không đồng bộ được vị trí máy.");
+    } finally {
+      setLocationSyncing(false);
+    }
+  }
+
   const change = useMemo(() => {
     if (!data) return 0;
     const previous = data.kpis.revenuePrev || 0;
@@ -93,6 +116,7 @@ export default function ExecutiveDashboardPage() {
     <OperationsHeader title="Dashboard lãnh đạo" subtitle="Tổng quan vận hành, doanh thu, chăm sóc khách hàng, kho và chất lượng dịch vụ" actions={<button type="button" onClick={load} className="icon-button" title="Làm mới"><Icon name="refresh" size={18}/></button>} />
     <div className="page-container space-y-6">
       {error && <Notice kind="error">{error}</Notice>}
+      {notice && <Notice kind="success">{notice}</Notice>}
       {loading && !data ? <LoadingState label="Đang tổng hợp dữ liệu doanh nghiệp..." /> : data && <>
         <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <button type="button" onClick={() => setActiveReport("machines")} className="report-card-button" title="Xem danh sách máy"><MetricCard label="Máy khách đang sử dụng" value={data.kpis.machines} icon="droplet" tone="emerald" hint={`${data.kpis.customers} khách · ${data.kpis.totalMachines} máy toàn hệ thống · Bấm để xem`} /></button>
@@ -148,7 +172,7 @@ export default function ExecutiveDashboardPage() {
 
         <section className="grid gap-6 xl:grid-cols-3">
           <article className="surface-card xl:col-span-2">
-            <div className="data-toolbar"><div><h2 className="page-section-title">Phân bổ máy theo tỉnh</h2><p className="page-section-subtitle">10 khu vực có số lượng thiết bị cao nhất</p></div><Link href="/customer-map" className="btn-secondary"><Icon name="map" size={16}/>Xem bản đồ</Link></div>
+            <div className="data-toolbar"><div><h2 className="page-section-title">Phân bổ máy theo tỉnh</h2><p className="page-section-subtitle">Tự suy mã tỉnh từ địa chỉ hoặc tọa độ GPS; hiển thị 10 khu vực có nhiều máy nhất</p></div><div className="flex flex-wrap gap-2"><button type="button" disabled={locationSyncing} onClick={() => void syncMachineLocations()} className="btn-primary px-4 py-2 text-sm font-black text-white disabled:opacity-50"><Icon name={locationSyncing ? "refresh" : "map-pin"} size={16}/>{locationSyncing ? "Đang nhận diện..." : "Nhận diện tỉnh/GPS"}</button><Link href="/customer-map" className="btn-secondary"><Icon name="map" size={16}/>Xem bản đồ</Link></div></div>
             <div className="space-y-4 p-5">{data.provinceRows.map((row) => { const max = Math.max(...data.provinceRows.map((item) => item._count._all), 1); return <div key={row.provinceCode || "unknown"}><div className="mb-1.5 flex justify-between text-sm"><span className="font-bold">Mã tỉnh {row.provinceCode || "Chưa xác định"}</span><span className="font-black">{row._count._all}</span></div><div className="stat-bar"><span style={{ width: `${Math.max(5, row._count._all / max * 100)}%` }}/></div></div>; })}{!data.provinceRows.length && <div className="empty-state"><p className="font-bold">Chưa có dữ liệu tỉnh/thành.</p></div>}</div>
           </article>
           <article className="surface-card">

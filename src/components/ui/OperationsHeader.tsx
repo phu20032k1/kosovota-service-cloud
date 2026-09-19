@@ -66,14 +66,15 @@ export function OperationsHeader({ title, subtitle, actions }: { title: string; 
     return () => { cancelled = true; };
   }, [router]);
 
+  const userRole = user?.role;
+
   useEffect(() => {
-    if (!user || !["ADMIN", "CSKH"].includes(user.role)) {
+    if (!userRole || !["ADMIN", "CSKH"].includes(userRole)) {
       setActivityCounts({});
       return;
     }
 
     let cancelled = false;
-    let timer: number | undefined;
 
     const loadActivity = async () => {
       try {
@@ -87,17 +88,17 @@ export function OperationsHeader({ title, subtitle, actions }: { title: string; 
 
     const onVisible = () => { if (document.visibilityState === "visible") void loadActivity(); };
     void loadActivity();
-    timer = window.setInterval(() => void loadActivity(), 30_000);
+    const timer = window.setInterval(() => void loadActivity(), 30_000);
     window.addEventListener("focus", loadActivity);
     document.addEventListener("visibilitychange", onVisible);
 
     return () => {
       cancelled = true;
-      if (timer) window.clearInterval(timer);
+      window.clearInterval(timer);
       window.removeEventListener("focus", loadActivity);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [user?.role]);
+  }, [userRole]);
 
   const nav = useMemo(() => user?.role === "ADMIN" ? ADMIN_NAV : user?.role === "CSKH" ? CSKH_NAV : [], [user?.role]);
   const home = homeForRole(user?.role);

@@ -1,39 +1,7 @@
-export const PROVINCES = [
-  { number: "01", name: "Hà Nội", code: "HN" },
-  { number: "02", name: "Hà Giang", code: "HG" },
-  { number: "03", name: "Cao Bằng", code: "CB" },
-  { number: "04", name: "Bắc Kạn", code: "BK" },
-  { number: "05", name: "Tuyên Quang", code: "TQ" },
-  { number: "06", name: "Lào Cai", code: "LC" },
-  { number: "07", name: "Điện Biên", code: "DB" },
-  { number: "08", name: "Lai Châu", code: "LCH" },
-  { number: "09", name: "Sơn La", code: "SL" },
-  { number: "10", name: "Yên Bái", code: "YB" },
-  { number: "11", name: "Hòa Bình", code: "HB" },
-  { number: "12", name: "Thái Nguyên", code: "TN" },
-  { number: "13", name: "Lạng Sơn", code: "LS" },
-  { number: "14", name: "Quảng Ninh", code: "QN" },
-  { number: "15", name: "Bắc Giang", code: "BG" },
-  { number: "16", name: "Phú Thọ", code: "PT" },
-  { number: "17", name: "Vĩnh Phúc", code: "VP" },
-  { number: "18", name: "Bình Định", code: "BDI" },
-  { number: "19", name: "Phú Yên", code: "PY" },
-  { number: "20", name: "Khánh Hòa", code: "KH" },
-  { number: "21", name: "Ninh Thuận", code: "NT" },
-  { number: "22", name: "Bình Thuận", code: "BT" },
-  { number: "23", name: "Kon Tum", code: "KT" },
-  { number: "24", name: "Gia Lai", code: "GL" },
-  { number: "25", name: "Đắk Lắk", code: "DL" },
-  { number: "26", name: "Đắk Nông", code: "DN" },
-  { number: "27", name: "Lâm Đồng", code: "LD" },
-  { number: "28", name: "Bình Phước", code: "BP" },
-  { number: "29", name: "Tây Ninh", code: "TNI" },
-  { number: "30", name: "Bình Dương", code: "BD" },
-  { number: "31", name: "Đồng Nai", code: "DNA" },
-  { number: "32", name: "Bà Rịa - Vũng Tàu", code: "VT" },
-  { number: "33", name: "Hồ Chí Minh", code: "HCM" },
-  { number: "34", name: "Cà Mau", code: "CM" },
-] as const;
+import { PROVINCES as PROVINCE_ROWS } from "@/lib/province";
+
+/** Dùng chung một nguồn tỉnh/thành để mã máy, đăng ký và bản đồ không lệch nhau. */
+export const PROVINCES = PROVINCE_ROWS.map(([number, code, name]) => ({ number, name, code }));
 
 export const ORDER_STATUSES = [
   "NEW",

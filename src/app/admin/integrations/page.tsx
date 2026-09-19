@@ -46,7 +46,7 @@ export default function IntegrationsPage() {
       const result = await response.json();
       if (!response.ok || !result.success) throw new Error(result.message || "Kiểm thử thất bại.");
       const extra = kind === "map" && result.data
-        ? ` Tọa độ: ${Number(result.data.lat).toFixed(6)}, ${Number(result.data.lng).toFixed(6)}.`
+        ? ` Tọa độ: ${Number(result.data.lat).toFixed(6)}, ${Number(result.data.lng).toFixed(6)}.${result.data.formattedAddress ? ` Địa chỉ chuẩn: ${result.data.formattedAddress}.` : ""}${result.data.provinceName ? ` Tỉnh/thành: ${result.data.provinceName}.` : ""}`
         : "";
       setNotice({ kind: result.data?.dryRun ? "info" : "success", text: `${result.message}${extra}` });
     } catch (value) {

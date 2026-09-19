@@ -52,6 +52,9 @@ export default function MaintenancePlansPage() {
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [syncing, setSyncing] = useState(false);
+  const [savingId, setSavingId] = useState("");
 
   const loadSchedules = useCallback(async () => {
     setLoading(true);
@@ -71,6 +74,48 @@ export default function MaintenancePlansPage() {
   useEffect(() => {
     void loadSchedules();
   }, [loadSchedules]);
+
+  async function syncMissingSchedules() {
+    setSyncing(true);
+    setError("");
+    setNotice("");
+    try {
+      const response = await fetch("/api/maintenance-schedules/sync-missing", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ limit: 1_000 }),
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.message || "Không đồng bộ được lịch.");
+      setNotice(result.message);
+      await loadSchedules();
+    } catch (value) {
+      setError(value instanceof Error ? value.message : "Không đồng bộ được lịch.");
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  async function saveDueDate(schedule: Schedule, dueDate: string) {
+    setSavingId(schedule.id);
+    setError("");
+    setNotice("");
+    try {
+      const response = await fetch(`/api/maintenance-schedules/${schedule.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dueDate: `${dueDate}T12:00:00+07:00` }),
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.message || "Không đổi được hạn.");
+      setNotice(`Đã đổi hạn ${schedule.machineId} – ${schedule.title}.`);
+      await loadSchedules();
+    } catch (value) {
+      setError(value instanceof Error ? value.message : "Không đổi được hạn.");
+    } finally {
+      setSavingId("");
+    }
+  }
 
   const { dueNow, upcoming } = useMemo(() => {
     const today = dateOnly(new Date());
@@ -92,14 +137,18 @@ export default function MaintenancePlansPage() {
       <OperationsHeader
         title="Lịch thay lõi"
         subtitle="4 bảng chu kỳ theo dòng máy và danh sách máy đã đến hạn cần xử lý"
-        actions={
-          <button type="button" onClick={loadSchedules} className="icon-button" title="Tải lại lịch">
+        actions={<div className="flex flex-wrap gap-2">
+          <button type="button" onClick={() => void syncMissingSchedules()} disabled={syncing} className="btn-primary px-4 py-2 text-sm font-black text-white disabled:opacity-50">
+            <Icon name={syncing ? "refresh" : "calendar"} size={17} /> {syncing ? "Đang đồng bộ..." : "Sinh lịch máy bị thiếu"}
+          </button>
+          <button type="button" onClick={() => void loadSchedules()} className="icon-button" title="Tải lại lịch">
             <Icon name="refresh" size={18} />
           </button>
-        }
+        </div>}
       />
 
       <div className="mx-auto max-w-7xl space-y-5 p-4 sm:p-6">
+        {notice && <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 font-bold text-emerald-800">{notice}</div>}
         <section className="surface-card overflow-hidden">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-5">
             <div>
@@ -122,17 +171,7 @@ export default function MaintenancePlansPage() {
                 <h3 className="mb-3 font-black text-red-700">CẦN XỬ LÝ NGAY</h3>
                 <div className="space-y-3">
                   {dueNow.map((item) => (
-                    <article key={item.id} className="rounded-2xl border border-red-200 bg-red-50/60 p-4">
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div>
-                          <p className="font-black text-slate-950">{item.machineId}</p>
-                          <p className="mt-1 text-sm text-slate-600">{item.machine.model} · {item.machine.customer?.name || "Chưa có khách hàng"}</p>
-                          {item.machine.customer?.phone && <p className="mt-1 text-sm font-bold text-slate-700">SĐT: {item.machine.customer.phone}</p>}
-                        </div>
-                        <span className="status-pill status-rose">{formatDate(item.dueDate)}</span>
-                      </div>
-                      <p className="mt-3 font-bold text-red-800">{item.title}</p>
-                    </article>
+                    <ScheduleCard key={item.id} item={item} tone="due" saving={savingId === item.id} onSave={saveDueDate} />
                   ))}
                   {dueNow.length === 0 && <p className="rounded-xl border border-dashed p-5 text-sm text-slate-500">Hiện chưa có máy đến hạn thay lõi.</p>}
                 </div>
@@ -142,17 +181,7 @@ export default function MaintenancePlansPage() {
                 <h3 className="mb-3 font-black text-amber-700">SẮP ĐẾN HẠN TRONG 7 NGÀY</h3>
                 <div className="space-y-3">
                   {upcoming.map((item) => (
-                    <article key={item.id} className="rounded-2xl border border-amber-200 bg-amber-50/60 p-4">
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div>
-                          <p className="font-black text-slate-950">{item.machineId}</p>
-                          <p className="mt-1 text-sm text-slate-600">{item.machine.model} · {item.machine.customer?.name || "Chưa có khách hàng"}</p>
-                          {item.machine.customer?.phone && <p className="mt-1 text-sm font-bold text-slate-700">SĐT: {item.machine.customer.phone}</p>}
-                        </div>
-                        <span className="status-pill status-slate">{formatDate(item.dueDate)}</span>
-                      </div>
-                      <p className="mt-3 font-bold text-amber-800">{item.title}</p>
-                    </article>
+                    <ScheduleCard key={item.id} item={item} tone="upcoming" saving={savingId === item.id} onSave={saveDueDate} />
                   ))}
                   {upcoming.length === 0 && <p className="rounded-xl border border-dashed p-5 text-sm text-slate-500">Không có máy sắp đến hạn trong 7 ngày tới.</p>}
                 </div>
@@ -214,5 +243,36 @@ export default function MaintenancePlansPage() {
         </section>
       </div>
     </main>
+  );
+}
+
+function ScheduleCard({ item, tone, saving, onSave }: {
+  item: Schedule;
+  tone: "due" | "upcoming";
+  saving: boolean;
+  onSave: (schedule: Schedule, dueDate: string) => Promise<void>;
+}) {
+  const [dueDate, setDueDate] = useState(() => new Date(item.dueDate).toISOString().slice(0, 10));
+  return (
+    <article className={`rounded-2xl border p-4 ${tone === "due" ? "border-red-200 bg-red-50/60" : "border-amber-200 bg-amber-50/60"}`}>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="font-black text-slate-950">{item.machineId}</p>
+          <p className="mt-1 text-sm text-slate-600">{item.machine.model} · {item.machine.customer?.name || "Chưa có khách hàng"}</p>
+          {item.machine.customer?.phone && <p className="mt-1 text-sm font-bold text-slate-700">SĐT: {item.machine.customer.phone}</p>}
+        </div>
+        <span className={`status-pill ${tone === "due" ? "status-rose" : "status-slate"}`}>{formatDate(item.dueDate)}</span>
+      </div>
+      <p className={`mt-3 font-bold ${tone === "due" ? "text-red-800" : "text-amber-800"}`}>{item.title}</p>
+      <div className="mt-3 flex flex-wrap items-end gap-2 border-t border-black/5 pt-3">
+        <label className="min-w-44 flex-1 text-xs font-black text-slate-600">
+          Điều chỉnh ngày đến hạn
+          <input type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} className="form-input mt-1" />
+        </label>
+        <button type="button" disabled={saving || !dueDate} onClick={() => void onSave(item, dueDate)} className="btn-secondary px-4 py-3 text-sm font-black disabled:opacity-50">
+          {saving ? "Đang lưu..." : "Lưu hạn mới"}
+        </button>
+      </div>
+    </article>
   );
 }

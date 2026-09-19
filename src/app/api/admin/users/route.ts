@@ -7,6 +7,10 @@ import { normalizePhone, isValidVietnamPhone } from "@/lib/phone";
 
 const CREATABLE_ROLES = new Set(["CSKH", "DEALER", "CTV", "KTV"]);
 
+function standaloneCtvCode(phone: string) {
+  return `CTV-${phone}`;
+}
+
 function text(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -59,12 +63,12 @@ export async function POST(request: NextRequest) {
   if (!CREATABLE_ROLES.has(role)) return NextResponse.json({ success: false, message: "Admin chỉ tạo CSKH, Đại lý, CTV hoặc KTV." }, { status: 400 });
   if (!name || !isValidVietnamPhone(phone)) return NextResponse.json({ success: false, message: "Vui lòng nhập họ tên và số điện thoại Việt Nam hợp lệ." }, { status: 400 });
   if (role === "CSKH" && !provinceScope) return NextResponse.json({ success: false, message: "CSKH cần provinceScope, ví dụ 01 hoặc 01,33." }, { status: 400 });
-  if (["DEALER", "CTV", "KTV"].includes(role) && !dealerCode) return NextResponse.json({ success: false, message: "Đại lý/CTV/KTV bắt buộc phải có mã đại lý." }, { status: 400 });
+  if (["DEALER", "KTV"].includes(role) && !dealerCode) return NextResponse.json({ success: false, message: "Đại lý/KTV bắt buộc phải có mã đại lý." }, { status: 400 });
 
   try {
     const existingDealer = dealerCode ? await prisma.dealer.findUnique({ where: { dealerCode } }) : null;
-    if (role === "KTV" && (!existingDealer || existingDealer.status !== "APPROVED")) {
-      return NextResponse.json({ success: false, message: "Không tìm thấy đại lý đã duyệt cho KTV." }, { status: 404 });
+    if (["CTV", "KTV"].includes(role) && dealerCode && (!existingDealer || existingDealer.status !== "APPROVED")) {
+      return NextResponse.json({ success: false, message: "Không tìm thấy đại lý đã duyệt để liên kết." }, { status: 404 });
     }
     if (role === "DEALER" && existingDealer && existingDealer.status !== "APPROVED") {
       return NextResponse.json({ success: false, message: "Mã đại lý đã tồn tại nhưng chưa được duyệt." }, { status: 409 });
@@ -77,6 +81,7 @@ export async function POST(request: NextRequest) {
     const initialPassword = text(body.password) || `Ksv@${randomBytes(4).toString("hex")}`;
     if (initialPassword.length < 10) return NextResponse.json({ success: false, message: "Mật khẩu cần ít nhất 10 ký tự." }, { status: 400 });
 
+    const resolvedDealerCode = role === "CTV" && !dealerCode ? standaloneCtvCode(phone) : dealerCode;
     const user = await prisma.$transaction(async (tx) => {
       if (role === "DEALER" && dealerCode && !existingDealer) {
         await tx.dealer.create({
@@ -90,12 +95,27 @@ export async function POST(request: NextRequest) {
           },
         });
       }
+      if (role === "CTV" && !dealerCode) {
+        await tx.dealer.upsert({
+          where: { dealerCode: resolvedDealerCode! },
+          update: { name, phone, representativeName: name, registrationType: "collaborator", status: "APPROVED" },
+          create: {
+            dealerCode: resolvedDealerCode!,
+            name: `CTV độc lập - ${name}`,
+            phone,
+            representativeName: name,
+            registrationType: "collaborator",
+            technicianCount: 1,
+            status: "APPROVED",
+          },
+        });
+      }
       const created = await tx.user.create({
         data: {
           phone,
           name,
           role,
-          dealerCode: ["DEALER", "CTV", "KTV"].includes(role) ? dealerCode : null,
+          dealerCode: ["DEALER", "CTV", "KTV"].includes(role) ? resolvedDealerCode : null,
           provinceScope: role === "CSKH" ? provinceScope : null,
           password: hashPassword(initialPassword),
           active: true,
@@ -109,7 +129,7 @@ export async function POST(request: NextRequest) {
           content: `KOSOVOTA: Tài khoản ${role} đã được tạo. SĐT: ${phone}. Mật khẩu ban đầu: ${initialPassword}.`,
         },
       });
-      await tx.adminLog.create({ data: { userId: auth.user.id, action: "ADMIN_CREATE_USER", target: created.id, detail: `${role}:${phone}:${dealerCode || ""}` } });
+      await tx.adminLog.create({ data: { userId: auth.user.id, action: "ADMIN_CREATE_USER", target: created.id, detail: `${role}:${phone}:${resolvedDealerCode || ""}` } });
       return created;
     });
 
@@ -152,9 +172,20 @@ export async function PATCH(request: NextRequest) {
     data.provinceScope = provinceScope;
     data.dealerCode = null;
   }
-  if (["DEALER", "CTV", "KTV"].includes(nextRole)) {
-    const dealerCode = text(body.dealerCode).toUpperCase();
-    const dealer = await prisma.dealer.findUnique({ where: { dealerCode } });
+  if (["DEALER", "CTV", "KTV"].includes(nextRole) && ("role" in body || "dealerCode" in body)) {
+    const requestedDealerCode = text(body.dealerCode).toUpperCase();
+    if (["DEALER", "KTV"].includes(nextRole) && !requestedDealerCode) {
+      return NextResponse.json({ success: false, message: "Đại lý/KTV bắt buộc phải liên kết đại lý đã duyệt." }, { status: 400 });
+    }
+    const nextPhone = typeof data.phone === "string" ? data.phone : current.phone;
+    const nextName = typeof data.name === "string" ? data.name : current.name;
+    const dealerCode = nextRole === "CTV" && !requestedDealerCode ? standaloneCtvCode(nextPhone) : requestedDealerCode;
+    let dealer = await prisma.dealer.findUnique({ where: { dealerCode } });
+    if (nextRole === "CTV" && !requestedDealerCode && !dealer) {
+      dealer = await prisma.dealer.create({
+        data: { dealerCode, name: `CTV độc lập - ${nextName}`, phone: nextPhone, representativeName: nextName, registrationType: "collaborator", technicianCount: 1, status: "APPROVED" },
+      });
+    }
     if (!dealer || dealer.status !== "APPROVED") return NextResponse.json({ success: false, message: "Mã đại lý không tồn tại hoặc chưa duyệt." }, { status: 400 });
     if (nextRole === "DEALER") {
       const linked = await prisma.user.findFirst({ where: { role: "DEALER", dealerCode, id: { not: id } }, select: { id: true } });
