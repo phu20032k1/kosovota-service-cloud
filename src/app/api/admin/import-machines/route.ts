@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { hasRole } from "@/lib/auth";
 import { normalizePhone } from "@/lib/phone";
-import { buildMaintenanceSchedules } from "@/lib/maintenance";
+import { buildMaintenanceSchedulesFromTemplates, type MaintenanceTemplate } from "@/lib/maintenance";
+import { getConfiguredMaintenanceTemplates } from "@/lib/maintenance-config";
 import { readSheet } from "read-excel-file/node";
 import { geocodeAddress } from "@/lib/maps/geocode";
 import { provinceFromAddress, provinceLetterCodeOrNull } from "@/lib/province";
@@ -157,6 +158,7 @@ export async function POST(request: NextRequest) {
     let createdCount = 0;
     let updatedCount = 0;
     const errors: { row: number; message: string }[] = [];
+    const maintenanceTemplateCache = new Map<string, MaintenanceTemplate[]>();
 
     for (const { data: row, rowNumber } of parsedRows) {
       try {
@@ -190,6 +192,16 @@ export async function POST(request: NextRequest) {
           || provinceFromAddress(address)?.[1]
           || geocodedProvinceCode
           || "";
+
+        let maintenanceTemplates: MaintenanceTemplate[] | null = null;
+        if (installDate) {
+          const cacheKey = model.trim().toUpperCase();
+          maintenanceTemplates = maintenanceTemplateCache.get(cacheKey) || null;
+          if (!maintenanceTemplates) {
+            maintenanceTemplates = await getConfiguredMaintenanceTemplates(model);
+            maintenanceTemplateCache.set(cacheKey, maintenanceTemplates);
+          }
+        }
 
         const outcome = await prisma.$transaction(async (tx) => {
           const customer = phone ? await tx.customer.upsert({
@@ -246,9 +258,13 @@ export async function POST(request: NextRequest) {
             },
           });
 
-          if (installDate) {
+          if (installDate && maintenanceTemplates) {
             const count = await tx.maintenanceSchedule.count({ where: { machineId: targetMachineId } });
-            if (!count) await tx.maintenanceSchedule.createMany({ data: buildMaintenanceSchedules(targetMachineId, installDate, machine.model) });
+            if (!count) {
+              await tx.maintenanceSchedule.createMany({
+                data: buildMaintenanceSchedulesFromTemplates(targetMachineId, installDate, maintenanceTemplates),
+              });
+            }
           }
           return { existed: Boolean(existingMachine) };
         });

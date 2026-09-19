@@ -146,7 +146,7 @@ export default function PaymentsPage() {
                 <span className="mini-chip"><Icon name="file" size={14}/>{data.batches.length} kỳ hiện có</span>
               </div>
 
-              <div className="overflow-x-auto">
+              <div className="hidden overflow-x-auto md:block">
                 <table className="min-w-full text-sm">
                   <thead>
                     <tr>
@@ -159,10 +159,7 @@ export default function PaymentsPage() {
                     {data.batches.map((batch) => (
                       <tr key={batch.id} onClick={() => setSelectedId(batch.id)} className={`cursor-pointer ${selectedId === batch.id ? "bg-emerald-50/70" : ""}`}>
                         <td className="p-3 font-black text-slate-950">{batch.batchCode}</td>
-                        <td className="p-3">
-                          <strong>{batch.dealer.name}</strong>
-                          <div className="text-xs text-slate-500">{batch.dealer.dealerCode}</div>
-                        </td>
+                        <td className="p-3"><strong>{batch.dealer.name}</strong><div className="text-xs text-slate-500">{batch.dealer.dealerCode}</div></td>
                         <td className="p-3 whitespace-nowrap">{date(batch.periodStart)} – {date(batch.periodEnd)}</td>
                         <td className="p-3 font-bold">{batch.lines.length}</td>
                         <td className="p-3 font-black text-emerald-700">{money(batch.netAmount)}</td>
@@ -172,6 +169,26 @@ export default function PaymentsPage() {
                     {!data.batches.length && <tr><td colSpan={6} className="p-10 text-center text-slate-500">Chưa có kỳ đối soát.</td></tr>}
                   </tbody>
                 </table>
+              </div>
+              <div className="divide-y divide-slate-100 md:hidden">
+                {data.batches.map((batch) => (
+                  <button key={batch.id} type="button" onClick={() => setSelectedId(batch.id)} className={`block w-full p-4 text-left ${selectedId === batch.id ? "bg-emerald-50/80" : "bg-white"}`}>
+                    <div className="flex min-w-0 items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="break-all font-black text-slate-950">{batch.batchCode}</p>
+                        <p className="mt-1 break-words text-sm font-bold text-slate-700">{batch.dealer.name}</p>
+                        <p className="text-xs text-slate-500">{batch.dealer.dealerCode}</p>
+                      </div>
+                      <StatusBadge value={batch.status}/>
+                    </div>
+                    <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                      <div className="rounded-xl bg-slate-50 p-3"><span className="text-xs text-slate-500">Thời gian</span><p className="mt-1 font-bold">{date(batch.periodStart)} – {date(batch.periodEnd)}</p></div>
+                      <div className="rounded-xl bg-slate-50 p-3"><span className="text-xs text-slate-500">Số lệnh</span><p className="mt-1 text-lg font-black">{batch.lines.length}</p></div>
+                      <div className="col-span-2 rounded-xl bg-emerald-50 p-3"><span className="text-xs text-emerald-700">Giá trị ròng</span><p className="mt-1 text-lg font-black text-emerald-700">{money(batch.netAmount)}</p></div>
+                    </div>
+                  </button>
+                ))}
+                {!data.batches.length && <p className="p-8 text-center text-slate-500">Chưa có kỳ đối soát.</p>}
               </div>
             </article>
 

@@ -581,7 +581,7 @@ export function UserManagementConsole({ mode }: { mode: Mode }) {
               Đang hiển thị {filteredUsers.length}/{users.length} tài khoản.
             </p>
           </div>
-          <div className="account-table-scroll overflow-auto">
+          <div className="account-table-scroll hidden overflow-auto sm:block">
             <table className="min-w-[980px] w-full text-sm">
               <thead className="bg-slate-50 text-left text-xs uppercase tracking-wider text-slate-500">
                 <tr>
@@ -594,15 +594,9 @@ export function UserManagementConsole({ mode }: { mode: Mode }) {
               </thead>
               <tbody>
                 {filteredUsers.map((user) => (
-                  <tr
-                    key={user.id}
-                    className="border-t border-slate-100 align-top"
-                  >
+                  <tr key={user.id} className="border-t border-slate-100 align-top">
                     <td className="px-4 py-3 font-black">{user.role}</td>
-                    <td className="px-4 py-3">
-                      <strong>{user.name}</strong>
-                      <p className="text-xs text-slate-500">{user.phone}</p>
-                    </td>
+                    <td className="px-4 py-3"><strong>{user.name}</strong><p className="text-xs text-slate-500">{user.phone}</p></td>
                     <td className="px-4 py-3 text-slate-600">
                       {user.role === "CSKH"
                         ? `Tỉnh: ${user.provinceScope || "—"}`
@@ -612,53 +606,52 @@ export function UserManagementConsole({ mode }: { mode: Mode }) {
                           ? `Đại lý: ${user.dealerCode || "—"}`
                           : "Toàn hệ thống"}
                     </td>
-                    <td className="px-4 py-3">
-                      <span
-                        className={`rounded-full px-3 py-1 text-xs font-bold ${user.active ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}
-                      >
-                        {user.active ? "Đang hoạt động" : "Đã khóa"}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex flex-wrap gap-2">
-                        <button
-                          type="button"
-                          onClick={() => toggleUser(user)}
-                          className="rounded-xl border border-slate-200 px-3 py-2 font-bold hover:bg-slate-50"
-                        >
-                          {user.active ? "Khóa" : "Mở"}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => openEditModal(user)}
-                          className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 font-bold text-emerald-800 hover:bg-emerald-100"
-                        >
-                          Xem chi tiết
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => deleteUser(user)}
-                          className="rounded-xl border border-red-200 px-3 py-2 font-bold text-red-700 hover:bg-red-50"
-                        >
-                          Xóa
-                        </button>
-                      </div>
-                    </td>
+                    <td className="px-4 py-3"><span className={`rounded-full px-3 py-1 text-xs font-bold ${user.active ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{user.active ? "Đang hoạt động" : "Đã khóa"}</span></td>
+                    <td className="px-4 py-3"><div className="flex flex-wrap gap-2">
+                      <button type="button" onClick={() => toggleUser(user)} className="rounded-xl border border-slate-200 px-3 py-2 font-bold hover:bg-slate-50">{user.active ? "Khóa" : "Mở"}</button>
+                      <button type="button" onClick={() => openEditModal(user)} className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 font-bold text-emerald-800 hover:bg-emerald-100">Xem chi tiết</button>
+                      <button type="button" onClick={() => deleteUser(user)} className="rounded-xl border border-red-200 px-3 py-2 font-bold text-red-700 hover:bg-red-50">Xóa</button>
+                    </div></td>
                   </tr>
                 ))}
               </tbody>
             </table>
-            {!users.length && (
-              <p className="p-8 text-center text-sm text-slate-500">
-                Chưa có tài khoản nào trong phạm vi quản lý.
-              </p>
-            )}
-            {Boolean(users.length) && !filteredUsers.length && (
-              <p className="p-8 text-center text-sm text-slate-500">
-                Không có tài khoản nào khớp bộ lọc.
-              </p>
-            )}
           </div>
+
+          <div className="divide-y divide-slate-100 sm:hidden">
+            {filteredUsers.map((user) => (
+              <article key={user.id} className="p-4">
+                <div className="flex min-w-0 items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="status-pill status-slate">{user.role}</span>
+                      <span className={`status-pill ${user.active ? "status-green" : "status-slate"}`}>{user.active ? "Đang hoạt động" : "Đã khóa"}</span>
+                    </div>
+                    <h3 className="mt-3 break-words text-base font-black text-slate-950">{user.name}</h3>
+                    <a href={`tel:${user.phone}`} className="mt-1 block text-sm font-bold text-emerald-700">{user.phone}</a>
+                  </div>
+                </div>
+                <div className="mt-3 rounded-xl bg-slate-50 p-3 text-sm leading-6 text-slate-600">
+                  <strong className="text-slate-800">Phạm vi: </strong>
+                  {user.role === "CSKH"
+                    ? `Tỉnh: ${user.provinceScope || "—"}`
+                    : user.role === "CTV" && (!user.dealerCode || user.dealerCode.startsWith("CTV-"))
+                      ? "CTV độc lập"
+                    : ["DEALER", "CTV", "KTV"].includes(user.role)
+                      ? `Đại lý: ${user.dealerCode || "—"}`
+                      : "Toàn hệ thống"}
+                </div>
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <button type="button" onClick={() => openEditModal(user)} className="btn-primary col-span-2 px-3 py-3 text-sm font-black text-white">Xem / sửa chi tiết</button>
+                  <button type="button" onClick={() => toggleUser(user)} className="btn-secondary px-3 py-3 text-sm font-black">{user.active ? "Khóa" : "Mở"}</button>
+                  <button type="button" onClick={() => deleteUser(user)} className="ghost-danger px-3 py-3 text-sm">Xóa</button>
+                </div>
+              </article>
+            ))}
+          </div>
+
+          {!users.length && <p className="p-8 text-center text-sm text-slate-500">Chưa có tài khoản nào trong phạm vi quản lý.</p>}
+          {Boolean(users.length) && !filteredUsers.length && <p className="p-8 text-center text-sm text-slate-500">Không có tài khoản nào khớp bộ lọc.</p>}
         </section>
       </section>
     </div>

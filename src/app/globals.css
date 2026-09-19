@@ -480,3 +480,111 @@ main .table-shell:has(> table) > table > thead > tr > th {
   background: #f8fafc;
   box-shadow: inset 0 -1px 0 #e2e8f0;
 }
+
+/* V32 - Mobile-first finishing pass */
+.admin-data-scroll {
+  width: 100%;
+  max-width: 100%;
+  overflow: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+@media (max-width: 640px) {
+  input,
+  select,
+  textarea {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  input[type="date"],
+  input[type="datetime-local"],
+  input[type="month"],
+  input[type="time"] {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .data-toolbar input,
+  .data-toolbar select,
+  .data-toolbar textarea {
+    width: 100%;
+    max-width: none;
+  }
+
+  .dispatch-layout .map-frame {
+    height: 360px !important;
+    min-height: 320px;
+  }
+
+  .dispatch-order-list {
+    max-height: 360px;
+  }
+
+  .modal-panel {
+    max-height: 100dvh;
+    border-radius: 1.25rem 1.25rem 0 0;
+  }
+
+  .modal-header,
+  .modal-body,
+  .modal-footer {
+    padding: .85rem;
+  }
+
+  .action-bar.is-sticky {
+    position: static;
+  }
+
+  .action-bar > div,
+  .action-bar > label {
+    width: 100%;
+  }
+
+  .action-bar button,
+  .action-bar a {
+    min-height: 44px;
+  }
+
+  .status-pill,
+  .status-badge,
+  .mini-chip {
+    max-width: 100%;
+  }
+
+  .page-section-title,
+  .page-section-subtitle,
+  .data-toolbar h2,
+  .data-toolbar p {
+    overflow-wrap: anywhere;
+  }
+
+  .ticket-list-item,
+  .dispatch-order-item {
+    padding: .8rem;
+  }
+
+  .table-shell > .divide-y article,
+  .surface-card > .divide-y article {
+    min-width: 0;
+  }
+}
+
+@media (max-width: 380px) {
+  .page-container,
+  .mx-auto.max-w-\[1480px\],
+  .mx-auto.max-w-7xl {
+    padding-left: .55rem;
+    padding-right: .55rem;
+  }
+
+  .surface-card {
+    border-radius: 1rem;
+  }
+
+  .metric-card {
+    padding: .85rem;
+  }
+}

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { buildMaintenanceSchedules } from "@/lib/maintenance";
+import { buildMaintenanceSchedulesFromTemplates } from "@/lib/maintenance";
+import { getConfiguredMaintenanceTemplates } from "@/lib/maintenance-config";
 import { hasRole } from "@/lib/auth";
 import { normalizePhone as normalizeVietnamPhone, isValidVietnamPhone } from "@/lib/phone";
 import { queueActivationCompletedNotifications } from "@/lib/notifications/events";
@@ -356,7 +357,8 @@ async function saveStepTwo(body: JsonObject, machineId: string, model: string) {
   }
 
   const status = machineStatusFromForm(body.machineStatus);
-  const scheduleData = buildMaintenanceSchedules(machineId, installationDate, model);
+  const maintenanceTemplates = await getConfiguredMaintenanceTemplates(model);
+  const scheduleData = buildMaintenanceSchedulesFromTemplates(machineId, installationDate, maintenanceTemplates);
 
   const existingActivation = await prisma.activation.findUnique({
     where: { machineId_step: { machineId, step: 2 } },
