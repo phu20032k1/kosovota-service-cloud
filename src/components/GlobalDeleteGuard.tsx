@@ -20,7 +20,12 @@ export default function GlobalDeleteGuard() {
       if (!(raw instanceof Element)) return;
       const clickable = raw.closest("button,a,[role='button']") as ClickTarget | null;
       if (!clickable || !isDeleteAction(clickable)) return;
-      if (clickable.closest("[role='dialog']")) return;
+
+      // Never intercept delete-like buttons that belong to an already-open modal.
+      // ConfirmDialog uses role="alertdialog" for danger actions, so checking only
+      // role="dialog" caused its own red "Xóa" button to be captured again.
+      if (clickable.closest("[data-delete-guard='ignore'], [role='dialog'], [role='alertdialog']")) return;
+
       if (bypass.current.has(clickable)) {
         bypass.current.delete(clickable);
         return;

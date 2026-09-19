@@ -3,7 +3,7 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Brand } from "./Brand";
 import { Icon, type IconName } from "./Icon";
 import { homeForRole, ROLE_LABEL, type InternalRole } from "@/lib/access-control";
@@ -52,6 +52,7 @@ export function OperationsHeader({ title, subtitle, actions }: { title: string; 
   const [user, setUser] = useState<SessionUser | null>(null);
   const [loggingOut, setLoggingOut] = useState(false);
   const [activityCounts, setActivityCounts] = useState<Record<string, number>>({});
+  const navRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -103,6 +104,21 @@ export function OperationsHeader({ title, subtitle, actions }: { title: string; 
   const nav = useMemo(() => user?.role === "ADMIN" ? ADMIN_NAV : user?.role === "CSKH" ? CSKH_NAV : [], [user?.role]);
   const home = homeForRole(user?.role);
 
+  useEffect(() => {
+    const navElement = navRef.current;
+    if (!navElement || window.matchMedia("(min-width: 768px)").matches) return;
+
+    const active = navElement.querySelector<HTMLElement>(".ops-nav-link.is-active");
+    if (!active) return;
+
+    const frame = window.requestAnimationFrame(() => {
+      const targetLeft = active.offsetLeft - (navElement.clientWidth - active.offsetWidth) / 2;
+      navElement.scrollTo({ left: Math.max(0, targetLeft), behavior: "smooth" });
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [pathname, nav.length]);
+
   async function logout() {
     setLoggingOut(true);
     try { await fetch("/api/auth/logout", { method: "POST" }); }
@@ -128,7 +144,7 @@ export function OperationsHeader({ title, subtitle, actions }: { title: string; 
             <button type="button" onClick={logout} disabled={loggingOut} className="icon-button" title="Đăng xuất" aria-label="Đăng xuất"><Icon name="log-out" size={18}/></button>
           </div>
         </div>
-        <nav className="ops-nav" aria-label="Điều hướng vận hành">
+        <nav ref={navRef} className="ops-nav" aria-label="Điều hướng vận hành">
           {nav.map((item) => {
             const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
             const count = Math.max(0, activityCounts[item.href] || 0);

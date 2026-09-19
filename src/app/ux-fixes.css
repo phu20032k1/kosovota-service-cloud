@@ -177,3 +177,84 @@ td:has(> .status-pill) {
   .web-dialog-backdrop,
   .web-dialog-panel { animation: none; }
 }
+
+
+/* 2026-09 mobile pass: keep admin navigation usable as a horizontal, touch-friendly rail. */
+@media (max-width: 767px) {
+  .ops-header-inner {
+    width: 100%;
+    gap: .55rem;
+    padding: .55rem .75rem .65rem;
+  }
+
+  .ops-nav {
+    width: 100%;
+    max-width: 100%;
+    flex-wrap: nowrap !important;
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+    margin: 0 !important;
+    padding: .2rem .05rem .35rem;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    overscroll-behavior-x: contain;
+    scroll-snap-type: x proximity;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .ops-nav::-webkit-scrollbar { display: none; }
+
+  .ops-nav-link {
+    min-height: 42px;
+    flex: 0 0 auto;
+    scroll-snap-align: center;
+    border: 1px solid #e0ebe7;
+    border-radius: 12px;
+    padding: .58rem .72rem !important;
+    background: rgba(255,255,255,.96);
+    box-shadow: 0 1px 2px rgba(2,44,34,.04);
+  }
+
+  .ops-nav-link span { display: inline !important; }
+  .ops-nav-link.is-active { border-color: transparent; }
+  .ops-nav-badge { margin-left: .05rem; }
+
+  input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+  select,
+  textarea {
+    font-size: 16px;
+  }
+
+  .web-dialog-backdrop {
+    place-items: end center;
+    padding:
+      max(.5rem, env(safe-area-inset-top))
+      max(.5rem, env(safe-area-inset-right))
+      0
+      max(.5rem, env(safe-area-inset-left));
+  }
+
+  .web-dialog-panel {
+    max-height: min(88dvh, 720px);
+    border-radius: 1.5rem 1.5rem 0 0;
+    padding:
+      1rem
+      max(1rem, env(safe-area-inset-right))
+      max(1rem, env(safe-area-inset-bottom))
+      max(1rem, env(safe-area-inset-left));
+  }
+
+  .web-dialog-icon {
+    width: 44px;
+    height: 44px;
+    border-radius: 14px;
+  }
+
+  .notice {
+    padding: .75rem .85rem;
+    font-size: .82rem;
+    line-height: 1.5;
+  }
+}

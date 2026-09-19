@@ -81,6 +81,7 @@ export function ConfirmDialog({
   return (
     <div
       className="web-dialog-backdrop"
+      data-delete-guard="ignore"
       role={tone === "danger" ? "alertdialog" : "dialog"}
       aria-modal="true"
       aria-labelledby={titleId}
