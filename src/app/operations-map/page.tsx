@@ -203,7 +203,7 @@ export default function OperationsMapPage() {
   }
 
   return <main className="min-h-screen bg-slate-50/70">
-    <OperationsHeader title="Điều phối lệnh dịch vụ" subtitle="Phiếu hỗ trợ tạo lệnh tự động, theo dõi hàng chờ và giao đại lý/CTV gần máy" actions={<button type="button" onClick={load} className="icon-button" title="Tải lại"><Icon name="refresh" size={18}/></button>}/>
+    <OperationsHeader title="Điều phối lệnh dịch vụ" subtitle="Phiếu hỗ trợ tạo lệnh tự động, theo dõi hàng chờ và giao đại lý/CTV gần máy" actions={<button type="button" onClick={() => void load()} className="icon-button" title="Tải lại"><Icon name="refresh" size={18}/></button>}/>
     <section className="mx-auto max-w-[1580px] space-y-4 p-3 sm:p-5">
       {notice && <Notice kind={notice.kind}>{notice.text}</Notice>}
 
