@@ -10,7 +10,7 @@ export type GeocodeResult = {
   formattedAddress?: string;
   provinceCode?: string;
   provinceName?: string;
-  provider: "google" | "maptiler";
+  provider: "google" | "maptiler" | "osm";
 };
 
 type GoogleComponent = { long_name?: string; short_name?: string; types?: string[] };
@@ -132,92 +132,263 @@ function mapTilerKey() {
   return key;
 }
 
+type NominatimResult = {
+  lat?: string;
+  lon?: string;
+  display_name?: string;
+  address?: {
+    state?: string;
+    city?: string;
+    province?: string;
+    county?: string;
+    city_district?: string;
+    suburb?: string;
+  };
+};
+
+let osmQueue: Promise<void> = Promise.resolve();
+let lastOsmRequestAt = 0;
+
+async function osmFetch(url: URL) {
+  const previous = osmQueue;
+  let releaseQueue = () => {};
+  osmQueue = new Promise<void>((resolve) => { releaseQueue = resolve; });
+  await previous;
+
+  try {
+    const wait = Math.max(0, 1_050 - (Date.now() - lastOsmRequestAt));
+    if (wait) await new Promise((resolve) => setTimeout(resolve, wait));
+    const response = await fetch(url, {
+      cache: "no-store",
+      headers: {
+        "User-Agent": "KOSOVOTA-Service-Cloud/1.0",
+        "Accept-Language": "vi-VN,vi;q=0.9,en;q=0.5",
+      },
+    });
+    lastOsmRequestAt = Date.now();
+    return response;
+  } finally {
+    releaseQueue();
+  }
+}
+
+function osmProvince(item: NominatimResult) {
+  return provinceMetadata(
+    item.address?.state,
+    item.address?.city,
+    item.address?.province,
+    item.address?.county,
+    item.address?.city_district,
+    item.display_name,
+  );
+}
+
+async function geocodeWithOsm(value: string): Promise<GeocodeResult | null> {
+  const url = new URL("https://nominatim.openstreetmap.org/search");
+  url.searchParams.set("q", value);
+  url.searchParams.set("format", "jsonv2");
+  url.searchParams.set("countrycodes", "vn");
+  url.searchParams.set("addressdetails", "1");
+  url.searchParams.set("limit", "5");
+  url.searchParams.set("accept-language", "vi");
+
+  const response = await osmFetch(url);
+  const result = await response.json() as NominatimResult[];
+  if (!response.ok) throw new Error(`OSM Geocoding HTTP ${response.status}`);
+
+  const items = Array.isArray(result) ? result : [];
+  const strict = bestCandidate(
+    value,
+    items,
+    (candidate) => candidate.display_name,
+    (candidate) => {
+      const lat = Number(candidate.lat);
+      const lng = Number(candidate.lon);
+      return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
+    },
+  );
+
+  const queryProvince = provinceFromAddress(value)?.[1];
+  const provinceMatched = queryProvince
+    ? items.find((candidate) => {
+        const lat = Number(candidate.lat);
+        const lng = Number(candidate.lon);
+        return isVietnamCoordinates(lat, lng) && osmProvince(candidate).provinceCode === queryProvince;
+      })
+    : undefined;
+
+  const item = strict || provinceMatched || items.find((candidate) => {
+    const lat = Number(candidate.lat);
+    const lng = Number(candidate.lon);
+    return isVietnamCoordinates(lat, lng);
+  });
+  if (!item) return null;
+
+  const lat = Number(item.lat);
+  const lng = Number(item.lon);
+  if (!isVietnamCoordinates(lat, lng)) return null;
+  return {
+    lat,
+    lng,
+    formattedAddress: item.display_name,
+    ...osmProvince(item),
+    provider: "osm",
+  };
+}
+
+async function reverseWithOsm(lat: number, lng: number): Promise<GeocodeResult | null> {
+  const url = new URL("https://nominatim.openstreetmap.org/reverse");
+  url.searchParams.set("lat", String(lat));
+  url.searchParams.set("lon", String(lng));
+  url.searchParams.set("format", "jsonv2");
+  url.searchParams.set("addressdetails", "1");
+  url.searchParams.set("accept-language", "vi");
+
+  const response = await osmFetch(url);
+  const item = await response.json() as NominatimResult;
+  if (!response.ok) throw new Error(`OSM Reverse Geocoding HTTP ${response.status}`);
+  return {
+    lat,
+    lng,
+    formattedAddress: item.display_name,
+    ...osmProvince(item),
+    provider: "osm",
+  };
+}
+
 export async function geocodeAddress(address: string): Promise<GeocodeResult | null> {
   const value = address.trim();
   if (!value) return null;
   const provider = providerName();
+  let primaryError: unknown = null;
 
-  if (provider === "google") {
-    const url = new URL("https://maps.googleapis.com/maps/api/geocode/json");
-    url.searchParams.set("address", value);
-    url.searchParams.set("region", "vn");
-    url.searchParams.set("components", "country:VN");
-    url.searchParams.set("language", "vi");
-    url.searchParams.set("key", googleKey());
-    const response = await fetch(url, { cache: "no-store" });
-    const result = await response.json() as { status?: string; error_message?: string; results?: GoogleResult[] };
-    if (!response.ok || (result.status !== "OK" && result.status !== "ZERO_RESULTS")) {
-      throw new Error(result.error_message || `Google Geocoding: ${result.status || response.status}`);
+  try {
+    if (provider === "osm") return geocodeWithOsm(value);
+
+    if (provider === "google") {
+      const url = new URL("https://maps.googleapis.com/maps/api/geocode/json");
+      url.searchParams.set("address", value);
+      url.searchParams.set("region", "vn");
+      url.searchParams.set("components", "country:VN");
+      url.searchParams.set("language", "vi");
+      url.searchParams.set("key", googleKey());
+      const response = await fetch(url, { cache: "no-store" });
+      const result = await response.json() as { status?: string; error_message?: string; results?: GoogleResult[] };
+      if (!response.ok || (result.status !== "OK" && result.status !== "ZERO_RESULTS")) {
+        throw new Error(result.error_message || `Google Geocoding: ${result.status || response.status}`);
+      }
+      const item = bestCandidate(
+        value,
+        result.results || [],
+        (candidate) => candidate.formatted_address,
+        (candidate) => candidate.geometry?.location || null,
+      );
+      if (item?.geometry?.location) {
+        return {
+          ...item.geometry.location,
+          formattedAddress: item.formatted_address,
+          ...googleProvince(item),
+          provider: "google",
+        };
+      }
+    } else {
+      const url = new URL(`https://api.maptiler.com/geocoding/${encodeURIComponent(value)}.json`);
+      url.searchParams.set("key", mapTilerKey());
+      url.searchParams.set("limit", "10");
+      url.searchParams.set("country", "vn");
+      url.searchParams.set("language", "vi");
+      url.searchParams.set("autocomplete", "false");
+      const response = await fetch(url, { cache: "no-store" });
+      const result = await response.json() as { features?: MapTilerFeature[]; message?: string };
+      if (!response.ok) throw new Error(result.message || `MapTiler Geocoding HTTP ${response.status}`);
+
+      const candidates = result.features || [];
+      let item = bestCandidate(
+        value,
+        candidates,
+        (candidate) => candidate.place_name,
+        (candidate) => candidate.center ? { lng: candidate.center[0], lat: candidate.center[1] } : null,
+      );
+      if (!item) {
+        const queryProvince = provinceFromAddress(value)?.[1];
+        item = candidates.find((candidate) => {
+          if (!candidate.center) return false;
+          const [lng, lat] = candidate.center;
+          return isVietnamCoordinates(lat, lng)
+            && (!queryProvince || mapTilerProvince(candidate).provinceCode === queryProvince);
+        }) || null;
+      }
+
+      if (item?.center) {
+        return {
+          lng: item.center[0],
+          lat: item.center[1],
+          formattedAddress: item.place_name,
+          ...mapTilerProvince(item),
+          provider: "maptiler",
+        };
+      }
     }
-    const item = bestCandidate(
-      value,
-      result.results || [],
-      (candidate) => candidate.formatted_address,
-      (candidate) => candidate.geometry?.location || null,
-    );
-    if (!item?.geometry?.location) return null;
-    return {
-      ...item.geometry.location,
-      formattedAddress: item.formatted_address,
-      ...googleProvince(item),
-      provider: "google",
-    };
+  } catch (error) {
+    primaryError = error;
   }
 
-  const url = new URL(`https://api.maptiler.com/geocoding/${encodeURIComponent(value)}.json`);
-  url.searchParams.set("key", mapTilerKey());
-  url.searchParams.set("limit", "10");
-  url.searchParams.set("country", "vn");
-  url.searchParams.set("language", "vi");
-  url.searchParams.set("autocomplete", "false");
-  const response = await fetch(url, { cache: "no-store" });
-  const result = await response.json() as { features?: MapTilerFeature[]; message?: string };
-  if (!response.ok) throw new Error(result.message || `MapTiler Geocoding HTTP ${response.status}`);
-  const item = bestCandidate(
-    value,
-    result.features || [],
-    (candidate) => candidate.place_name,
-    (candidate) => candidate.center ? { lng: candidate.center[0], lat: candidate.center[1] } : null,
-  );
-  if (!item?.center) return null;
-  return {
-    lng: item.center[0],
-    lat: item.center[1],
-    formattedAddress: item.place_name,
-    ...mapTilerProvince(item),
-    provider: "maptiler",
-  };
+  try {
+    const fallback = await geocodeWithOsm(value);
+    if (fallback) return fallback;
+  } catch (fallbackError) {
+    if (primaryError) throw primaryError;
+    throw fallbackError;
+  }
+
+  if (primaryError) throw primaryError;
+  return null;
 }
 
 export async function reverseGeocodeCoordinates(lat: number, lng: number): Promise<GeocodeResult | null> {
   if (!isVietnamCoordinates(lat, lng)) return null;
   const provider = providerName();
+  let primaryError: unknown = null;
 
-  if (provider === "google") {
-    const url = new URL("https://maps.googleapis.com/maps/api/geocode/json");
-    url.searchParams.set("latlng", `${lat},${lng}`);
-    url.searchParams.set("language", "vi");
-    url.searchParams.set("key", googleKey());
-    const response = await fetch(url, { cache: "no-store" });
-    const result = await response.json() as { status?: string; error_message?: string; results?: GoogleResult[] };
-    if (!response.ok || (result.status !== "OK" && result.status !== "ZERO_RESULTS")) {
-      throw new Error(result.error_message || `Google Reverse Geocoding: ${result.status || response.status}`);
+  try {
+    if (provider === "osm") return reverseWithOsm(lat, lng);
+
+    if (provider === "google") {
+      const url = new URL("https://maps.googleapis.com/maps/api/geocode/json");
+      url.searchParams.set("latlng", `${lat},${lng}`);
+      url.searchParams.set("language", "vi");
+      url.searchParams.set("key", googleKey());
+      const response = await fetch(url, { cache: "no-store" });
+      const result = await response.json() as { status?: string; error_message?: string; results?: GoogleResult[] };
+      if (!response.ok || (result.status !== "OK" && result.status !== "ZERO_RESULTS")) {
+        throw new Error(result.error_message || `Google Reverse Geocoding: ${result.status || response.status}`);
+      }
+      const item = (result.results || []).find((candidate) => Boolean(googleProvince(candidate).provinceCode));
+      if (item) return { lat, lng, formattedAddress: item.formatted_address, ...googleProvince(item), provider: "google" };
+    } else {
+      const url = new URL(`https://api.maptiler.com/geocoding/${lng},${lat}.json`);
+      url.searchParams.set("key", mapTilerKey());
+      url.searchParams.set("limit", "10");
+      url.searchParams.set("country", "vn");
+      url.searchParams.set("language", "vi");
+      const response = await fetch(url, { cache: "no-store" });
+      const result = await response.json() as { features?: MapTilerFeature[]; message?: string };
+      if (!response.ok) throw new Error(result.message || `MapTiler Reverse Geocoding HTTP ${response.status}`);
+      const item = (result.features || []).find((candidate) => Boolean(mapTilerProvince(candidate).provinceCode));
+      if (item) return { lat, lng, formattedAddress: item.place_name, ...mapTilerProvince(item), provider: "maptiler" };
     }
-    const item = (result.results || []).find((candidate) => {
-      const metadata = googleProvince(candidate);
-      return Boolean(metadata.provinceCode);
-    });
-    return item ? { lat, lng, formattedAddress: item.formatted_address, ...googleProvince(item), provider: "google" } : null;
+  } catch (error) {
+    primaryError = error;
   }
 
-  const url = new URL(`https://api.maptiler.com/geocoding/${lng},${lat}.json`);
-  url.searchParams.set("key", mapTilerKey());
-  url.searchParams.set("limit", "10");
-  url.searchParams.set("country", "vn");
-  url.searchParams.set("language", "vi");
-  const response = await fetch(url, { cache: "no-store" });
-  const result = await response.json() as { features?: MapTilerFeature[]; message?: string };
-  if (!response.ok) throw new Error(result.message || `MapTiler Reverse Geocoding HTTP ${response.status}`);
-  const item = (result.features || []).find((candidate) => Boolean(mapTilerProvince(candidate).provinceCode));
-  return item ? { lat, lng, formattedAddress: item.place_name, ...mapTilerProvince(item), provider: "maptiler" } : null;
+  try {
+    const fallback = await reverseWithOsm(lat, lng);
+    if (fallback?.provinceCode || fallback?.formattedAddress) return fallback;
+  } catch (fallbackError) {
+    if (primaryError) throw primaryError;
+    throw fallbackError;
+  }
+
+  if (primaryError) throw primaryError;
+  return null;
 }
