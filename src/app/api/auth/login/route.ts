@@ -74,6 +74,10 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    if (!isInternalRole(user.role)) {
+      return NextResponse.json({ success: false, message: "Vai trò tài khoản không hợp lệ sau khi đồng bộ." }, { status: 403 });
+    }
+
     if (!user.password.startsWith("scrypt$")) {
       await prisma.user.update({ where: { id: user.id }, data: { password: hashPassword(password) } });
     }
