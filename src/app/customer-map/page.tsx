@@ -42,17 +42,31 @@ export default function CustomerMapPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const load = useCallback(async () => {
-    setLoading(true); setError("");
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
+    if (!silent) setError("");
     try {
       const response = await fetch("/api/machines", { cache: "no-store" });
       const result = await response.json();
       if (!response.ok || !result.success) throw new Error(result.message || "Không tải được danh sách máy.");
       setMachines(result.data || []);
     } catch (value) { setError(value instanceof Error ? value.message : "Không tải được dữ liệu."); }
-    finally { setLoading(false); }
+    finally { if (!silent) setLoading(false); }
   }, []);
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    void load();
+    const refresh = () => {
+      if (document.visibilityState === "visible") void load(true);
+    };
+    const timer = window.setInterval(refresh, 60_000);
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [load]);
 
   const models = useMemo(() => [...new Set(machines.map((m) => m.model).filter(Boolean))].sort(), [machines]);
   const filtered = useMemo(() => machines.filter((machine) => {

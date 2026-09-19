@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PRODUCTS } from "@/data/products";
 import { OperationsHeader } from "@/components/ui/OperationsHeader";
 import { Icon } from "@/components/ui/Icon";
@@ -54,10 +54,12 @@ export default function MaintenancePlansPage() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [syncing, setSyncing] = useState(false);
+  const [generatingOrders, setGeneratingOrders] = useState(false);
   const [savingId, setSavingId] = useState("");
+  const automationRunning = useRef(false);
 
-  const loadSchedules = useCallback(async () => {
-    setLoading(true);
+  const loadSchedules = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     setError("");
     try {
       const response = await fetch("/api/maintenance-schedules?status=PENDING", { cache: "no-store" });
@@ -67,12 +69,63 @@ export default function MaintenancePlansPage() {
     } catch (value) {
       setError(value instanceof Error ? value.message : "Không tải được lịch bảo trì.");
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
     void loadSchedules();
+
+    const refresh = () => {
+      if (document.visibilityState === "visible") void loadSchedules(true);
+    };
+    const timer = window.setInterval(refresh, 30_000);
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [loadSchedules]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const runAutomation = async () => {
+      if (automationRunning.current || document.visibilityState !== "visible") return;
+      automationRunning.current = true;
+      try {
+        const syncResponse = await fetch("/api/maintenance-schedules/sync-missing", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ limit: 1_000 }),
+        });
+        const syncResult = await syncResponse.json();
+        if (!syncResponse.ok || !syncResult.success) throw new Error(syncResult.message || "Không tự sinh được lịch còn thiếu.");
+
+        const orderResponse = await fetch(`/api/maintenance-schedules/generate-orders?through=${encodeURIComponent(new Date().toISOString())}`, {
+          method: "POST",
+        });
+        const orderResult = await orderResponse.json();
+        if (!orderResponse.ok || !orderResult.success) throw new Error(orderResult.message || "Không tự sinh được lệnh đến hạn.");
+
+        if (!cancelled && ((syncResult.data?.createdSchedules || 0) > 0 || (orderResult.created || 0) > 0)) {
+          setNotice(`Tự động: sinh ${syncResult.data?.createdSchedules || 0} lịch và ${orderResult.created || 0} lệnh đến hạn.`);
+        }
+        if (!cancelled) await loadSchedules(true);
+      } catch (value) {
+        if (!cancelled) setError(value instanceof Error ? value.message : "Không chạy được tự động hóa lịch.");
+      } finally {
+        automationRunning.current = false;
+      }
+    };
+
+    void runAutomation();
+    const timer = window.setInterval(() => void runAutomation(), 5 * 60_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
   }, [loadSchedules]);
 
   async function syncMissingSchedules() {
@@ -88,11 +141,30 @@ export default function MaintenancePlansPage() {
       const result = await response.json();
       if (!response.ok || !result.success) throw new Error(result.message || "Không đồng bộ được lịch.");
       setNotice(result.message);
-      await loadSchedules();
+      await loadSchedules(true);
     } catch (value) {
       setError(value instanceof Error ? value.message : "Không đồng bộ được lịch.");
     } finally {
       setSyncing(false);
+    }
+  }
+
+  async function generateDueOrders() {
+    setGeneratingOrders(true);
+    setError("");
+    setNotice("");
+    try {
+      const response = await fetch(`/api/maintenance-schedules/generate-orders?through=${encodeURIComponent(new Date().toISOString())}`, {
+        method: "POST",
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.message || "Không sinh được lệnh đến hạn.");
+      setNotice(result.message);
+      await loadSchedules(true);
+    } catch (value) {
+      setError(value instanceof Error ? value.message : "Không sinh được lệnh đến hạn.");
+    } finally {
+      setGeneratingOrders(false);
     }
   }
 
@@ -109,7 +181,7 @@ export default function MaintenancePlansPage() {
       const result = await response.json();
       if (!response.ok || !result.success) throw new Error(result.message || "Không đổi được hạn.");
       setNotice(`Đã đổi hạn ${schedule.machineId} – ${schedule.title}.`);
-      await loadSchedules();
+      await loadSchedules(true);
     } catch (value) {
       setError(value instanceof Error ? value.message : "Không đổi được hạn.");
     } finally {
@@ -138,8 +210,11 @@ export default function MaintenancePlansPage() {
         title="Lịch thay lõi"
         subtitle="4 bảng chu kỳ theo dòng máy và danh sách máy đã đến hạn cần xử lý"
         actions={<div className="flex flex-wrap gap-2">
-          <button type="button" onClick={() => void syncMissingSchedules()} disabled={syncing} className="btn-primary px-4 py-2 text-sm font-black text-white disabled:opacity-50">
+          <button type="button" onClick={() => void syncMissingSchedules()} disabled={syncing || generatingOrders} className="btn-primary px-4 py-2 text-sm font-black text-white disabled:opacity-50">
             <Icon name={syncing ? "refresh" : "calendar"} size={17} /> {syncing ? "Đang đồng bộ..." : "Sinh lịch máy bị thiếu"}
+          </button>
+          <button type="button" onClick={() => void generateDueOrders()} disabled={generatingOrders || syncing} className="btn-secondary px-4 py-2 text-sm font-black disabled:opacity-50">
+            <Icon name={generatingOrders ? "refresh" : "activity"} size={17} /> {generatingOrders ? "Đang sinh lệnh..." : "Sinh lệnh đến hạn"}
           </button>
           <button type="button" onClick={() => void loadSchedules()} className="icon-button" title="Tải lại lịch">
             <Icon name="refresh" size={18} />

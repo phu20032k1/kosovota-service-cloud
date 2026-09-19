@@ -81,7 +81,39 @@ export default function ExecutiveDashboardPage() {
     }
   }, []);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    void load();
+    const refresh = () => {
+      if (document.visibilityState === "visible") void load();
+    };
+    const timer = window.setInterval(refresh, 30_000);
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [load]);
+
+  useEffect(() => {
+    const key = "kosovota:auto-machine-location-sync";
+    const last = Number(window.sessionStorage.getItem(key) || 0);
+    if (Date.now() - last < 10 * 60_000) return;
+    window.sessionStorage.setItem(key, String(Date.now()));
+
+    void fetch("/api/machines/geocode-all", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ batchSize: 80 }),
+    }).then(async (response) => {
+      const result = await response.json();
+      if (response.ok && result.success && (result.data?.updated || 0) > 0) {
+        setNotice(`Tự động nhận diện vị trí: ${result.message}`);
+        await load();
+      }
+    }).catch(() => undefined);
+  }, [load]);
 
   async function syncMachineLocations() {
     setLocationSyncing(true);

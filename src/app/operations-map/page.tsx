@@ -54,9 +54,9 @@ export default function OperationsMapPage() {
   const [radius, setRadius] = useState(20);
   const [shortlist, setShortlist] = useState<ShortlistDealer[]>([]);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setNotice(null);
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
+    if (!silent) setNotice(null);
     try {
       const [machineResponse, dealerResponse, orderResponse] = await Promise.all([
         fetch("/api/machines", { cache: "no-store" }),
@@ -89,11 +89,24 @@ export default function OperationsMapPage() {
     } catch (error) {
       setNotice({ kind: "error", text: error instanceof Error ? error.message : "Không tải được dữ liệu điều phối." });
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, []);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    void load();
+    const refresh = () => {
+      if (document.visibilityState === "visible") void load(true);
+    };
+    const timer = window.setInterval(refresh, 30_000);
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [load]);
 
   const normalizedSearch = search.trim().toLowerCase();
   const visibleMachines = useMemo(() => machines

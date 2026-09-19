@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { hasRole } from "@/lib/auth";
 import { queueMaintenanceReminderEmail } from "@/lib/notifications/events";
+import { generateDueMaintenanceOrders, syncMissingMaintenanceSchedules } from "@/lib/maintenance-automation";
 
 function hasCronSecret(request: NextRequest) {
   const configured = process.env.CRON_SECRET;
@@ -30,6 +31,12 @@ async function run(request: NextRequest, daysInput?: unknown) {
   }
 
   const days = Math.min(Math.max(Number(daysInput) || 7, 1), 30);
+
+  // Cron này cũng tự sửa dữ liệu cũ: máy đã có ngày lắp nhưng thiếu lịch sẽ
+  // được sinh lịch trước, sau đó lịch đến hạn tự tạo lệnh dịch vụ.
+  const maintenanceSync = await syncMissingMaintenanceSchedules(1_000);
+  const orderGeneration = await generateDueMaintenanceOrders(new Date(), 1_000);
+
   const now = new Date();
   const today = startOfDay(now);
   const tomorrow = new Date(today);
@@ -87,8 +94,18 @@ async function run(request: NextRequest, daysInput?: unknown) {
 
   return NextResponse.json({
     success: true,
-    message: `Đã tạo ${queued} email nhắc lịch bảo trì; bỏ qua ${skipped} thông báo đã có.`,
-    data: { queued, skipped, scanned: schedules.length, days, overdue, today: todayCount, upcoming },
+    message: `Đã tự đồng bộ ${maintenanceSync.createdSchedules} lịch, sinh ${orderGeneration.created} lệnh đến hạn và tạo ${queued} email nhắc lịch; bỏ qua ${skipped} thông báo đã có.`,
+    data: {
+      queued,
+      skipped,
+      scanned: schedules.length,
+      days,
+      overdue,
+      today: todayCount,
+      upcoming,
+      maintenanceSync,
+      orderGeneration,
+    },
   });
 }
 
