@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { OperationsHeader } from "@/components/ui/OperationsHeader";
 import { Icon } from "@/components/ui/Icon";
@@ -40,6 +41,8 @@ type PlanConfig = {
   updatedAt?: string | null;
 };
 
+type Horizon = "ALL" | "7" | "30" | "90";
+
 function intervalLabel(item: PlanItem) {
   if (item.daysAfterInstallation) return `${item.daysAfterInstallation} ngày sau lắp đặt`;
   if (item.monthsAfterInstallation) return `${item.monthsAfterInstallation} tháng sau lắp đặt`;
@@ -56,12 +59,26 @@ function formatDate(value: string | Date) {
   return new Date(value).toLocaleDateString("vi-VN");
 }
 
+function dayDiff(value: string | Date) {
+  const today = dateOnly(new Date()).getTime();
+  const due = dateOnly(value).getTime();
+  return Math.round((due - today) / 86_400_000);
+}
+
 function isReplacementTask(title: string) {
   return /thay|lõi|loi|màng|mang|vật liệu|vat lieu|bảo trì|bao tri/i.test(title);
 }
 
 function cloneItems(items: PlanItem[]) {
   return items.map((item) => ({ ...item }));
+}
+
+function dueText(value: string) {
+  const days = dayDiff(value);
+  if (days < 0) return `Quá hạn ${Math.abs(days)} ngày`;
+  if (days === 0) return "Đến hạn hôm nay";
+  if (days === 1) return "Còn 1 ngày";
+  return `Còn ${days} ngày`;
 }
 
 export default function MaintenancePlansPage() {
@@ -78,13 +95,15 @@ export default function MaintenancePlansPage() {
   const [draftItems, setDraftItems] = useState<PlanItem[]>([]);
   const [savingPlan, setSavingPlan] = useState(false);
   const [applyExisting, setApplyExisting] = useState(true);
+  const [search, setSearch] = useState("");
+  const [horizon, setHorizon] = useState<Horizon>("30");
   const automationRunning = useRef(false);
 
   const loadSchedules = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     if (!silent) setError("");
     try {
-      const response = await fetch("/api/maintenance-schedules?status=PENDING", { cache: "no-store" });
+      const response = await fetch("/api/maintenance-schedules?status=PENDING,ORDER_CREATED", { cache: "no-store" });
       const result = await response.json();
       if (!response.ok || !result.success) throw new Error(result.message || "Không tải được lịch bảo trì.");
       setSchedules(result.data || []);
@@ -111,7 +130,6 @@ export default function MaintenancePlansPage() {
 
   useEffect(() => {
     void Promise.all([loadSchedules(), loadPlans()]);
-
     const refresh = () => {
       if (document.visibilityState === "visible") {
         void loadSchedules(true);
@@ -149,7 +167,7 @@ export default function MaintenancePlansPage() {
         if (!orderResponse.ok || !orderResult.success) throw new Error(orderResult.message || "Không tự sinh được lệnh đến hạn.");
 
         if (!cancelled && ((syncResult.data?.createdSchedules || 0) > 0 || (orderResult.created || 0) > 0)) {
-          setNotice(`Tự động: sinh ${syncResult.data?.createdSchedules || 0} lịch và ${orderResult.created || 0} lệnh đến hạn.`);
+          setNotice(`Đã tự khôi phục ${syncResult.data?.createdSchedules || 0} lịch thiếu và tạo ${orderResult.created || 0} lệnh đến hạn.`);
         }
         if (!cancelled) await loadSchedules(true);
       } catch (value) {
@@ -283,20 +301,56 @@ export default function MaintenancePlansPage() {
     }
   }
 
-  const { dueNow, upcoming } = useMemo(() => {
-    const today = dateOnly(new Date());
-    const next7 = new Date(today);
-    next7.setDate(next7.getDate() + 7);
+  const replacementSchedules = useMemo(
+    () => schedules.filter((item) => isReplacementTask(item.title)),
+    [schedules],
+  );
 
-    const replacementSchedules = schedules.filter((item) => isReplacementTask(item.title));
+  const stats = useMemo(() => {
+    const today = dateOnly(new Date());
+    const next7 = new Date(today); next7.setDate(next7.getDate() + 7);
+    const next30 = new Date(today); next30.setDate(next30.getDate() + 30);
+
     return {
-      dueNow: replacementSchedules.filter((item) => dateOnly(item.dueDate) <= today),
-      upcoming: replacementSchedules.filter((item) => {
+      overdue: replacementSchedules.filter((item) => dateOnly(item.dueDate) < today).length,
+      today: replacementSchedules.filter((item) => dateOnly(item.dueDate).getTime() === today.getTime()).length,
+      next7: replacementSchedules.filter((item) => {
         const due = dateOnly(item.dueDate);
         return due > today && due <= next7;
-      }),
+      }).length,
+      next30: replacementSchedules.filter((item) => {
+        const due = dateOnly(item.dueDate);
+        return due > today && due <= next30;
+      }).length,
+      orderCreated: replacementSchedules.filter((item) => item.status === "ORDER_CREATED").length,
+      total: replacementSchedules.length,
     };
-  }, [schedules]);
+  }, [replacementSchedules]);
+
+  const urgentSchedules = useMemo(
+    () => replacementSchedules.filter((item) => dayDiff(item.dueDate) <= 0),
+    [replacementSchedules],
+  );
+
+  const filteredSchedules = useMemo(() => {
+    const key = search.trim().toLowerCase();
+    const maxDays = horizon === "ALL" ? Number.POSITIVE_INFINITY : Number(horizon);
+    return replacementSchedules.filter((item) => {
+      const days = dayDiff(item.dueDate);
+      if (days < 1 || days > maxDays) return false;
+      if (!key) return true;
+      const haystack = [
+        item.machineId,
+        item.machine.model,
+        item.title,
+        item.machine.customer?.name,
+        item.machine.customer?.phone,
+        item.machine.customer?.address,
+        item.serviceOrder?.orderCode,
+      ].filter(Boolean).join(" ").toLowerCase();
+      return haystack.includes(key);
+    });
+  }, [horizon, replacementSchedules, search]);
 
   const editingPlan = plans.find((plan) => plan.modelCode === editingModel) || null;
 
@@ -304,13 +358,13 @@ export default function MaintenancePlansPage() {
     <main className="min-h-screen bg-slate-100">
       <OperationsHeader
         title="Lịch thay lõi"
-        subtitle="Theo dõi lịch thực tế, tự sinh lệnh và chỉnh chu kỳ chăm sóc theo từng dòng máy"
+        subtitle="Theo dõi toàn bộ lịch mở, máy quá hạn, lệnh đã sinh và chu kỳ từng dòng máy"
         actions={<div className="mobile-stack-actions flex flex-wrap gap-2">
           <button type="button" onClick={() => void syncMissingSchedules()} disabled={syncing || generatingOrders} className="btn-primary px-4 py-2 text-sm font-black text-white disabled:opacity-50">
-            <Icon name={syncing ? "refresh" : "calendar"} size={17} /> {syncing ? "Đang đồng bộ..." : "Sinh lịch máy bị thiếu"}
+            <Icon name={syncing ? "refresh" : "calendar"} size={17} /> {syncing ? "Đang khôi phục..." : "Khôi phục lịch thiếu"}
           </button>
           <button type="button" onClick={() => void generateDueOrders()} disabled={generatingOrders || syncing} className="btn-secondary px-4 py-2 text-sm font-black disabled:opacity-50">
-            <Icon name={generatingOrders ? "refresh" : "activity"} size={17} /> {generatingOrders ? "Đang sinh lệnh..." : "Sinh lệnh đến hạn"}
+            <Icon name={generatingOrders ? "refresh" : "activity"} size={17} /> {generatingOrders ? "Đang tạo lệnh..." : "Tạo lệnh đến hạn"}
           </button>
           <button type="button" onClick={() => void Promise.all([loadSchedules(), loadPlans()])} className="icon-button" title="Tải lại lịch">
             <Icon name="refresh" size={18} />
@@ -319,42 +373,112 @@ export default function MaintenancePlansPage() {
       />
 
       <div className="mx-auto max-w-7xl space-y-5 p-3 sm:p-6">
-        {notice && <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-bold text-emerald-800">{notice}</div>}
-        {error && <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-bold text-red-700">{error}</div>}
+        {notice && <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-bold text-emerald-800">{notice}</div>}
+        {error && <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm font-bold text-red-700">{error}</div>}
+
+        <section className="overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-emerald-950 to-emerald-800 text-white shadow-xl shadow-slate-300/40">
+          <div className="grid gap-6 p-5 sm:p-7 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+            <div className="min-w-0">
+              <div className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1.5 text-xs font-black uppercase tracking-[.14em] text-emerald-100">
+                <Icon name="calendar" size={15}/> Lịch vận hành thực tế
+              </div>
+              <h1 className="mt-4 text-2xl font-black tracking-tight sm:text-3xl">Không bỏ sót máy đến kỳ thay lõi</h1>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-emerald-50/80">
+                Trang này hiển thị cả lịch đang chờ và lịch đã tự sinh lệnh dịch vụ, nên máy đến hạn sẽ không còn “biến mất” khỏi màn hình.
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-5 lg:min-w-[600px]">
+              <StatTile label="Quá hạn" value={stats.overdue} tone="rose"/>
+              <StatTile label="Hôm nay" value={stats.today} tone="amber"/>
+              <StatTile label="7 ngày tới" value={stats.next7} tone="blue"/>
+              <StatTile label="Đã tạo lệnh" value={stats.orderCreated} tone="emerald"/>
+              <StatTile label="Tổng lịch mở" value={stats.total} tone="slate"/>
+            </div>
+          </div>
+        </section>
+
+        <section className="grid gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(360px,.8fr)]">
+          <article className="surface-card overflow-hidden">
+            <div className="border-b border-slate-100 p-4 sm:p-5">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                <div>
+                  <p className="eyebrow">Ưu tiên xử lý</p>
+                  <h2 className="mt-1 text-xl font-black text-slate-950">Đến hạn và quá hạn</h2>
+                  <p className="mt-1 text-sm leading-6 text-slate-500">Lịch đã tạo lệnh vẫn giữ ở đây để Admin theo dõi xuyên suốt.</p>
+                </div>
+                <span className="rounded-full bg-rose-100 px-3 py-1.5 text-xs font-black text-rose-700">{urgentSchedules.length} việc cần chú ý</span>
+              </div>
+            </div>
+            {loading ? (
+              <LoadingBlock text="Đang tải lịch thay lõi..."/>
+            ) : urgentSchedules.length ? (
+              <div className="divide-y divide-slate-100">
+                {urgentSchedules.map((item) => (
+                  <ScheduleRow key={item.id} item={item} saving={savingId === item.id} onSave={saveDueDate} urgent />
+                ))}
+              </div>
+            ) : (
+              <EmptyCalendar
+                title="Không có lịch quá hạn"
+                description={stats.total ? "Các lịch thay lõi hiện tại đều đang ở tương lai." : "Chưa tìm thấy lịch thay lõi. Bấm “Khôi phục lịch thiếu” để hệ thống tạo lại từ ngày lắp đặt."}
+                action={!stats.total ? <button type="button" onClick={() => void syncMissingSchedules()} disabled={syncing} className="btn-primary px-4 py-3 text-sm font-black text-white disabled:opacity-50"><Icon name="refresh" size={16}/>Khôi phục lịch ngay</button> : undefined}
+              />
+            )}
+          </article>
+
+          <aside className="surface-card overflow-hidden">
+            <div className="border-b border-slate-100 p-4 sm:p-5">
+              <p className="eyebrow">Tổng quan 30 ngày</p>
+              <h2 className="mt-1 text-xl font-black text-slate-950">Khối lượng sắp tới</h2>
+            </div>
+            <div className="grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-1">
+              <SummaryBox icon="clock" label="Trong 7 ngày" value={stats.next7} note="Cần chuẩn bị khách hàng và vật tư"/>
+              <SummaryBox icon="calendar" label="Trong 30 ngày" value={stats.next30} note="Tổng lịch thay lõi sắp tới"/>
+              <SummaryBox icon="activity" label="Đã sinh lệnh" value={stats.orderCreated} note="Có lệnh dịch vụ đang theo dõi"/>
+              <SummaryBox icon="wrench" label="Lịch mở toàn bộ" value={stats.total} note="PENDING + ORDER_CREATED"/>
+            </div>
+          </aside>
+        </section>
 
         <section className="surface-card overflow-hidden">
-          <div className="flex flex-col gap-3 border-b border-slate-100 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
-            <div className="min-w-0">
-              <p className="eyebrow">Theo dõi thực tế</p>
-              <h2 className="mt-1 text-xl font-black text-slate-950">Máy cần thay lõi / bảo trì</h2>
-              <p className="mt-1 text-sm leading-6 text-slate-500">Quá hạn và hôm nay nằm bên trái; lịch trong 7 ngày tới nằm bên phải. Dữ liệu tự làm mới.</p>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <span className="status-pill status-rose">Đến hạn: {dueNow.length}</span>
-              <span className="status-pill status-slate">7 ngày tới: {upcoming.length}</span>
+          <div className="border-b border-slate-100 p-4 sm:p-5">
+            <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+              <div>
+                <p className="eyebrow">Lịch sắp tới</p>
+                <h2 className="mt-1 text-xl font-black text-slate-950">Danh sách thay lõi theo thời gian</h2>
+                <p className="mt-1 text-sm leading-6 text-slate-500">Hiển thị toàn bộ lịch tương lai thay vì chỉ 7 ngày như trước.</p>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-[minmax(240px,1fr)_auto]">
+                <label className="relative min-w-0">
+                  <Icon name="search" size={17} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
+                  <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Tìm mã máy, khách, SĐT, nội dung..." className="w-full pl-10"/>
+                </label>
+                <div className="grid grid-cols-4 gap-1 rounded-xl bg-slate-100 p-1">
+                  {([
+                    ["7", "7N"],
+                    ["30", "30N"],
+                    ["90", "90N"],
+                    ["ALL", "Tất cả"],
+                  ] as [Horizon, string][]).map(([value, label]) => (
+                    <button key={value} type="button" onClick={() => setHorizon(value)} className={`rounded-lg px-3 py-2 text-xs font-black transition ${horizon === value ? "bg-white text-emerald-700 shadow-sm" : "text-slate-500"}`}>{label}</button>
+                  ))}
+                </div>
+              </div>
             </div>
           </div>
 
-          {loading ? (
-            <div className="p-6 text-sm font-semibold text-slate-500">Đang tải máy đến hạn...</div>
-          ) : (
-            <div className="grid gap-0 xl:grid-cols-2 xl:divide-x xl:divide-slate-100">
-              <div className="p-3 sm:p-5">
-                <h3 className="mb-3 font-black text-red-700">CẦN XỬ LÝ NGAY</h3>
-                <div className="space-y-3">
-                  {dueNow.map((item) => <ScheduleCard key={item.id} item={item} tone="due" saving={savingId === item.id} onSave={saveDueDate} />)}
-                  {dueNow.length === 0 && <p className="rounded-xl border border-dashed p-5 text-sm text-slate-500">Hiện chưa có máy đến hạn thay lõi.</p>}
-                </div>
-              </div>
-
-              <div className="p-3 sm:p-5">
-                <h3 className="mb-3 font-black text-amber-700">SẮP ĐẾN HẠN TRONG 7 NGÀY</h3>
-                <div className="space-y-3">
-                  {upcoming.map((item) => <ScheduleCard key={item.id} item={item} tone="upcoming" saving={savingId === item.id} onSave={saveDueDate} />)}
-                  {upcoming.length === 0 && <p className="rounded-xl border border-dashed p-5 text-sm text-slate-500">Không có máy sắp đến hạn trong 7 ngày tới.</p>}
-                </div>
-              </div>
+          {loading ? <LoadingBlock text="Đang tải lịch sắp tới..."/> : filteredSchedules.length ? (
+            <div className="divide-y divide-slate-100">
+              {filteredSchedules.map((item) => (
+                <ScheduleRow key={item.id} item={item} saving={savingId === item.id} onSave={saveDueDate} />
+              ))}
             </div>
+          ) : (
+            <EmptyCalendar
+              title={stats.total ? "Không có lịch phù hợp bộ lọc" : "Chưa có lịch thay lõi"}
+              description={stats.total ? "Thử đổi khoảng thời gian hoặc từ khóa tìm kiếm." : "Hệ thống sẽ khôi phục lịch từ ngày lắp đặt và đúng chu kỳ của model."}
+              action={!stats.total ? <button type="button" onClick={() => void syncMissingSchedules()} disabled={syncing} className="btn-primary px-4 py-3 text-sm font-black text-white disabled:opacity-50"><Icon name="refresh" size={16}/>Khôi phục lịch thiếu</button> : undefined}
+            />
           )}
         </section>
 
@@ -364,11 +488,9 @@ export default function MaintenancePlansPage() {
               <div>
                 <p className="section-kicker">Chỉnh chu kỳ</p>
                 <h2 className="page-section-title">{editingPlan.name}</h2>
-                <p className="page-section-subtitle">Thay đổi này được lưu thành phiên bản cấu hình mới, không mất lịch sử cấu hình cũ.</p>
+                <p className="page-section-subtitle">Lưu cấu hình mới và có thể áp dụng ngay cho lịch tương lai của máy hiện có.</p>
               </div>
-              <button type="button" onClick={() => { setEditingModel(""); setDraftItems([]); }} className="btn-secondary px-4 py-2 text-sm font-black">
-                <Icon name="x" size={16}/>Đóng
-              </button>
+              <button type="button" onClick={() => { setEditingModel(""); setDraftItems([]); }} className="btn-secondary px-4 py-2 text-sm font-black"><Icon name="x" size={16}/>Đóng</button>
             </div>
             <div className="space-y-3 p-3 sm:p-5">
               {draftItems.map((item, index) => {
@@ -377,136 +499,142 @@ export default function MaintenancePlansPage() {
                 return (
                   <article key={index} className="rounded-2xl border border-slate-200 bg-slate-50 p-3 sm:p-4">
                     <div className="grid min-w-0 gap-3 lg:grid-cols-[minmax(0,1fr)_120px_120px_auto_auto] lg:items-end">
-                      <label className="min-w-0">
-                        <span className="field-label">Nội dung mốc {index + 1}</span>
-                        <input value={item.title} onChange={(event) => updateDraft(index, { title: event.target.value })} className="w-full min-w-0" />
-                      </label>
-                      <label>
-                        <span className="field-label">Đơn vị</span>
-                        <select value={usesDays ? "days" : "months"} onChange={(event) => changeUnit(index, event.target.value as "days" | "months")} className="w-full">
-                          <option value="days">Ngày</option>
-                          <option value="months">Tháng</option>
-                        </select>
-                      </label>
-                      <label>
-                        <span className="field-label">Sau lắp đặt</span>
-                        <input
-                          type="number"
-                          min={1}
-                          max={usesDays ? 3650 : 120}
-                          value={value}
-                          onChange={(event) => updateDraft(index, usesDays
-                            ? { daysAfterInstallation: Math.max(1, Number(event.target.value) || 1) }
-                            : { monthsAfterInstallation: Math.max(1, Number(event.target.value) || 1) })}
-                          className="w-full"
-                        />
-                      </label>
-                      <label className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700">
-                        <input type="checkbox" checked={Boolean(item.customerCare)} onChange={(event) => updateDraft(index, { customerCare: event.target.checked })} />
-                        Chăm sóc
-                      </label>
-                      <button type="button" disabled={draftItems.length <= 1} onClick={() => setDraftItems((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="ghost-danger disabled:opacity-40">
-                        <Icon name="trash" size={16}/>Bỏ
-                      </button>
+                      <label className="min-w-0"><span className="field-label">Nội dung mốc {index + 1}</span><input value={item.title} onChange={(event) => updateDraft(index, { title: event.target.value })} className="w-full min-w-0"/></label>
+                      <label><span className="field-label">Đơn vị</span><select value={usesDays ? "days" : "months"} onChange={(event) => changeUnit(index, event.target.value as "days" | "months")} className="w-full"><option value="days">Ngày</option><option value="months">Tháng</option></select></label>
+                      <label><span className="field-label">Sau lắp đặt</span><input type="number" min={1} max={usesDays ? 3650 : 120} value={value} onChange={(event) => updateDraft(index, usesDays ? { daysAfterInstallation: Math.max(1, Number(event.target.value) || 1) } : { monthsAfterInstallation: Math.max(1, Number(event.target.value) || 1) })} className="w-full"/></label>
+                      <label className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700"><input type="checkbox" checked={Boolean(item.customerCare)} onChange={(event) => updateDraft(index, { customerCare: event.target.checked })}/>Chăm sóc</label>
+                      <button type="button" disabled={draftItems.length <= 1} onClick={() => setDraftItems((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="ghost-danger disabled:opacity-40"><Icon name="trash" size={16}/>Bỏ</button>
                     </div>
                   </article>
                 );
               })}
-              <button type="button" onClick={addMilestone} className="btn-secondary w-full px-4 py-3 text-sm font-black sm:w-auto">
-                <Icon name="plus" size={16}/>Thêm mốc
-              </button>
+              <button type="button" onClick={addMilestone} className="btn-secondary w-full px-4 py-3 text-sm font-black sm:w-auto"><Icon name="plus" size={16}/>Thêm mốc</button>
               <label className="flex items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm leading-6 text-emerald-900">
-                <input type="checkbox" checked={applyExisting} onChange={(event) => setApplyExisting(event.target.checked)} className="mt-1 shrink-0" />
-                <span><strong>Áp dụng cho lịch tương lai của máy đang có.</strong> Các lịch đã tạo lệnh hoặc đã xử lý được giữ nguyên; chỉ lịch PENDING trong tương lai được tính lại.</span>
+                <input type="checkbox" checked={applyExisting} onChange={(event) => setApplyExisting(event.target.checked)} className="mt-1 shrink-0"/>
+                <span><strong>Áp dụng cho lịch tương lai của máy đang có.</strong> Lịch đã sinh lệnh hoặc đã xử lý được giữ nguyên.</span>
               </label>
               <div className="mobile-stack-actions flex flex-wrap justify-end gap-2 border-t border-slate-100 pt-4">
                 <button type="button" onClick={() => { setEditingModel(""); setDraftItems([]); }} className="btn-secondary px-5 py-3 font-black">Hủy</button>
-                <button type="button" disabled={savingPlan} onClick={() => void savePlan()} className="btn-primary px-5 py-3 font-black text-white disabled:opacity-50">
-                  <Icon name={savingPlan ? "refresh" : "check"} size={17}/>{savingPlan ? "Đang lưu..." : "Lưu chu kỳ"}
-                </button>
+                <button type="button" disabled={savingPlan} onClick={() => void savePlan()} className="btn-primary px-5 py-3 font-black text-white disabled:opacity-50"><Icon name={savingPlan ? "refresh" : "check"} size={17}/>{savingPlan ? "Đang lưu..." : "Lưu chu kỳ"}</button>
               </div>
             </div>
           </section>
         )}
 
-        <section className="surface-card p-4 sm:p-6">
-          <p className="eyebrow">KOSOVOTA · Định mức bảo trì</p>
-          <h2 className="mt-2 text-xl font-black text-slate-950 sm:text-2xl">Chu kỳ chăm sóc có thể chỉnh trực tiếp</h2>
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
-            Máy mới sẽ dùng cấu hình mới nhất. Khi cần, có thể áp dụng cấu hình mới cho các lịch tương lai của máy đang hoạt động.
-          </p>
-        </section>
+        <section className="surface-card overflow-hidden">
+          <div className="border-b border-slate-100 p-4 sm:p-5">
+            <p className="eyebrow">Cấu hình chu kỳ</p>
+            <h2 className="mt-1 text-xl font-black text-slate-950">Chu kỳ theo từng dòng máy</h2>
+            <p className="mt-1 text-sm leading-6 text-slate-500">Phần này chỉ dùng để chỉnh định mức. Lịch thực tế của từng máy nằm ở phía trên.</p>
+          </div>
 
-        {plansLoading ? <div className="surface-card p-6 text-sm font-semibold text-slate-500">Đang tải cấu hình chu kỳ...</div> : (
-          <section className="grid min-w-0 gap-4 xl:grid-cols-2">
-            {plans.map((plan, planIndex) => (
-              <article key={plan.modelCode} className="surface-card min-w-0 overflow-hidden">
-                <div className="border-b border-slate-100 p-4 sm:p-5">
-                  <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          {plansLoading ? <LoadingBlock text="Đang tải cấu hình chu kỳ..."/> : (
+            <div className="grid min-w-0 gap-4 p-3 sm:p-5 xl:grid-cols-2">
+              {plans.map((plan) => (
+                <article key={plan.modelCode} className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white">
+                  <div className="flex min-w-0 flex-col gap-3 border-b border-slate-100 p-4 sm:flex-row sm:items-start sm:justify-between">
                     <div className="min-w-0">
-                      <p className="text-xs font-black uppercase tracking-wider text-emerald-700">Bảng {planIndex + 1}</p>
-                      <h2 className="mt-1 break-words text-lg font-black text-slate-950">{plan.name}</h2>
-                      <div className="mt-2 flex flex-wrap items-center gap-2 text-xs font-bold text-slate-500">
-                        <span>Model: {plan.modelCode}</span>
-                        <span className={plan.source === "custom" ? "status-pill status-green" : "status-pill status-slate"}>
-                          {plan.source === "custom" ? "Đã tùy chỉnh" : "Mặc định"}
-                        </span>
-                        {plan.updatedAt && <span>Cập nhật {formatDate(plan.updatedAt)}</span>}
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-black uppercase tracking-wide text-emerald-700">{plan.category}</span>
+                        <span className={plan.source === "custom" ? "status-pill status-green" : "status-pill status-slate"}>{plan.source === "custom" ? "Đã tùy chỉnh" : "Mặc định"}</span>
                       </div>
+                      <h3 className="mt-2 break-words text-base font-black text-slate-950">{plan.name}</h3>
+                      <p className="mt-1 text-xs font-bold text-slate-500">{plan.modelCode}{plan.updatedAt ? ` · cập nhật ${formatDate(plan.updatedAt)}` : ""}</p>
                     </div>
-                    <button type="button" onClick={() => startEdit(plan)} className="btn-secondary shrink-0 px-4 py-2 text-sm font-black">
-                      <Icon name="settings" size={16}/>Sửa chu kỳ
-                    </button>
+                    <button type="button" onClick={() => startEdit(plan)} className="btn-secondary shrink-0 px-4 py-2 text-sm font-black"><Icon name="settings" size={16}/>Sửa chu kỳ</button>
                   </div>
-                </div>
-
-                <div className="divide-y divide-slate-100">
-                  {plan.items.map((item, index) => (
-                    <div key={`${plan.modelCode}-${index}`} className="grid min-w-0 gap-2 p-4 sm:grid-cols-[42px_170px_minmax(0,1fr)_auto] sm:items-center">
-                      <span className="grid h-8 w-8 place-items-center rounded-lg bg-slate-100 text-xs font-black text-slate-600">{index + 1}</span>
-                      <p className="text-sm font-bold text-slate-600">{intervalLabel(item)}</p>
-                      <p className="min-w-0 break-words text-sm font-black text-slate-950">{item.title}</p>
-                      <span className={item.customerCare ? "status-pill status-slate" : "status-pill status-green"}>
-                        {item.customerCare ? "Chăm sóc" : "Thay lõi / bảo trì"}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </article>
-            ))}
-          </section>
-        )}
+                  <div className="divide-y divide-slate-100">
+                    {plan.items.map((item, index) => (
+                      <div key={`${plan.modelCode}-${index}`} className="grid min-w-0 gap-2 p-3 sm:grid-cols-[36px_145px_minmax(0,1fr)_auto] sm:items-center sm:p-4">
+                        <span className="grid h-8 w-8 place-items-center rounded-lg bg-slate-100 text-xs font-black text-slate-600">{index + 1}</span>
+                        <p className="text-xs font-bold text-slate-500 sm:text-sm">{intervalLabel(item)}</p>
+                        <p className="min-w-0 break-words text-sm font-black text-slate-950">{item.title}</p>
+                        <span className={item.customerCare ? "status-pill status-slate" : "status-pill status-green"}>{item.customerCare ? "Chăm sóc" : "Thay lõi"}</span>
+                      </div>
+                    ))}
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
       </div>
     </main>
   );
 }
 
-function ScheduleCard({ item, tone, saving, onSave }: {
+function StatTile({ label, value, tone }: { label: string; value: number; tone: "rose" | "amber" | "blue" | "emerald" | "slate" }) {
+  const classes = {
+    rose: "border-rose-300/25 bg-rose-400/10 text-rose-100",
+    amber: "border-amber-300/25 bg-amber-300/10 text-amber-100",
+    blue: "border-sky-300/25 bg-sky-300/10 text-sky-100",
+    emerald: "border-emerald-300/25 bg-emerald-300/10 text-emerald-100",
+    slate: "border-white/15 bg-white/10 text-white",
+  }[tone];
+  return <div className={`rounded-2xl border p-3 ${classes}`}><p className="text-2xl font-black">{value}</p><p className="mt-1 text-[11px] font-black uppercase tracking-wide opacity-80">{label}</p></div>;
+}
+
+function SummaryBox({ icon, label, value, note }: { icon: "clock" | "calendar" | "activity" | "wrench"; label: string; value: number; note: string }) {
+  return <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4"><span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-white text-emerald-700 shadow-sm"><Icon name={icon} size={20}/></span><div className="min-w-0"><div className="flex items-baseline gap-2"><p className="text-2xl font-black text-slate-950">{value}</p><p className="text-sm font-black text-slate-700">{label}</p></div><p className="mt-1 text-xs leading-5 text-slate-500">{note}</p></div></div>;
+}
+
+function LoadingBlock({ text }: { text: string }) {
+  return <div className="flex items-center justify-center gap-3 p-10 text-sm font-bold text-slate-500"><span className="animate-spin text-emerald-600"><Icon name="refresh" size={20}/></span>{text}</div>;
+}
+
+function EmptyCalendar({ title, description, action }: { title: string; description: string; action?: React.ReactNode }) {
+  return <div className="grid min-h-[240px] place-items-center p-6 text-center"><div className="max-w-md"><span className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-emerald-50 text-emerald-700"><Icon name="calendar" size={25}/></span><h3 className="mt-4 text-lg font-black text-slate-950">{title}</h3><p className="mt-2 text-sm leading-6 text-slate-500">{description}</p>{action && <div className="mt-4 flex justify-center">{action}</div>}</div></div>;
+}
+
+function ScheduleRow({ item, saving, onSave, urgent = false }: {
   item: Schedule;
-  tone: "due" | "upcoming";
   saving: boolean;
   onSave: (schedule: Schedule, dueDate: string) => Promise<void>;
+  urgent?: boolean;
 }) {
   const [dueDate, setDueDate] = useState(() => new Date(item.dueDate).toISOString().slice(0, 10));
+  const hasOrder = Boolean(item.serviceOrder);
+  const days = dayDiff(item.dueDate);
+  const tone = days < 0 ? "rose" : days === 0 ? "amber" : days <= 7 ? "blue" : "slate";
+  const toneClasses = {
+    rose: "bg-rose-50 text-rose-700 border-rose-200",
+    amber: "bg-amber-50 text-amber-700 border-amber-200",
+    blue: "bg-blue-50 text-blue-700 border-blue-200",
+    slate: "bg-slate-100 text-slate-600 border-slate-200",
+  }[tone];
+
   return (
-    <article className={`min-w-0 rounded-2xl border p-3 sm:p-4 ${tone === "due" ? "border-red-200 bg-red-50/60" : "border-amber-200 bg-amber-50/60"}`}>
-      <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0">
-          <p className="break-all font-black text-slate-950">{item.machineId}</p>
-          <p className="mt-1 break-words text-sm text-slate-600">{item.machine.model} · {item.machine.customer?.name || "Chưa có khách hàng"}</p>
-          {item.machine.customer?.phone && <p className="mt-1 text-sm font-bold text-slate-700">SĐT: {item.machine.customer.phone}</p>}
+    <article className={`grid min-w-0 gap-4 p-4 transition hover:bg-slate-50/70 sm:p-5 ${urgent ? "lg:grid-cols-[minmax(0,1fr)_auto]" : "lg:grid-cols-[minmax(0,1fr)_auto]"}`}>
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className={`rounded-full border px-2.5 py-1 text-[11px] font-black ${toneClasses}`}>{dueText(item.dueDate)}</span>
+          <span className={hasOrder ? "status-pill status-green" : "status-pill status-slate"}>{hasOrder ? `Đã tạo lệnh ${item.serviceOrder?.orderCode || ""}` : "Chờ xử lý"}</span>
+          <span className="text-xs font-bold text-slate-400">{formatDate(item.dueDate)}</span>
         </div>
-        <span className={`status-pill w-fit ${tone === "due" ? "status-rose" : "status-slate"}`}>{formatDate(item.dueDate)}</span>
+
+        <div className="mt-3 grid min-w-0 gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+          <div className="min-w-0">
+            <p className="break-all text-sm font-black text-emerald-700">{item.machineId}</p>
+            <h3 className="mt-1 break-words text-base font-black text-slate-950">{item.title}</h3>
+            <p className="mt-1 break-words text-sm text-slate-500">{item.machine.model}{item.machine.provinceCode ? ` · tỉnh ${item.machine.provinceCode}` : ""}</p>
+          </div>
+          <div className="min-w-0 rounded-xl bg-slate-50 p-3 text-sm leading-6 text-slate-600">
+            <p className="break-words"><strong className="text-slate-800">Khách:</strong> {item.machine.customer?.name || "Chưa có khách hàng"}</p>
+            {item.machine.customer?.phone && <p><strong className="text-slate-800">SĐT:</strong> <a href={`tel:${item.machine.customer.phone}`} className="font-bold text-emerald-700">{item.machine.customer.phone}</a></p>}
+            {item.machine.customer?.address && <p className="break-words"><strong className="text-slate-800">Địa chỉ:</strong> {item.machine.customer.address}</p>}
+          </div>
+        </div>
       </div>
-      <p className={`mt-3 break-words font-bold ${tone === "due" ? "text-red-800" : "text-amber-800"}`}>{item.title}</p>
-      <div className="mt-3 grid min-w-0 gap-2 border-t border-black/5 pt-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
-        <label className="min-w-0 text-xs font-black text-slate-600">
-          Điều chỉnh ngày đến hạn
-          <input type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} className="form-input mt-1 w-full min-w-0 max-w-full" />
-        </label>
-        <button type="button" disabled={saving || !dueDate} onClick={() => void onSave(item, dueDate)} className="btn-secondary px-4 py-3 text-sm font-black disabled:opacity-50">
-          {saving ? "Đang lưu..." : "Lưu hạn mới"}
-        </button>
+
+      <div className="flex min-w-0 flex-col gap-2 lg:w-60 lg:justify-center">
+        {hasOrder && item.serviceOrder ? (
+          <Link href={`/admin/service-orders/${item.serviceOrder.id}`} className="btn-primary w-full px-4 py-3 text-sm font-black text-white"><Icon name="eye" size={16}/>Xem lệnh dịch vụ</Link>
+        ) : (
+          <>
+            <label className="min-w-0"><span className="field-label">Điều chỉnh hạn</span><input type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} className="w-full min-w-0"/></label>
+            <button type="button" disabled={saving || !dueDate} onClick={() => void onSave(item, dueDate)} className="btn-secondary w-full px-4 py-3 text-sm font-black disabled:opacity-50">{saving ? "Đang lưu..." : "Lưu ngày mới"}</button>
+          </>
+        )}
       </div>
     </article>
   );
