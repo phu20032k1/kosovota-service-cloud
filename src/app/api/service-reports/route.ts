@@ -19,9 +19,10 @@ export async function POST(request: NextRequest) {
     const serviceType = typeof body.serviceType === "string" ? body.serviceType.trim() : "";
     const oldCorePhoto = typeof body.oldCorePhoto === "string" ? body.oldCorePhoto.trim() : "";
     const newCorePhoto = typeof body.newCorePhoto === "string" ? body.newCorePhoto.trim() : "";
+    const finalPhoto = typeof body.finalPhoto === "string" ? body.finalPhoto.trim() : "";
     const signature = typeof body.signature === "string" ? body.signature.trim() : "";
-    if (!machineId || !dealerCode || !serviceType || !oldCorePhoto || !newCorePhoto || !signature) {
-      return NextResponse.json({ success: false, message: "Thiếu mã máy, đại lý, dịch vụ, hai ảnh lõi hoặc chữ ký." }, { status: 400 });
+    if (!machineId || !dealerCode || !serviceType || !oldCorePhoto || !newCorePhoto || !finalPhoto || !signature) {
+      return NextResponse.json({ success: false, message: "Cần đủ ảnh lõi cũ, ảnh lõi mới, ảnh toàn cảnh sau hoàn thành và chữ ký khách hàng." }, { status: 400 });
     }
     const orderId = typeof body.orderId === "string" ? body.orderId.trim() : "";
     const [machine, dealer, order] = await Promise.all([
@@ -63,7 +64,7 @@ export async function POST(request: NextRequest) {
           dealerCode, serviceType,
           products: typeof body.products === "string" ? body.products || null : null,
           oldCorePhoto, newCorePhoto,
-          finalPhoto: typeof body.finalPhoto === "string" ? body.finalPhoto || null : null,
+          finalPhoto,
           signature, note: typeof body.note === "string" ? body.note || null : null,
         },
       });

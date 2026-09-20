@@ -116,6 +116,7 @@ export default function AgentPortalPage() {
       const result = await response.json();
       if (!response.ok || !result.success) throw new Error(result.message || "Tải ảnh thất bại");
       setReport((current) => ({ ...current, [field]: result.url }));
+      setReportError("");
     } catch (error) {
       setNotice({ kind: "error", text: error instanceof Error ? error.message : "Tải ảnh thất bại" });
     } finally { setUploading(false); }
@@ -124,8 +125,8 @@ export default function AgentPortalPage() {
   async function submitReport() {
     if (!reportOrder || submittingReport) return;
     setReportError("");
-    if (!report.oldCorePhoto || !report.newCorePhoto || !report.signature.trim()) {
-      setReportError("Cần ảnh lõi cũ, ảnh lõi mới và chữ ký khách hàng trước khi gửi.");
+    if (!report.oldCorePhoto || !report.newCorePhoto || !report.finalPhoto || !report.signature.trim()) {
+      setReportError("Cần đủ ảnh lõi cũ, ảnh lõi mới, ảnh toàn cảnh sau hoàn thành và chữ ký khách hàng trước khi gửi.");
       return;
     }
     setSubmittingReport(true);
@@ -259,7 +260,7 @@ export default function AgentPortalPage() {
             <p className="text-xs text-slate-500">Khi gửi báo cáo, hệ thống kiểm tra tồn rồi tự tạo phiếu xuất gắn với lệnh này.</p>
           </div>
         </Field>
-        <Field label="Mô tả sản phẩm/vật tư khác"><input value={report.products} onChange={(e) => setReport((c) => ({ ...c, products: e.target.value }))} placeholder="Chỉ nhập khi có vật tư chưa nằm trong kho" className="w-full rounded-xl border p-3" /></Field><UploadField label="Ảnh lõi cũ *" value={report.oldCorePhoto} onChange={(file) => uploadFile(file, "oldCorePhoto")} /><UploadField label="Ảnh lõi mới *" value={report.newCorePhoto} onChange={(file) => uploadFile(file, "newCorePhoto")} /><UploadField label="Ảnh toàn cảnh sau hoàn thành" value={report.finalPhoto} onChange={(file) => uploadFile(file, "finalPhoto")} /><Field label="Xác nhận chữ ký khách hàng *"><input required value={report.signature} onChange={(e) => setReport((c) => ({ ...c, signature: e.target.value }))} placeholder="Nhập họ tên khách hàng đã xác nhận" className="w-full rounded-xl border p-3" /></Field><Field label="Ghi chú"><textarea value={report.note} onChange={(e) => setReport((c) => ({ ...c, note: e.target.value }))} className="w-full rounded-xl border p-3" /></Field>{reportError && <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm font-bold text-rose-700">{reportError}</div>}<button type="button" disabled={uploading || submittingReport} onClick={submitReport} className="w-full rounded-xl bg-emerald-600 p-3 font-black text-white disabled:opacity-50">{uploading ? "Đang tải ảnh..." : submittingReport ? "Đang gửi báo cáo..." : "Gửi báo cáo hoàn thành"}</button></div></Modal>}
+        <Field label="Mô tả sản phẩm/vật tư khác"><input value={report.products} onChange={(e) => setReport((c) => ({ ...c, products: e.target.value }))} placeholder="Chỉ nhập khi có vật tư chưa nằm trong kho" className="w-full rounded-xl border p-3" /></Field><UploadField label="Ảnh lõi cũ *" value={report.oldCorePhoto} onChange={(file) => uploadFile(file, "oldCorePhoto")} /><UploadField label="Ảnh lõi mới *" value={report.newCorePhoto} onChange={(file) => uploadFile(file, "newCorePhoto")} /><UploadField label="Ảnh toàn cảnh sau hoàn thành *" value={report.finalPhoto} onChange={(file) => uploadFile(file, "finalPhoto")} /><Field label="Xác nhận chữ ký khách hàng *"><input required value={report.signature} onChange={(e) => { setReport((c) => ({ ...c, signature: e.target.value })); setReportError(""); }} placeholder="Nhập họ tên khách hàng đã xác nhận" className="w-full rounded-xl border p-3" /></Field><Field label="Ghi chú"><textarea value={report.note} onChange={(e) => setReport((c) => ({ ...c, note: e.target.value }))} className="w-full rounded-xl border p-3" /></Field>{reportError && <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm font-bold text-rose-700">{reportError}</div>}<button type="button" disabled={uploading || submittingReport} onClick={submitReport} className="w-full rounded-xl bg-emerald-600 p-3 font-black text-white disabled:opacity-50">{uploading ? "Đang tải ảnh..." : submittingReport ? "Đang gửi báo cáo..." : "Gửi báo cáo hoàn thành"}</button></div></Modal>}
     </main>
   );
 }

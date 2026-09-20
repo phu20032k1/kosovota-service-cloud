@@ -152,6 +152,7 @@ export default function ServiceReportPage() {
 
     isDrawingRef.current = true;
     setSignatureDrawn(true);
+    setFormError("");
   }
 
   function drawSignature(
@@ -255,6 +256,7 @@ export default function ServiceReportPage() {
     file,
   },
 }));
+    setFormError("");
   }
 
   function handleSignatureUpload(
@@ -271,6 +273,7 @@ export default function ServiceReportPage() {
       preview: URL.createObjectURL(file),
       file,
     });
+    setFormError("");
   }
 
   async function uploadFile(file: File) {
@@ -308,6 +311,12 @@ async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     return;
   }
 
+  if (!photos.completedMachine) {
+    setFormError("Thiếu ảnh toàn cảnh sau hoàn thành. Hãy chụp hoặc chọn ảnh trước khi gửi.");
+    document.getElementById("service-report-photos")?.scrollIntoView({ behavior: "smooth", block: "center" });
+    return;
+  }
+
   if (!signatureDrawn && !signatureUpload) {
     setFormError("Khách hàng cần ký trực tiếp hoặc tải ảnh chữ ký trước khi gửi.");
     return;
@@ -318,9 +327,7 @@ async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     const oldCorePhoto = await uploadFile(photos.oldFilter.file);
     const newCorePhoto = await uploadFile(photos.newFilter.file);
 
-    const finalPhoto = photos.completedMachine
-      ? await uploadFile(photos.completedMachine.file)
-      : null;
+    const finalPhoto = await uploadFile(photos.completedMachine.file);
 
     let signature = "";
 

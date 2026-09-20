@@ -79,9 +79,10 @@ export async function POST(request: NextRequest, { params }: Params) {
 
     const oldCorePhoto = typeof body.oldCorePhoto === "string" ? body.oldCorePhoto.trim() : "";
     const newCorePhoto = typeof body.newCorePhoto === "string" ? body.newCorePhoto.trim() : "";
+    const finalPhoto = typeof body.finalPhoto === "string" ? body.finalPhoto.trim() : "";
     const signature = typeof body.signature === "string" ? body.signature.trim() : "";
-    if (!oldCorePhoto || !newCorePhoto || !signature) {
-      return NextResponse.json({ success: false, message: "Cần ảnh lõi cũ, ảnh lõi mới và chữ ký khách hàng." }, { status: 400 });
+    if (!oldCorePhoto || !newCorePhoto || !finalPhoto || !signature) {
+      return NextResponse.json({ success: false, message: "Cần đủ ảnh lõi cũ, ảnh lõi mới, ảnh toàn cảnh sau hoàn thành và chữ ký khách hàng." }, { status: 400 });
     }
     if (materials.length && !order.dealerId) {
       return NextResponse.json({ success: false, message: "Lệnh chưa được gắn đại lý nên chưa thể xuất vật tư." }, { status: 400 });
@@ -175,7 +176,7 @@ export async function POST(request: NextRequest, { params }: Params) {
           products,
           oldCorePhoto,
           newCorePhoto,
-          finalPhoto: typeof body.finalPhoto === "string" ? body.finalPhoto || null : null,
+          finalPhoto,
           signature,
           note: typeof body.note === "string" ? body.note || null : null,
         },
