@@ -8,8 +8,8 @@ export async function POST(request: NextRequest) {
   if (!auth) return NextResponse.json({ success: false, message: "Chỉ Admin được khôi phục dữ liệu." }, { status: 403 });
 
   const body = await request.json().catch(() => ({}));
-  const raw = Array.isArray(body.ids) ? body.ids : [];
-  const ids = Array.from(new Set(raw.map((value: unknown) => String(value || "").trim()).filter(Boolean))).slice(0, MAX_BULK);
+  const raw: unknown[] = Array.isArray(body.ids) ? body.ids : [];
+  const ids: string[] = Array.from(new Set(raw.map((value) => typeof value === "string" ? value.trim() : "").filter((value): value is string => Boolean(value)))).slice(0, MAX_BULK);
   if (!ids.length) return NextResponse.json({ success: false, message: "Chưa chọn dữ liệu cần khôi phục." }, { status: 400 });
 
   let restored = 0;
