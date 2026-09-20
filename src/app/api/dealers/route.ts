@@ -9,7 +9,7 @@ import { POST as registerDealer } from "@/app/api/dealers/register/route";
 
 const DEALER_STATUSES = ["PENDING", "APPROVED", "REJECTED", "SUSPENDED"] as const;
 type DealerStatus = (typeof DEALER_STATUSES)[number];
-type DealerStatusResult = { dealerCode: string; phone: string; status: string; initialPassword: string | null };
+type DealerStatusResult = { dealerCode: string; phone: string; email: string | null; status: string; initialPassword: string | null };
 type DealerStatusError = { dealerCode: string; message: string };
 
 function text(value: unknown) {
@@ -72,6 +72,7 @@ async function updateOneDealerStatus(
         await tx.user.create({
           data: {
             phone,
+            email: updated.email,
             password: hashPassword(initialPassword),
             name: updated.representativeName || updated.name,
             role: accountRole,
@@ -87,6 +88,7 @@ async function updateOneDealerStatus(
             dealerCode: updated.dealerCode,
             active: true,
             name: updated.representativeName || updated.name,
+            email: updated.email || existing.email,
           },
         });
       }
@@ -106,7 +108,7 @@ async function updateOneDealerStatus(
       },
     });
 
-    return { dealerCode: updated.dealerCode, phone: updated.phone, status: updated.status, initialPassword };
+    return { dealerCode: updated.dealerCode, phone: updated.phone, email: updated.email, status: updated.status, initialPassword };
   });
 }
 
@@ -158,18 +160,18 @@ export async function PATCH(request: NextRequest) {
     }
 
     if (results.length) {
-      await prisma.notification.createMany({
-        data: results.map((dealer) => ({
-          phone: dealer.phone,
-          channel: "SMS",
-          kind: "DEALER_STATUS",
-          content: status === "APPROVED"
-            ? dealer.initialPassword
-              ? `Hồ sơ ${dealer.dealerCode} đã được duyệt. Tài khoản: ${dealer.phone}. Mật khẩu ban đầu: ${dealer.initialPassword}. Hãy đổi mật khẩu bằng chức năng Quên mật khẩu.`
-              : `Hồ sơ ${dealer.dealerCode} đã được duyệt. Tài khoản đại lý đã được kích hoạt.`
-            : `Hồ sơ ${dealer.dealerCode} đã được cập nhật trạng thái ${status}.`,
-        })),
+      const notifications = results.flatMap((dealer) => {
+        const content = status === "APPROVED"
+          ? dealer.initialPassword
+            ? `Hồ sơ ${dealer.dealerCode} đã được duyệt. Tài khoản: ${dealer.phone}. Mật khẩu ban đầu: ${dealer.initialPassword}. Hãy đổi mật khẩu bằng chức năng Quên mật khẩu.`
+            : `Hồ sơ ${dealer.dealerCode} đã được duyệt. Tài khoản đại lý đã được kích hoạt.`
+          : `Hồ sơ ${dealer.dealerCode} đã được cập nhật trạng thái ${status}.`;
+        return [
+          { phone: dealer.phone, channel: "SMS", kind: "DEALER_STATUS", content },
+          ...(dealer.email ? [{ email: dealer.email, channel: "EMAIL", kind: "DEALER_STATUS", subject: "KOSOVOTA - Cập nhật hồ sơ đại lý/CTV", content }] : []),
+        ];
       });
+      await prisma.notification.createMany({ data: notifications });
     }
 
     if (!results.length) {

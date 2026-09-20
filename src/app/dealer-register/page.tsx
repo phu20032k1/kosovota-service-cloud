@@ -49,6 +49,7 @@ export default function DealerRegisterPage() {
   const [companyName, setCompanyName] = useState("");
   const [fullName, setFullName] = useState("");
   const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState("");
   const [birthDate, setBirthDate] = useState("");
   const [houseNumber, setHouseNumber] = useState("");
   const [street, setStreet] = useState("");
@@ -185,6 +186,7 @@ export default function DealerRegisterPage() {
           name: companyName || fullName,
           representativeName: fullName,
           phone,
+          email,
           address: [houseNumber, street, ward, selectedProvince.name].filter(Boolean).join(", "),
           lat: location.latitude,
           lng: location.longitude,
@@ -299,6 +301,9 @@ export default function DealerRegisterPage() {
             </Field>
             <Field label="Số điện thoại *">
               <input value={phone} onChange={(event) => setPhone(event.target.value)} inputMode="tel" required />
+            </Field>
+            <Field label="Email nhận thông báo *">
+              <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" required placeholder="ten@gmail.com" />
             </Field>
             <Field label="Ngày sinh">
               <input type="date" value={birthDate} onChange={(event) => setBirthDate(event.target.value)} />

@@ -105,6 +105,7 @@ export async function POST(request: NextRequest) {
     const representativeName = text(body.representativeName || body.name);
     const companyName = text(extra.companyName || body.companyName);
     const phone = normalizePhone(body.phone);
+    const email = text(body.email).toLowerCase();
     const province = text(body.province);
     const provinceCode = text(body.provinceCode || body.province);
     const ward = text(body.ward);
@@ -117,9 +118,9 @@ export async function POST(request: NextRequest) {
     const citizenId = text(extra.citizenId || body.citizenId);
     const bankAccount = text(extra.bankAccount || body.bankAccount);
 
-    if (!representativeName || !isValidVietnamPhone(phone) || !province || !provinceCode || !ward) {
+    if (!representativeName || !isValidVietnamPhone(phone) || !/^\S+@\S+\.\S+$/.test(email) || !province || !provinceCode || !ward) {
       return NextResponse.json(
-        { success: false, message: "Vui lòng nhập đủ họ tên, số điện thoại hợp lệ, tỉnh và xã/phường." },
+        { success: false, message: "Vui lòng nhập đủ họ tên, số điện thoại, email hợp lệ, tỉnh và xã/phường." },
         { status: 400 },
       );
     }
@@ -163,6 +164,7 @@ export async function POST(request: NextRequest) {
             dealerCode,
             name: companyName || representativeName,
             phone,
+            email,
             province,
             address: address || null,
             lat: coordinates.lat,
@@ -206,13 +208,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    await prisma.notification.create({
-      data: {
-        phone,
-        channel: "SMS",
-        kind: "DEALER_REGISTRATION",
-        content: `KOSOVOTA đã nhận đăng ký ${createdDealer.dealerCode}. Mã được sinh tự động theo Tỉnh + Xã/Phường + Năm + STT và đang chờ duyệt.`,
-      },
+    const registrationMessage = `KOSOVOTA đã nhận đăng ký ${createdDealer.dealerCode}. Mã được sinh tự động theo Tỉnh + Xã/Phường + Năm + STT và đang chờ duyệt.`;
+    await prisma.notification.createMany({
+      data: [
+        { phone, channel: "SMS", kind: "DEALER_REGISTRATION", content: registrationMessage },
+        { email, channel: "EMAIL", kind: "DEALER_REGISTRATION", subject: "KOSOVOTA - Đã nhận đăng ký đại lý/CTV", content: registrationMessage },
+      ],
     });
 
     await bumpDealerCacheVersion();
@@ -228,6 +229,7 @@ export async function POST(request: NextRequest) {
           dealerCode: createdDealer.dealerCode,
           name: createdDealer.name,
           phone: createdDealer.phone,
+          email: createdDealer.email,
           province: createdDealer.province,
           registrationType: createdDealer.registrationType,
           status: createdDealer.status,
