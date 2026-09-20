@@ -402,7 +402,7 @@ export default function MaintenancePlansPage() {
             {loading ? (
               <LoadingBlock text="Đang tải lịch chăm sóc / thay lõi..."/>
             ) : urgentSchedules.length ? (
-              <div className="divide-y divide-slate-100">
+              <div className="max-h-[340px] divide-y divide-slate-100 overflow-y-auto overscroll-contain [scrollbar-gutter:stable] sm:max-h-[420px] lg:max-h-[480px]">
                 {urgentSchedules.map((item) => (
                   <ScheduleRow key={item.id} item={item} saving={savingId === item.id} onSave={saveDueDate} urgent />
                 ))}
@@ -458,7 +458,7 @@ export default function MaintenancePlansPage() {
           </div>
 
           {loading ? <LoadingBlock text="Đang tải lịch sắp tới..."/> : filteredSchedules.length ? (
-            <div className="max-h-[70vh] divide-y divide-slate-100 overflow-y-auto overscroll-contain [scrollbar-gutter:stable] sm:max-h-[680px] lg:max-h-[720px]">
+            <div className="max-h-[420px] divide-y divide-slate-100 overflow-y-auto overscroll-contain [scrollbar-gutter:stable] sm:max-h-[520px] lg:max-h-[600px]">
               {filteredSchedules.map((item) => (
                 <ScheduleRow key={item.id} item={item} saving={savingId === item.id} onSave={saveDueDate} />
               ))}
