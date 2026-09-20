@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { hasRole } from "@/lib/auth";
-import { restoreTrashItem } from "@/app/api/admin/trash/[id]/restore/route";
 
 const MAX_BULK = 100;
 
@@ -15,9 +14,18 @@ export async function POST(request: NextRequest) {
 
   let restored = 0;
   const failed: Array<{ id: string; message: string }> = [];
+  const origin = new URL(request.url).origin;
+
   for (const id of ids) {
-    const response = await restoreTrashItem(request, id);
-    const payload = await response.clone().json().catch(() => ({}));
+    const response = await fetch(origin + "/api/admin/trash/" + encodeURIComponent(id) + "/restore", {
+      method: "POST",
+      headers: {
+        cookie: request.headers.get("cookie") || "",
+        authorization: request.headers.get("authorization") || "",
+      },
+      cache: "no-store",
+    });
+    const payload = await response.json().catch(() => ({}));
     if (response.ok && payload.success) restored += 1;
     else failed.push({ id, message: payload.message || "Không khôi phục được." });
   }

@@ -15,7 +15,7 @@ function stringArray(value: unknown): string[] {
   return arrayValue(value).map((item) => String(item || "")).filter(Boolean);
 }
 
-export async function restoreTrashItem(request: NextRequest, id: string) {
+async function restoreTrashItem(request: NextRequest, id: string) {
   const auth = await hasRole(request, ["ADMIN", "SUPER_ADMIN"]);
   if (!auth) return NextResponse.json({ success: false, message: "Chỉ Admin được khôi phục dữ liệu." }, { status: 403 });
 
