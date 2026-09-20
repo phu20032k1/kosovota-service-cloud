@@ -25,6 +25,7 @@ const ADMIN_NAV: NavItem[] = [
   { href: "/dealer-map", label: "Bản đồ đại lý", icon: "map" },
   { href: "/maintenance-plans", label: "Lịch thay lõi", icon: "calendar" },
   { href: "/admin/reports", label: "Dữ liệu", icon: "database" },
+  { href: "/admin/trash", label: "Thùng rác", icon: "trash" },
   { href: "/admin/notifications", label: "Thông báo", icon: "bell" },
   { href: "/scan", label: "Quét QR", icon: "qr" },
   { href: "/admin/integrations", label: "Tích hợp", icon: "settings" },

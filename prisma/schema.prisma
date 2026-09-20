@@ -483,3 +483,23 @@ model CustomerActivity {
   @@index([customerId, occurredAt])
   @@index([type, occurredAt])
 }
+
+
+model TrashItem {
+  id            String   @id @default(cuid())
+  entityType    String
+  entityId      String
+  label         String
+  snapshot      Json
+  metadata      Json?
+  deletedById   String?
+  deletedByName String?
+  source        String?
+  deletedAt     DateTime @default(now())
+  restoredAt    DateTime?
+  restoredById  String?
+
+  @@index([restoredAt, deletedAt])
+  @@index([entityType, deletedAt])
+  @@index([entityType, entityId])
+}

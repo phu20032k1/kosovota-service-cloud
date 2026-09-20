@@ -7,6 +7,7 @@ type ClickTarget = HTMLElement & { click: () => void };
 
 function isDeleteAction(element: HTMLElement) {
   const text = `${element.textContent || ""} ${element.getAttribute("aria-label") || ""} ${element.getAttribute("title") || ""}`.toLowerCase();
+  if (/(xóa|xoá)\s+(lọc|tìm kiếm|chữ ký)|clear\s+(filter|search|signature)/i.test(text)) return false;
   return /(^|\s)(xóa|xoá|delete|remove)(\s|$)/i.test(text);
 }
 
@@ -60,9 +61,9 @@ export default function GlobalDeleteGuard() {
     <ConfirmDialog
       open={Boolean(target)}
       title="Xác nhận xóa"
-      description="Hành động này có thể làm mất dữ liệu hoặc liên kết đang sử dụng. Hãy kiểm tra trước khi tiếp tục."
+      description="Dữ liệu hệ thống sẽ được lưu vào Thùng rác trước khi xóa để Admin có thể kiểm tra và khôi phục khi cần."
       highlight={target?.textContent?.trim() || "Mục đã chọn"}
-      confirmLabel="Xóa"
+      confirmLabel="Chuyển vào thùng rác"
       cancelLabel="Hủy"
       tone="danger"
       onConfirm={confirmDelete}
