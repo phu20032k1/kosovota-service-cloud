@@ -1,3 +1,4 @@
+import { archiveToTrash } from "@/lib/trash";
 import { randomBytes } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -223,6 +224,48 @@ export async function DELETE(request: NextRequest) {
     const dealerIds = dealers.map((dealer) => dealer.id);
 
     await prisma.$transaction(async (tx) => {
+      const trashDealers = await tx.dealer.findMany({
+        where: { id: { in: dealerIds } },
+        include: {
+          warehouse: { include: { balances: true } },
+          paymentBatches: { include: { lines: true } },
+          serviceOrders: { select: { id: true } },
+          supportTickets: { select: { id: true } },
+        },
+      });
+      const linkedUsers = await tx.user.findMany({
+        where: { dealerCode: { in: deletedCodes }, role: { in: ["DEALER", "CTV", "KTV"] } },
+      });
+      const trashWarehouseIds = trashDealers.map((dealer) => dealer.warehouse?.id).filter((id): id is string => Boolean(id));
+      const movementLinks = trashWarehouseIds.length
+        ? await tx.stockMovement.findMany({
+            where: { OR: [{ fromWarehouseId: { in: trashWarehouseIds } }, { toWarehouseId: { in: trashWarehouseIds } }] },
+            select: { id: true, fromWarehouseId: true, toWarehouseId: true },
+          })
+        : [];
+
+      for (const dealer of trashDealers) {
+        const { warehouse, paymentBatches, serviceOrders, supportTickets, ...record } = dealer;
+        const warehouseId = warehouse?.id || null;
+        await archiveToTrash(tx, {
+          entityType: "DEALER",
+          entityId: dealer.id,
+          label: dealer.name + " · " + dealer.dealerCode,
+          snapshot: {
+            record,
+            warehouse,
+            paymentBatches,
+            serviceOrderIds: serviceOrders.map((item) => item.id),
+            ticketIds: supportTickets.map((item) => item.id),
+            linkedUsers: linkedUsers.filter((user) => user.dealerCode === dealer.dealerCode),
+            movementLinks: warehouseId ? movementLinks.filter((movement) => movement.fromWarehouseId === warehouseId || movement.toWarehouseId === warehouseId) : [],
+          },
+          deletedById: auth.user.id,
+          deletedByName: auth.user.name,
+          source: "/api/dealers",
+        });
+      }
+
       const batches = await tx.paymentBatch.findMany({
         where: { dealerId: { in: dealerIds } },
         select: { id: true },
@@ -271,7 +314,7 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({
       success: true,
       data: { deletedCodes },
-      message: deletedCodes.length === 1 ? "Đã xóa đại lý." : `Đã xóa ${deletedCodes.length} đại lý.`,
+      message: deletedCodes.length === 1 ? "Đã chuyển đại lý vào Thùng rác." : `Đã chuyển ${deletedCodes.length} đại lý vào Thùng rác.`,
     });
   } catch (error) {
     console.error("DELETE /api/dealers failed", error);

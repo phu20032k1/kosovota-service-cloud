@@ -1,3 +1,4 @@
+import { archiveToTrash } from "@/lib/trash";
 import { randomBytes } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -253,9 +254,20 @@ export async function DELETE(request: NextRequest) {
   if (!current || current.role === "SUPER_ADMIN") return NextResponse.json({ success: false, message: "Không tìm thấy tài khoản cấp dưới hoặc không được xóa SUPER_ADMIN." }, { status: 404 });
 
   try {
-    await prisma.user.delete({ where: { id } });
-    await prisma.adminLog.create({ data: { userId: auth.user.id, action: "SUPER_DELETE_USER", target: id, detail: `${current.role}:${current.phone}` } });
-    return NextResponse.json({ success: true, data: { id } });
+    await prisma.$transaction(async (tx) => {
+      await archiveToTrash(tx, {
+        entityType: "USER",
+        entityId: current.id,
+        label: current.name + " · " + current.phone,
+        snapshot: { record: current },
+        deletedById: auth.user.id,
+        deletedByName: auth.user.name,
+        source: "/api/super-admin/users",
+      });
+      await tx.user.delete({ where: { id } });
+      await tx.adminLog.create({ data: { userId: auth.user.id, action: "SUPER_DELETE_USER", target: id, detail: `${current.role}:${current.phone}` } });
+    });
+    return NextResponse.json({ success: true, message: "Đã chuyển tài khoản vào Thùng rác.", data: { id } });
   } catch (error) {
     console.error("DELETE /api/super-admin/users failed", error);
     return NextResponse.json({ success: false, message: "Tài khoản đang liên kết dữ liệu. Hãy dùng nút Khóa thay vì Xóa." }, { status: 409 });

@@ -1,3 +1,4 @@
+import { archiveToTrash } from "@/lib/trash";
 import { Prisma } from "@prisma/client";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -110,10 +111,27 @@ export async function DELETE(request: NextRequest) {
     const result = await prisma.$transaction(async (tx) => {
       const existing = await tx.customer.findMany({
         where: { id: { in: customerIds } },
-        select: { id: true, name: true, phone: true },
+        include: {
+          activities: true,
+          machines: { select: { id: true } },
+          tickets: { select: { id: true } },
+        },
       });
       const existingIds = existing.map((customer) => customer.id);
       if (!existingIds.length) return { deleted: 0, customers: existing };
+
+      for (const customer of existing) {
+        const { activities, machines, tickets, ...record } = customer;
+        await archiveToTrash(tx, {
+          entityType: "CUSTOMER",
+          entityId: customer.id,
+          label: customer.name + " · " + customer.phone,
+          snapshot: { record, activities, machineIds: machines.map((item) => item.id), ticketIds: tickets.map((item) => item.id) },
+          deletedById: auth.user.id,
+          deletedByName: auth.user.name,
+          source: "/api/crm/customers",
+        });
+      }
 
       await tx.machine.updateMany({ where: { customerId: { in: existingIds } }, data: { customerId: null } });
       await tx.supportTicket.updateMany({ where: { customerId: { in: existingIds } }, data: { customerId: null } });
@@ -132,7 +150,7 @@ export async function DELETE(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      message: result.deleted === 1 ? "Đã xóa khách hàng." : `Đã xóa ${result.deleted} khách hàng.`,
+      message: result.deleted === 1 ? "Đã chuyển khách hàng vào Thùng rác." : `Đã chuyển ${result.deleted} khách hàng vào Thùng rác.`,
       data: { deleted: result.deleted },
     });
   } catch (error) {

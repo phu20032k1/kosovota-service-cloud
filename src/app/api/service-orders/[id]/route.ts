@@ -1,3 +1,4 @@
+import { archiveToTrash } from "@/lib/trash";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { hasRole } from "@/lib/auth";
@@ -69,19 +70,32 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   if (!auth) return NextResponse.json({ success: false, message: "Chỉ Admin/CSKH được xóa lệnh." }, { status: 403 });
   try {
     const { id } = await params;
-    const order = await prisma.serviceOrder.findUnique({ where: { id }, include: { machine: true, sourceTicket: true } });
+    const order = await prisma.serviceOrder.findUnique({
+      where: { id },
+      include: { machine: true, sourceTicket: true, reports: true, stockMovements: { select: { id: true } } },
+    });
     if (!order) return NextResponse.json({ success: false, message: "Không tìm thấy lệnh dịch vụ." }, { status: 404 });
     if (auth.user.role === "CSKH" && auth.user.provinceScope) {
       const scopes = auth.user.provinceScope.split(",").map((value: string) => value.trim()).filter(Boolean);
       if (scopes.length && (!order.machine.provinceCode || !scopes.includes(order.machine.provinceCode))) return NextResponse.json({ success: false, message: "Lệnh nằm ngoài phạm vi CSKH được phân công." }, { status: 403 });
     }
     await prisma.$transaction(async (tx) => {
+      const { machine, sourceTicket, reports, stockMovements, ...record } = order;
+      await archiveToTrash(tx, {
+        entityType: "SERVICE_ORDER",
+        entityId: order.id,
+        label: order.orderCode + " · " + order.customerName,
+        snapshot: { record, reports, stockMovementIds: stockMovements.map((item) => item.id), sourceTicketId: sourceTicket?.id || null },
+        deletedById: auth.user.id,
+        deletedByName: auth.user.name,
+        source: "/api/service-orders/[id]",
+      });
       if (order.sourceTicket) await tx.supportTicket.update({ where: { id: order.sourceTicket.id }, data: { serviceOrderId: null, status: order.sourceTicket.status === "RESOLVED" ? "RESOLVED" : "NEW" } });
       await tx.serviceReport.deleteMany({ where: { orderId: id } });
       await tx.stockMovement.updateMany({ where: { serviceOrderId: id }, data: { serviceOrderId: null } });
       await tx.serviceOrder.delete({ where: { id } });
     });
-    return NextResponse.json({ success: true, message: order.sourceTicket ? `Đã xóa lệnh ${order.orderCode}. Yêu cầu ${order.sourceTicket.ticketCode} vẫn được giữ lại.` : `Đã xóa lệnh ${order.orderCode}.` });
+    return NextResponse.json({ success: true, message: order.sourceTicket ? `Đã chuyển lệnh ${order.orderCode} vào Thùng rác. Yêu cầu ${order.sourceTicket.ticketCode} vẫn được giữ lại.` : `Đã chuyển lệnh ${order.orderCode} vào Thùng rác.` });
   } catch (error) {
     console.error("DELETE /api/service-orders/[id] failed", error);
     return NextResponse.json({ success: false, message: databaseErrorMessage(error, "Không xóa được lệnh dịch vụ.") }, { status: 500 });

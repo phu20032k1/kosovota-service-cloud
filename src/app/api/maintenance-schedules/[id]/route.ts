@@ -1,3 +1,4 @@
+import { archiveToTrash } from "@/lib/trash";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { hasRole } from "@/lib/auth";
@@ -44,6 +45,19 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   const auth = await hasRole(request, ["ADMIN"]);
   if (!auth) return NextResponse.json({ success: false, message: "Chỉ Admin được xóa lịch." }, { status: 403 });
   const { id } = await params;
-  await prisma.maintenanceSchedule.delete({ where: { id } });
-  return NextResponse.json({ success: true, message: "Đã xóa lịch bảo trì." });
+  const schedule = await prisma.maintenanceSchedule.findUnique({ where: { id } });
+  if (!schedule) return NextResponse.json({ success: false, message: "Không tìm thấy lịch bảo trì." }, { status: 404 });
+  await prisma.$transaction(async (tx) => {
+    await archiveToTrash(tx, {
+      entityType: "MAINTENANCE_SCHEDULE",
+      entityId: schedule.id,
+      label: schedule.title + " · " + schedule.machineId,
+      snapshot: { record: schedule },
+      deletedById: auth.user.id,
+      deletedByName: auth.user.name,
+      source: "/api/maintenance-schedules/[id]",
+    });
+    await tx.maintenanceSchedule.delete({ where: { id } });
+  });
+  return NextResponse.json({ success: true, message: "Đã chuyển lịch bảo trì vào Thùng rác." });
 }

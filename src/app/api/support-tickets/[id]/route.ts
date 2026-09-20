@@ -1,3 +1,4 @@
+import { archiveToTrash } from "@/lib/trash";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { hasRole } from "@/lib/auth";
@@ -86,7 +87,14 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   if (!auth) return NextResponse.json({ success: false, message: "Chỉ Admin/CSKH được xóa yêu cầu." }, { status: 403 });
   try {
     const { id } = await params;
-    const ticket = await prisma.supportTicket.findUnique({ where: { id }, include: { machine: true, serviceOrder: true } });
+    const ticket = await prisma.supportTicket.findUnique({
+      where: { id },
+      include: {
+        machine: true,
+        messages: true,
+        serviceOrder: { include: { reports: true, stockMovements: { select: { id: true } } } },
+      },
+    });
     if (!ticket) return NextResponse.json({ success: false, message: "Không tìm thấy yêu cầu." }, { status: 404 });
 
     if (auth.user.role === "CSKH" && auth.user.provinceScope) {
@@ -97,6 +105,21 @@ export async function DELETE(request: NextRequest, { params }: Params) {
     }
 
     await prisma.$transaction(async (tx) => {
+      const { machine, messages, serviceOrder, ...record } = ticket;
+      let linkedServiceOrder: Record<string, unknown> | null = null;
+      if (serviceOrder) {
+        const { reports, stockMovements, ...serviceRecord } = serviceOrder;
+        linkedServiceOrder = { record: serviceRecord, reports, stockMovementIds: stockMovements.map((item) => item.id) };
+      }
+      await archiveToTrash(tx, {
+        entityType: "SUPPORT_TICKET",
+        entityId: ticket.id,
+        label: ticket.ticketCode + " · " + ticket.contactName,
+        snapshot: { record, messages, linkedServiceOrder },
+        deletedById: auth.user.id,
+        deletedByName: auth.user.name,
+        source: "/api/support-tickets/[id]",
+      });
       await tx.ticketMessage.deleteMany({ where: { ticketId: id } });
       if (ticket.serviceOrderId) {
         await tx.supportTicket.update({ where: { id }, data: { serviceOrderId: null } });
@@ -108,7 +131,7 @@ export async function DELETE(request: NextRequest, { params }: Params) {
     });
 
     await writeAudit({ request, userId: auth.user.id, action: "DELETE_SUPPORT_TICKET", target: ticket.ticketCode, detail: { deletedServiceOrder: ticket.serviceOrder?.orderCode || null } });
-    return NextResponse.json({ success: true, message: ticket.serviceOrder ? `Đã xóa yêu cầu ${ticket.ticketCode} và lệnh Điều phối ${ticket.serviceOrder.orderCode}.` : `Đã xóa yêu cầu ${ticket.ticketCode}.` });
+    return NextResponse.json({ success: true, message: ticket.serviceOrder ? `Đã chuyển yêu cầu ${ticket.ticketCode} và lệnh Điều phối ${ticket.serviceOrder.orderCode} vào Thùng rác.` : `Đã chuyển yêu cầu ${ticket.ticketCode} vào Thùng rác.` });
   } catch (error) {
     console.error("DELETE /api/support-tickets/[id] failed", error);
     return NextResponse.json({ success: false, message: databaseErrorMessage(error, "Không xóa được yêu cầu và lệnh Điều phối liên kết.") }, { status: 500 });
