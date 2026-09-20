@@ -65,10 +65,6 @@ function dayDiff(value: string | Date) {
   return Math.round((due - today) / 86_400_000);
 }
 
-function isReplacementTask(title: string) {
-  return /thay|lõi|loi|màng|mang|vật liệu|vat lieu|bảo trì|bao tri/i.test(title);
-}
-
 function cloneItems(items: PlanItem[]) {
   return items.map((item) => ({ ...item }));
 }
@@ -301,10 +297,7 @@ export default function MaintenancePlansPage() {
     }
   }
 
-  const replacementSchedules = useMemo(
-    () => schedules.filter((item) => isReplacementTask(item.title)),
-    [schedules],
-  );
+  const managedSchedules = useMemo(() => schedules, [schedules]);
 
   const stats = useMemo(() => {
     const today = dateOnly(new Date());
@@ -312,30 +305,30 @@ export default function MaintenancePlansPage() {
     const next30 = new Date(today); next30.setDate(next30.getDate() + 30);
 
     return {
-      overdue: replacementSchedules.filter((item) => dateOnly(item.dueDate) < today).length,
-      today: replacementSchedules.filter((item) => dateOnly(item.dueDate).getTime() === today.getTime()).length,
-      next7: replacementSchedules.filter((item) => {
+      overdue: managedSchedules.filter((item) => dateOnly(item.dueDate) < today).length,
+      today: managedSchedules.filter((item) => dateOnly(item.dueDate).getTime() === today.getTime()).length,
+      next7: managedSchedules.filter((item) => {
         const due = dateOnly(item.dueDate);
         return due > today && due <= next7;
       }).length,
-      next30: replacementSchedules.filter((item) => {
+      next30: managedSchedules.filter((item) => {
         const due = dateOnly(item.dueDate);
         return due > today && due <= next30;
       }).length,
-      orderCreated: replacementSchedules.filter((item) => item.status === "ORDER_CREATED").length,
-      total: replacementSchedules.length,
+      orderCreated: managedSchedules.filter((item) => item.status === "ORDER_CREATED").length,
+      total: managedSchedules.length,
     };
-  }, [replacementSchedules]);
+  }, [managedSchedules]);
 
   const urgentSchedules = useMemo(
-    () => replacementSchedules.filter((item) => dayDiff(item.dueDate) <= 0),
-    [replacementSchedules],
+    () => managedSchedules.filter((item) => dayDiff(item.dueDate) <= 0),
+    [managedSchedules],
   );
 
   const filteredSchedules = useMemo(() => {
     const key = search.trim().toLowerCase();
     const maxDays = horizon === "ALL" ? Number.POSITIVE_INFINITY : Number(horizon);
-    return replacementSchedules.filter((item) => {
+    return managedSchedules.filter((item) => {
       const days = dayDiff(item.dueDate);
       if (days < 1 || days > maxDays) return false;
       if (!key) return true;
@@ -350,15 +343,15 @@ export default function MaintenancePlansPage() {
       ].filter(Boolean).join(" ").toLowerCase();
       return haystack.includes(key);
     });
-  }, [horizon, replacementSchedules, search]);
+  }, [horizon, managedSchedules, search]);
 
   const editingPlan = plans.find((plan) => plan.modelCode === editingModel) || null;
 
   return (
     <main className="min-h-screen bg-slate-100">
       <OperationsHeader
-        title="Lịch thay lõi"
-        subtitle="Theo dõi toàn bộ lịch mở, máy quá hạn, lệnh đã sinh và chu kỳ từng dòng máy"
+        title="Lịch chăm sóc & thay lõi"
+        subtitle="Cài chu kỳ chăm sóc/thay lõi và theo dõi lịch máy tự sinh theo ngày lắp đặt"
         actions={<div className="mobile-stack-actions flex flex-wrap gap-2">
           <button type="button" onClick={() => void syncMissingSchedules()} disabled={syncing || generatingOrders} className="btn-primary px-4 py-2 text-sm font-black text-white disabled:opacity-50">
             <Icon name={syncing ? "refresh" : "calendar"} size={17} /> {syncing ? "Đang khôi phục..." : "Khôi phục lịch thiếu"}
@@ -382,7 +375,7 @@ export default function MaintenancePlansPage() {
               <div className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1.5 text-xs font-black uppercase tracking-[.14em] text-emerald-100">
                 <Icon name="calendar" size={15}/> Quản lý bảo trì
               </div>
-              <h1 className="mt-4 text-2xl font-black tracking-tight sm:text-3xl">Lịch thay lõi & bảo trì</h1>
+              <h1 className="mt-4 text-2xl font-black tracking-tight sm:text-3xl">Lịch chăm sóc, thay lõi & bảo trì</h1>
             </div>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-5 lg:min-w-[600px]">
               <StatTile label="Quá hạn" value={stats.overdue} tone="rose"/>
@@ -407,7 +400,7 @@ export default function MaintenancePlansPage() {
               </div>
             </div>
             {loading ? (
-              <LoadingBlock text="Đang tải lịch thay lõi..."/>
+              <LoadingBlock text="Đang tải lịch chăm sóc / thay lõi..."/>
             ) : urgentSchedules.length ? (
               <div className="divide-y divide-slate-100">
                 {urgentSchedules.map((item) => (
@@ -417,7 +410,7 @@ export default function MaintenancePlansPage() {
             ) : (
               <EmptyCalendar
                 title="Không có lịch quá hạn"
-                description={stats.total ? "Các lịch thay lõi hiện tại đều đang ở tương lai." : "Chưa tìm thấy lịch thay lõi. Bấm “Khôi phục lịch thiếu” để hệ thống tạo lại từ ngày lắp đặt."}
+                description={stats.total ? "Các lịch thay lõi hiện tại đều đang ở tương lai." : "Chưa tìm thấy lịch chăm sóc / thay lõi. Bấm “Khôi phục lịch thiếu” để hệ thống tạo lại từ ngày lắp đặt."}
                 action={!stats.total ? <button type="button" onClick={() => void syncMissingSchedules()} disabled={syncing} className="btn-primary px-4 py-3 text-sm font-black text-white disabled:opacity-50"><Icon name="refresh" size={16}/>Khôi phục lịch ngay</button> : undefined}
               />
             )}
@@ -430,7 +423,7 @@ export default function MaintenancePlansPage() {
             </div>
             <div className="grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-1">
               <SummaryBox icon="clock" label="Trong 7 ngày" value={stats.next7} note="Cần chuẩn bị khách hàng và vật tư"/>
-              <SummaryBox icon="calendar" label="Trong 30 ngày" value={stats.next30} note="Tổng lịch thay lõi sắp tới"/>
+              <SummaryBox icon="calendar" label="Trong 30 ngày" value={stats.next30} note="Tổng lịch chăm sóc / thay lõi sắp tới"/>
               <SummaryBox icon="activity" label="Đã sinh lệnh" value={stats.orderCreated} note="Có lệnh dịch vụ đang theo dõi"/>
               <SummaryBox icon="wrench" label="Lịch mở toàn bộ" value={stats.total} note="PENDING + ORDER_CREATED"/>
             </div>
@@ -442,7 +435,7 @@ export default function MaintenancePlansPage() {
             <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
               <div>
                 <p className="eyebrow">Lịch sắp tới</p>
-                <h2 className="mt-1 text-xl font-black text-slate-950">Danh sách thay lõi theo thời gian</h2>
+                <h2 className="mt-1 text-xl font-black text-slate-950">Danh sách lịch chăm sóc / thay lõi</h2>
 
               </div>
               <div className="grid gap-2 sm:grid-cols-[minmax(240px,1fr)_auto]">
@@ -472,7 +465,7 @@ export default function MaintenancePlansPage() {
             </div>
           ) : (
             <EmptyCalendar
-              title={stats.total ? "Không có lịch phù hợp bộ lọc" : "Chưa có lịch thay lõi"}
+              title={stats.total ? "Không có lịch phù hợp bộ lọc" : "Chưa có lịch chăm sóc / thay lõi"}
               description={stats.total ? "Thử đổi khoảng thời gian hoặc từ khóa tìm kiếm." : "Hệ thống sẽ khôi phục lịch từ ngày lắp đặt và đúng chu kỳ của model."}
               action={!stats.total ? <button type="button" onClick={() => void syncMissingSchedules()} disabled={syncing} className="btn-primary px-4 py-3 text-sm font-black text-white disabled:opacity-50"><Icon name="refresh" size={16}/>Khôi phục lịch thiếu</button> : undefined}
             />

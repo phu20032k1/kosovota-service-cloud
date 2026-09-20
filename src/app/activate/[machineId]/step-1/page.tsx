@@ -3,7 +3,7 @@
 import { ActionSessionBar } from "@/components/ActionSessionBar";
 
 import Link from "next/link";
-import { ChangeEvent, FormEvent, ReactNode, useEffect, useState } from "react";
+import { ChangeEvent, FormEvent, ReactNode, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { findProductByModel } from "@/data/products";
 
@@ -81,7 +81,9 @@ export default function ActivationStepOnePage() {
   const [accountHolder, setAccountHolder] = useState("");
   const [bankName, setBankName] = useState("");
   const [completed, setCompleted] = useState(false);
+  const [completionMessage, setCompletionMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
   const [submitError, setSubmitError] = useState("");
   const [workHome, setWorkHome] = useState("/agent-portal");
 
@@ -196,8 +198,24 @@ export default function ActivationStepOnePage() {
 
   async function submitActivation(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (submitting) return;
+    if (submittingRef.current || submitting) return;
     setSubmitError("");
+
+    if (!ownerName.trim()) {
+      setSubmitError("Tên chủ nhà là bắt buộc.");
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
+    if (ownerPhone.replace(/\D/g, "").length < 9) {
+      setSubmitError("Số điện thoại chủ nhà chưa hợp lệ.");
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
+    if (!installationDate || !dealerCode.trim() || !installerName.trim() || installerPhone.replace(/\D/g, "").length < 9) {
+      setSubmitError("Cần nhập đủ ngày lắp đặt, đại lý và thông tin người lắp.");
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
 
     if (!location && !allowTestMode) {
       setSubmitError("Anh/chị cần bấm BẬT GPS trước khi gửi. Nếu đang test trên máy tính, bật Chế độ test.");
@@ -231,6 +249,7 @@ export default function ActivationStepOnePage() {
       return;
     }
 
+    submittingRef.current = true;
     setSubmitting(true);
     try {
       const buildingPhoto = await uploadPhoto(photos.building);
@@ -290,12 +309,14 @@ export default function ActivationStepOnePage() {
         return;
       }
 
+      setCompletionMessage(stepTwoResult.message || "Kích hoạt máy thành công.");
       setCompleted(true);
     } catch (error) {
       console.error(error);
       setSubmitError(error instanceof Error ? error.message : "Có lỗi khi gửi kích hoạt máy.");
       window.scrollTo({ top: 0, behavior: "smooth" });
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   }
@@ -311,9 +332,9 @@ export default function ActivationStepOnePage() {
             Kích hoạt máy thành công
           </h1>
           <p className="mt-3 text-slate-600">
-            Máy <strong>{machineId}</strong> đã lưu đủ thông tin khách hàng, lắp
-            đặt và bảo trì.
+            Máy <strong>{machineId}</strong> đã lưu đủ thông tin khách hàng, lắp đặt và lịch chăm sóc/bảo trì.
           </p>
+          {completionMessage && <p className="mt-3 rounded-xl bg-emerald-50 p-3 text-sm font-bold text-emerald-800">{completionMessage}</p>}
           <div className="mt-7 grid gap-3 sm:grid-cols-2">
             <Link
               href={`/qr/${machineId}`}
@@ -337,7 +358,7 @@ export default function ActivationStepOnePage() {
   return (
     <main className="min-h-screen bg-slate-100 px-4 py-8">
       <ActionSessionBar title="Kích hoạt máy" />
-      <form onSubmit={submitActivation} className="mx-auto max-w-2xl space-y-6">
+      <form onSubmit={submitActivation} noValidate className="mx-auto max-w-2xl space-y-6">
         <header className="rounded-2xl bg-white p-6 shadow-sm">
           <p className="text-sm font-bold uppercase tracking-widest text-green-700">
             KOSOVOTA
@@ -664,10 +685,10 @@ export default function ActivationStepOnePage() {
         <section className="space-y-5 rounded-2xl bg-white p-5 shadow-sm">
           <div>
             <h2 className="text-lg font-bold text-slate-900">
-              Thông tin nhận quà
+              Thông tin nhận quà <span className="text-red-600">*</span>
             </h2>
             <p className="mt-1 text-sm text-slate-500">
-              Có thể nhập ngay tại đây, không cần sang bước 2 riêng.
+              Bắt buộc nhập đủ số tài khoản, chủ tài khoản và ngân hàng.
             </p>
           </div>
 

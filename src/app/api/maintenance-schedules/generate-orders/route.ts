@@ -25,7 +25,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      message: `Đã tạo ${result.created} lệnh đến hạn; bỏ qua ${result.skipped} lịch chưa đủ dữ liệu hoặc đã được xử lý.`,
+      message: `Đã tạo ${result.created} lệnh kỹ thuật đến hạn; ${result.careOnly} mốc chăm sóc được giữ ở lịch nhắc; bỏ qua ${result.skipped - result.careOnly} lịch chưa đủ dữ liệu hoặc đã được xử lý.`,
       created: result.created,
       skipped: result.skipped,
       data: result,

@@ -16,30 +16,16 @@ function isReplacementTask(title: string) {
 
 export async function syncMissingMaintenanceSchedules(limitInput = 500) {
   const limit = Math.min(1_000, Math.max(1, Number(limitInput) || 500));
-  const replacementTitleFilters = [
-    { title: { contains: "thay", mode: "insensitive" as const } },
-    { title: { contains: "lõi", mode: "insensitive" as const } },
-    { title: { contains: "loi", mode: "insensitive" as const } },
-    { title: { contains: "màng", mode: "insensitive" as const } },
-    { title: { contains: "mang", mode: "insensitive" as const } },
-    { title: { contains: "vật liệu", mode: "insensitive" as const } },
-    { title: { contains: "vat lieu", mode: "insensitive" as const } },
-    { title: { contains: "bảo trì", mode: "insensitive" as const } },
-    { title: { contains: "bao tri", mode: "insensitive" as const } },
-  ];
-
+  const totalInstalled = await prisma.machine.count({ where: { installDate: { not: null } } });
   const machines = await prisma.machine.findMany({
-    where: {
-      installDate: { not: null },
-      maintenanceSchedules: { none: { OR: replacementTitleFilters } },
-    },
+    where: { installDate: { not: null } },
     select: {
       id: true,
       model: true,
       installDate: true,
-      maintenanceSchedules: { select: { title: true, dueDate: true } },
+      maintenanceSchedules: { select: { title: true, dueDate: true, status: true } },
     },
-    orderBy: { installDate: "asc" },
+    orderBy: [{ installDate: "asc" }, { id: "asc" }],
     take: limit,
   });
 
@@ -57,14 +43,26 @@ export async function syncMissingMaintenanceSchedules(limitInput = 500) {
         templates = await getConfiguredMaintenanceTemplates(machine.model);
         templateCache.set(cacheKey, templates);
       }
-      const desired = buildMaintenanceSchedulesFromTemplates(machine.id, machine.installDate!, templates!);
-      const existingKeys = new Set(
-        machine.maintenanceSchedules.map((item) => `${item.title.trim().toLowerCase()}|${item.dueDate.toISOString()}`),
-      );
-      const hasAnySchedules = machine.maintenanceSchedules.length > 0;
+
+      const desired = buildMaintenanceSchedulesFromTemplates(machine.id, machine.installDate, templates);
+      // So khớp theo số lượng từng nội dung thay vì đúng ngày tuyệt đối.
+      // Nhờ đó Admin/CSKH có thể điều chỉnh ngày của một lịch riêng mà cron
+      // không tạo lại mốc cũ vào hôm sau.
+      const existingCountByTitle = new Map<string, number>();
+      for (const item of machine.maintenanceSchedules) {
+        const key = item.title.trim().toLowerCase();
+        existingCountByTitle.set(key, (existingCountByTitle.get(key) || 0) + 1);
+      }
+      const usedCountByTitle = new Map<string, number>();
       const missing = desired.filter((item) => {
-        if (hasAnySchedules && !isReplacementTask(item.title)) return false;
-        return !existingKeys.has(`${item.title.trim().toLowerCase()}|${item.dueDate.toISOString()}`);
+        const key = item.title.trim().toLowerCase();
+        const existingCount = existingCountByTitle.get(key) || 0;
+        const usedCount = usedCountByTitle.get(key) || 0;
+        if (usedCount < existingCount) {
+          usedCountByTitle.set(key, usedCount + 1);
+          return false;
+        }
+        return true;
       });
 
       const created = missing.length
@@ -82,21 +80,18 @@ export async function syncMissingMaintenanceSchedules(limitInput = 500) {
     }
   }
 
-  const remaining = await prisma.machine.count({
-    where: {
-      installDate: { not: null },
-      maintenanceSchedules: { none: { OR: replacementTitleFilters } },
-    },
-  });
-
   return {
     scanned: machines.length,
     synced: syncedMachineIds.length,
     syncedMachineIds,
     createdSchedules,
-    remaining,
+    remaining: Math.max(0, totalInstalled - machines.length),
     failed,
   };
+}
+
+function normalizedTitle(value: string) {
+  return value.trim().toLowerCase();
 }
 
 export async function generateDueMaintenanceOrders(throughInput: Date = new Date(), limitInput = 1_000) {
@@ -113,9 +108,25 @@ export async function generateDueMaintenanceOrders(throughInput: Date = new Date
 
   let created = 0;
   let skipped = 0;
+  let careOnly = 0;
   const failed: Array<{ scheduleId: string; machineId: string; reason: string }> = [];
+  const templateCache = new Map<string, MaintenanceTemplate[]>();
 
   for (const schedule of schedules) {
+    const modelKey = schedule.machine.model.trim().toUpperCase();
+    let templates = templateCache.get(modelKey);
+    if (!templates) {
+      templates = await getConfiguredMaintenanceTemplates(schedule.machine.model);
+      templateCache.set(modelKey, templates);
+    }
+    const configuredTemplate = templates.find((item) => normalizedTitle(item.title) === normalizedTitle(schedule.title));
+    if (configuredTemplate?.customerCare) {
+      // Mốc chăm sóc chỉ cần nhắc CSKH/khách hàng, không tự biến thành lệnh kỹ thuật.
+      careOnly += 1;
+      skipped += 1;
+      continue;
+    }
+
     const customer = schedule.machine.customer;
     if (!customer?.phone) {
       skipped += 1;
@@ -179,5 +190,5 @@ export async function generateDueMaintenanceOrders(throughInput: Date = new Date
     }
   }
 
-  return { scanned: schedules.length, created, skipped, failed, through };
+  return { scanned: schedules.length, created, skipped, careOnly, failed, through };
 }

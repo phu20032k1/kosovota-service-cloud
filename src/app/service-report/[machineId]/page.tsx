@@ -299,6 +299,16 @@ async function handleSubmit(event: FormEvent<HTMLFormElement>) {
   if (submitting) return;
   setFormError("");
 
+  if (!dealerCode.trim()) {
+    setFormError("Tài khoản chưa có mã đại lý. Hãy đăng nhập lại hoặc liên hệ Admin.");
+    return;
+  }
+
+  if (!replacementProducts.trim()) {
+    setFormError("Hãy nhập sản phẩm/vật tư đã thay trước khi gửi báo cáo.");
+    return;
+  }
+
   if (!photos.oldFilter) {
     setFormError("Thiếu ảnh lõi cũ. Hãy chụp hoặc chọn ảnh trước khi gửi.");
     document.getElementById("service-report-photos")?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -445,6 +455,7 @@ async function handleSubmit(event: FormEvent<HTMLFormElement>) {
       <ActionSessionBar title="Báo cáo dịch vụ" />
       <form
         onSubmit={handleSubmit}
+        noValidate
         className="mx-auto max-w-2xl space-y-6"
       >
         <header className="rounded-2xl bg-white p-6 shadow-sm">
@@ -576,9 +587,17 @@ async function handleSubmit(event: FormEvent<HTMLFormElement>) {
             </h2>
 
             <p className="mt-1 text-sm text-slate-500">
-              Ảnh lõi cũ và lõi mới là bắt buộc.
+              Bắt buộc đủ ảnh lõi cũ, ảnh lõi mới và ảnh toàn cảnh sau hoàn thành.
             </p>
           </div>
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm font-bold text-amber-900">
+            Cần đủ 3 ảnh bắt buộc trước khi gửi. Nếu thiếu, hệ thống sẽ báo chính xác ảnh còn thiếu.
+          </div>
+          {formError && /ảnh|chữ ký|ký/i.test(formError) && (
+            <div role="alert" aria-live="assertive" className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm font-bold text-rose-700">
+              {formError}
+            </div>
+          )}
 
           <PhotoInput
             title="Ảnh lõi cũ đã tháo ra"
@@ -608,7 +627,8 @@ async function handleSubmit(event: FormEvent<HTMLFormElement>) {
 
           <PhotoInput
             title="Ảnh toàn cảnh máy sau khi hoàn thành"
-            description="Không bắt buộc nhưng được khuyến khích."
+            description="Bắt buộc để xác nhận máy sau khi hoàn thành dịch vụ."
+            required
             photo={photos.completedMachine}
             onChange={(event) =>
               handlePhotoChange(
