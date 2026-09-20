@@ -109,12 +109,18 @@ async function sendEmail(input: DeliveryInput): Promise<DeliveryResult> {
   return { providerMessageId: info.messageId || crypto.randomUUID(), raw: info };
 }
 
+export function notificationDryRun(channel: string) {
+  const normalized = channel.toUpperCase();
+  if (normalized === "EMAIL") return process.env.EMAIL_DRY_RUN === "true";
+  return process.env.NOTIFICATION_DRY_RUN !== "false";
+}
+
 export async function deliverNotification(input: DeliveryInput): Promise<DeliveryResult> {
-  if (process.env.NOTIFICATION_DRY_RUN !== "false") {
+  const channel = input.channel.toUpperCase();
+  if (notificationDryRun(channel)) {
     console.info(`[DRY RUN] ${input.channel} -> ${input.email || input.phone || "unknown"}: ${input.subject ? `${input.subject} - ` : ""}${input.content}`);
     return { providerMessageId: `dry_${input.id}` };
   }
-  const channel = input.channel.toUpperCase();
   if (channel === "SMS") {
     const provider = (process.env.SMS_PROVIDER || "esms").toLowerCase();
     if (provider !== "esms") throw new Error(`SMS_PROVIDER ${provider} chưa được hỗ trợ.`);

@@ -12,7 +12,7 @@ type State = {
   notifications: { dryRun: boolean; otpChannel: string };
   sms: { provider: string; ready: boolean; sandbox: boolean };
   zalo: { provider: string; ready: boolean; otpTemplate: boolean; serviceOrderTemplate: boolean };
-  email: { ready: boolean; from: string };
+  email: { ready: boolean; from: string; dryRun: boolean };
 };
 
 type TestKind = "map" | "sms" | "zalo" | "email";
@@ -62,13 +62,14 @@ export default function IntegrationsPage() {
       {error && <Notice kind="error">{error}</Notice>}
       {notice && <Notice kind={notice.kind}>{notice.text}</Notice>}
       {!data ? <LoadingState label="Đang kiểm tra cấu hình..." /> : <>
-        {data.notifications.dryRun && <Notice kind="warning">Hệ thống đang ở chế độ DRY RUN: SMS/Zalo/Gmail chỉ được mô phỏng. Sau khi sandbox thành công, đổi <code>NOTIFICATION_DRY_RUN=false</code> để gửi thật.</Notice>}
+        {data.notifications.dryRun && <Notice kind="warning">SMS/Zalo đang ở chế độ DRY RUN và chưa gửi thật. Gmail được cấu hình độc lập bằng <code>EMAIL_DRY_RUN</code>.</Notice>}
+        {data.email.dryRun && <Notice kind="info">Gmail đang ở chế độ thử. Đặt <code>EMAIL_DRY_RUN=false</code> và cấu hình Gmail App Password để gửi email thật.</Notice>}
         <div className="grid gap-3 sm:gap-4 md:grid-cols-2 xl:grid-cols-3">
           <IntegrationCard icon="map" title="Bản đồ" provider={data.map.provider} ready={data.map.ready} rows={[["Khóa trình duyệt", data.map.browserKeyConfigured]]} />
           <IntegrationCard icon="map-pin" title="Geocoding địa chỉ" provider={data.geocoding.provider} ready={data.geocoding.enabled && data.geocoding.ready} rows={[["Đã bật tự động", data.geocoding.enabled], ["Khóa server", data.geocoding.ready]]} />
           <IntegrationCard icon="phone" title="SMS" provider={data.sms.provider} ready={data.sms.ready && !data.sms.sandbox && !data.notifications.dryRun} rows={[["Thông tin API", data.sms.ready], ["Sandbox đã tắt", !data.sms.sandbox], ["Gửi thật đã bật", !data.notifications.dryRun]]} />
           <IntegrationCard icon="send" title="Zalo ZBS Template" provider={data.zalo.provider} ready={data.zalo.ready && !data.notifications.dryRun} rows={[["Access token + template", data.zalo.ready], ["Template OTP", data.zalo.otpTemplate], ["Template giao lệnh", data.zalo.serviceOrderTemplate]]} />
-          <IntegrationCard icon="file" title="Gmail thông báo" provider="smtp.gmail.com:587" ready={data.email.ready && !data.notifications.dryRun} rows={[["GMAIL_USER + APP_PASSWORD", data.email.ready], ["Gửi thật đã bật", !data.notifications.dryRun]]} />
+          <IntegrationCard icon="file" title="Gmail thông báo" provider="smtp.gmail.com:587" ready={data.email.ready && !data.email.dryRun} rows={[["GMAIL_USER + APP_PASSWORD", data.email.ready], ["Gửi thật đã bật", !data.email.dryRun]]} />
           <IntegrationCard icon="shield" title="OTP" provider={data.notifications.otpChannel} ready={!data.notifications.dryRun && (data.notifications.otpChannel === "ZALO" ? data.zalo.ready : data.sms.ready)} rows={[["Kênh hiện tại", true], ["Gửi thật đã bật", !data.notifications.dryRun]]} />
         </div>
 

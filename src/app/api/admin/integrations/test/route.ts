@@ -3,7 +3,7 @@ import { hasRole } from "@/lib/auth";
 import { geocodeAddress } from "@/lib/maps/geocode";
 import { normalizePhone, isValidVietnamPhone } from "@/lib/phone";
 import { prisma } from "@/lib/prisma";
-import { deliverNotification } from "@/lib/notifications/providers";
+import { deliverNotification, notificationDryRun } from "@/lib/notifications/providers";
 
 function parseTestTemplateData() {
   const fallback = {
@@ -73,7 +73,7 @@ export async function POST(request: NextRequest) {
         where: { id: notification.id },
         data: { status: "SENT", providerMessageId: result.providerMessageId, sentAt: new Date(), error: null },
       });
-      const dryRun = process.env.NOTIFICATION_DRY_RUN !== "false";
+      const dryRun = notificationDryRun(channel);
       return NextResponse.json({
         success: true,
         message: dryRun

@@ -36,11 +36,13 @@ for (const [urlName, tokenName] of redisPairs) {
   }
 }
 
-if (value("NOTIFICATION_DRY_RUN") !== "false") warnings.push('NOTIFICATION_DRY_RUN chưa là "false": hệ thống sẽ không gửi SMS/Zalo/Email thật.');
-if (value("NOTIFICATION_DRY_RUN") === "false") {
+if (value("NOTIFICATION_DRY_RUN") !== "false") warnings.push('NOTIFICATION_DRY_RUN chưa là "false": SMS/Zalo sẽ không gửi thật.');
+if (value("EMAIL_DRY_RUN") === "true") {
+  warnings.push('EMAIL_DRY_RUN đang là "true": Gmail chỉ được mô phỏng.');
+} else {
   required("GMAIL_USER");
   required("GMAIL_APP_PASSWORD");
-  required("EMAIL_FROM");
+  if (!value("EMAIL_FROM")) warnings.push("Chưa đặt EMAIL_FROM: hệ thống sẽ dùng GMAIL_USER làm người gửi.");
 }
 
 if ((value("OTP_CHANNEL") || "SMS").toUpperCase() === "SMS") {
