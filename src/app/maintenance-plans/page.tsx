@@ -465,7 +465,7 @@ export default function MaintenancePlansPage() {
           </div>
 
           {loading ? <LoadingBlock text="Đang tải lịch sắp tới..."/> : filteredSchedules.length ? (
-            <div className="divide-y divide-slate-100">
+            <div className="max-h-[70vh] divide-y divide-slate-100 overflow-y-auto overscroll-contain [scrollbar-gutter:stable] sm:max-h-[680px] lg:max-h-[720px]">
               {filteredSchedules.map((item) => (
                 <ScheduleRow key={item.id} item={item} saving={savingId === item.id} onSave={saveDueDate} />
               ))}

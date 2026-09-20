@@ -15,11 +15,10 @@ function stringArray(value: unknown): string[] {
   return arrayValue(value).map((item) => String(item || "")).filter(Boolean);
 }
 
-export async function POST(request: NextRequest, { params }: Params) {
+export async function restoreTrashItem(request: NextRequest, id: string) {
   const auth = await hasRole(request, ["ADMIN", "SUPER_ADMIN"]);
   if (!auth) return NextResponse.json({ success: false, message: "Chỉ Admin được khôi phục dữ liệu." }, { status: 403 });
 
-  const { id } = await params;
   await ensureTrashStorage(prisma);
   const item = await prisma.trashItem.findUnique({ where: { id } });
   if (!item) return NextResponse.json({ success: false, message: "Không tìm thấy dữ liệu trong Thùng rác." }, { status: 404 });
@@ -142,4 +141,10 @@ export async function POST(request: NextRequest, { params }: Params) {
     const message = error instanceof Error ? error.message : "Không khôi phục được dữ liệu.";
     return NextResponse.json({ success: false, message: "Không khôi phục được vì dữ liệu liên quan đã thay đổi hoặc bị trùng. Chi tiết: " + message }, { status: 409 });
   }
+}
+
+
+export async function POST(request: NextRequest, { params }: Params) {
+  const { id } = await params;
+  return restoreTrashItem(request, id);
 }
