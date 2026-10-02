@@ -100,9 +100,8 @@ export default function CustomersPage() {
   }
 
   async function confirmDelete() {
-    const ids = deleteIds || [];
-    setDeleteIds(null);
-    if (!ids.length) return;
+    const ids = deleteIds ? [...deleteIds] : [];
+    if (!ids.length || busy) return;
     setBusy(true); setError(""); setMessage("");
     try {
       const response = await fetch("/api/crm/customers", {
@@ -112,8 +111,13 @@ export default function CustomersPage() {
       });
       const result = await readApiResponse<{ deleted: number }>(response);
       if (!response.ok || !result.success) throw new Error(result.message || "Không xóa được khách hàng");
-      setMessage(result.message || "Đã xóa khách hàng.");
+
+      // Remove deleted rows immediately so the table never looks unchanged
+      // while the fresh server list is being fetched.
+      setItems((current) => current.filter((item) => !ids.includes(item.id)));
       setSelected((current) => current.filter((id) => !ids.includes(id)));
+      setDeleteIds(null);
+      setMessage(result.message || "Đã xóa khách hàng.");
       await load();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Không xóa được khách hàng");
