@@ -1,5 +1,6 @@
-import { archiveToTrash } from "@/lib/trash";
+import { ensureTrashStorage } from "@/lib/trash";
 import { randomBytes } from "crypto";
+import { Prisma } from "@prisma/client";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { hasRole } from "@/lib/auth";
@@ -225,6 +226,10 @@ export async function DELETE(request: NextRequest) {
     const deletedCodes = dealers.map((dealer) => dealer.dealerCode);
     const dealerIds = dealers.map((dealer) => dealer.id);
 
+    // Ensure the archive table exists before the interactive transaction.
+    // Running DDL once per dealer made large bulk deletes prone to Prisma P2028 timeouts.
+    await ensureTrashStorage(prisma);
+
     await prisma.$transaction(async (tx) => {
       const trashDealers = await tx.dealer.findMany({
         where: { id: { in: dealerIds } },
@@ -246,14 +251,14 @@ export async function DELETE(request: NextRequest) {
           })
         : [];
 
-      for (const dealer of trashDealers) {
+      const trashRows: Prisma.TrashItemCreateManyInput[] = trashDealers.map((dealer) => {
         const { warehouse, paymentBatches, serviceOrders, supportTickets, ...record } = dealer;
         const warehouseId = warehouse?.id || null;
-        await archiveToTrash(tx, {
+        return {
           entityType: "DEALER",
           entityId: dealer.id,
           label: dealer.name + " · " + dealer.dealerCode,
-          snapshot: {
+          snapshot: JSON.parse(JSON.stringify({
             record,
             warehouse,
             paymentBatches,
@@ -261,11 +266,15 @@ export async function DELETE(request: NextRequest) {
             ticketIds: supportTickets.map((item) => item.id),
             linkedUsers: linkedUsers.filter((user) => user.dealerCode === dealer.dealerCode),
             movementLinks: warehouseId ? movementLinks.filter((movement) => movement.fromWarehouseId === warehouseId || movement.toWarehouseId === warehouseId) : [],
-          },
+          })) as Prisma.InputJsonValue,
           deletedById: auth.user.id,
           deletedByName: auth.user.name,
           source: "/api/dealers",
-        });
+        };
+      });
+
+      for (let offset = 0; offset < trashRows.length; offset += 50) {
+        await tx.trashItem.createMany({ data: trashRows.slice(offset, offset + 50) });
       }
 
       const batches = await tx.paymentBatch.findMany({
@@ -311,7 +320,7 @@ export async function DELETE(request: NextRequest) {
           detail: "Xóa hồ sơ đại lý; giữ lịch sử dịch vụ bằng cách bỏ liên kết dealerId.",
         })),
       });
-    });
+    }, { timeout: 20_000 });
 
     return NextResponse.json({
       success: true,
