@@ -94,6 +94,10 @@ export default function AdminReportsPage() {
   const [selectedMachineIds, setSelectedMachineIds] = useState<string[]>([]);
   const [deleteRequest, setDeleteRequest] = useState<string[] | null>(null);
   const [dealerStatusRequest, setDealerStatusRequest] = useState<{ codes: string[]; status: "APPROVED" | "REJECTED" } | null>(null);
+  const [dealerDeleteRequest, setDealerDeleteRequest] = useState<string[] | null>(null);
+  const [leadDeleteRequest, setLeadDeleteRequest] = useState<string[] | null>(null);
+  const [sosDeleteRequest, setSosDeleteRequest] = useState<string[] | null>(null);
+  const [resetRequest, setResetRequest] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -203,6 +207,83 @@ export default function AdminReportsPage() {
     await updateDealers(request.codes, request.status);
   }
 
+  async function deleteDealers(codes: string[]) {
+    if (!codes.length || busy) return;
+    setBusy(true); setError(""); setMessage("");
+    try {
+      const response = await fetch("/api/dealers", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(codes.length === 1 ? { dealerCode: codes[0] } : { dealerCodes: codes }),
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.message || "Không xóa được đại lý");
+      setMessage(result.message);
+      setDealerDeleteRequest(null);
+      await load();
+    } catch (value) {
+      setError(value instanceof Error ? value.message : "Không xóa được đại lý");
+    } finally { setBusy(false); }
+  }
+
+  async function deleteLeads(ids: string[]) {
+    if (!ids.length || busy) return;
+    setBusy(true); setError(""); setMessage("");
+    try {
+      const response = await fetch("/api/leads", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(ids.length === 1 ? { leadId: ids[0] } : { leadIds: ids }),
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.message || "Không xóa được yêu cầu tư vấn");
+      setMessage(result.message);
+      setLeadDeleteRequest(null);
+      await load();
+    } catch (value) {
+      setError(value instanceof Error ? value.message : "Không xóa được yêu cầu tư vấn");
+    } finally { setBusy(false); }
+  }
+
+  async function deleteSos(ids: string[]) {
+    if (!ids.length || busy) return;
+    setBusy(true); setError(""); setMessage("");
+    try {
+      const response = await fetch("/api/sos-tickets", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(ids.length === 1 ? { sosId: ids[0] } : { sosIds: ids }),
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.message || "Không xóa được SOS");
+      setMessage(result.message);
+      setSosDeleteRequest(null);
+      await load();
+    } catch (value) {
+      setError(value instanceof Error ? value.message : "Không xóa được SOS");
+    } finally { setBusy(false); }
+  }
+
+  async function resetAllTestData() {
+    if (busy) return;
+    setBusy(true); setError(""); setMessage("");
+    try {
+      const response = await fetch("/api/admin/reset-test-data", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirmation: "RESET_ALL_TEST_DATA" }),
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.message || "Không reset được dữ liệu test");
+      setMessage(result.message);
+      setResetRequest(false);
+      setSelectedMachineIds([]);
+      await load();
+    } catch (value) {
+      setError(value instanceof Error ? value.message : "Không reset được dữ liệu test");
+    } finally { setBusy(false); }
+  }
+
   return <main className="page-shell">
     <OperationsHeader
       title="Điều hành toàn quốc"
@@ -231,6 +312,7 @@ export default function AdminReportsPage() {
             <div className="flex flex-wrap gap-2">
               <button type="button" onClick={() => downloadTemplate("kosovota-mau-may.xlsx", ["ID máy", "Seri cần in", "Tên máy", "Model", "Công suất", "Bảo hành", "Năm sản xuất", "Tên khách hàng", "SĐT khách hàng", "Địa chỉ", "Tỉnh", "Vĩ độ", "Kinh độ", "Ngày lắp", "Trạng thái"], [["HT.0100.0626014", "HT.0100.0626014", "Tên máy: Máy lọc nước tinh khiết siêu sạch\nMã số: HT100-RU\nCông suất: 100L/H\nBảo hành: 12 tháng\nNăm sản xuất: 2026", "HT100-RU", "100L/H", "12 tháng", "2026", "Nguyễn Văn A", "0912345678", "Số 1 Hà Nội", "HN", "21.0278", "105.8342", "30/06/2026", "NEW"]])} className="rounded-xl border border-emerald-200 px-4 py-3 font-bold text-emerald-700">Tải mẫu máy</button>
               <button type="button" onClick={() => downloadTemplate("kosovota-mau-dai-ly.xlsx", ["Mã đại lý", "Tên đại lý", "Đại diện", "SĐT", "Tỉnh", "Địa chỉ", "Dịch vụ", "Trạng thái", "Số KTV", "Khu vực phụ trách", "Mã số thuế", "CCCD", "Số tài khoản", "Chủ tài khoản", "Ngân hàng", "Vĩ độ", "Kinh độ"], [["HN-DL-26-0001", "Đại lý Hà Nội 01", "Nguyễn Văn B", "0987654321", "Hà Nội", "Số 2 Hà Nội", "Lắp đặt, bảo trì", "APPROVED", "3", "Hà Nội", "0100000000", "001xxxxxxxx", "123456789", "NGUYEN VAN B", "VCB", "21.0278", "105.8342"]])} className="rounded-xl border border-blue-200 px-4 py-3 font-bold text-blue-700">Tải mẫu đại lý</button>
+              <button data-delete-guard="ignore" type="button" disabled={busy} onClick={() => setResetRequest(true)} className="rounded-xl bg-rose-700 px-4 py-3 font-black text-white hover:bg-rose-800 disabled:opacity-50"><Icon name="trash" size={16}/>Xóa sạch dữ liệu test</button>
             </div>
           </div>
           <div className="mt-4 flex flex-wrap gap-3">
@@ -363,9 +445,10 @@ export default function AdminReportsPage() {
                   <p className="text-sm text-slate-600">{dealer.representativeName} · {dealer.phone} · {dealer.province}</p>
                   <p className="mt-1 text-sm">{dealer.services}</p>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
                   <button type="button" disabled={busy} onClick={() => setDealerStatusRequest({ codes: [dealer.dealerCode], status: "APPROVED" })} className="rounded-lg bg-emerald-600 px-3 py-2 font-bold text-white disabled:opacity-50">Duyệt</button>
                   <button type="button" disabled={busy} onClick={() => setDealerStatusRequest({ codes: [dealer.dealerCode], status: "REJECTED" })} className="rounded-lg bg-rose-600 px-3 py-2 font-bold text-white disabled:opacity-50">Từ chối</button>
+                  <button type="button" disabled={busy} onClick={() => setDealerDeleteRequest([dealer.dealerCode])} className="ghost-danger px-3 py-2 text-sm disabled:opacity-50"><Icon name="trash" size={14}/>Xóa</button>
                 </div>
               </div>
             </article>)}
@@ -374,26 +457,27 @@ export default function AdminReportsPage() {
         </div>
 
         <div className="surface-card">
-          <div className="border-b p-5"><h2 className="text-xl font-black">Yêu cầu tư vấn sản phẩm</h2></div>
+          <div className="border-b p-5"><h2 className="text-xl font-black">Yêu cầu tư vấn sản phẩm</h2><p className="mt-1 text-sm text-slate-500">Có thể xóa từng yêu cầu không còn cần dùng.</p></div>
           <div className="max-h-96 divide-y overflow-y-auto">
-            {(data?.leads || []).map((lead) => <article key={lead.id} className="p-5"><p className="font-black">{lead.fullName} · <a href={`tel:${lead.phone}`} className="text-emerald-700">{lead.phone}</a></p><p className="text-sm text-slate-600">{lead.productSlug || "Tư vấn chung"} · {lead.province || "Chưa chọn tỉnh"} · {date(lead.createdAt)}</p>{lead.note && <p className="mt-1 text-sm">{lead.note}</p>}</article>)}
+            {(data?.leads || []).map((lead) => <article key={lead.id} className="flex items-start justify-between gap-3 p-5"><div className="min-w-0"><p className="font-black">{lead.fullName} · <a href={`tel:${lead.phone}`} className="text-emerald-700">{lead.phone}</a></p><p className="text-sm text-slate-600">{lead.productSlug || "Tư vấn chung"} · {lead.province || "Chưa chọn tỉnh"} · {date(lead.createdAt)}</p>{lead.note && <p className="mt-1 text-sm">{lead.note}</p>}</div><button type="button" disabled={busy} onClick={() => setLeadDeleteRequest([lead.id])} className="ghost-danger shrink-0 px-3 py-2 text-xs disabled:opacity-50"><Icon name="trash" size={14}/>Xóa</button></article>)}
             {(data?.leads || []).length === 0 && <p className="p-8 text-center text-slate-500">Chưa có yêu cầu tư vấn.</p>}
           </div>
         </div>
       </section>
 
       <section className="surface-card">
-        <div className="border-b p-5"><h2 className="text-xl font-black">SOS ưu tiên cao</h2></div>
+        <div className="border-b p-5"><h2 className="text-xl font-black">SOS ưu tiên cao</h2><p className="mt-1 text-sm text-slate-500">Admin có thể xóa các SOS test hoặc không còn sử dụng.</p></div>
         <div className="hidden overflow-x-auto md:block">
           <table className="min-w-full text-sm">
-            <thead className="text-left"><tr>{["Máy", "Khách hàng", "SĐT", "Tiếp nhận", "Trạng thái"].map((h) => <th key={h} className="p-3">{h}</th>)}</tr></thead>
-            <tbody>{(data?.sosTickets || []).map((ticket) => <tr key={ticket.id} className="border-b"><td className="p-3 font-black">{ticket.machineId}</td><td className="p-3">{ticket.customerName}</td><td className="p-3"><a href={`tel:${ticket.customerPhone}`} className="text-emerald-700">{ticket.customerPhone}</a></td><td className="p-3">{date(ticket.createdAt)}</td><td className="p-3 font-bold">{ticket.status}</td></tr>)}</tbody>
+            <thead className="text-left"><tr>{["Máy", "Khách hàng", "SĐT", "Tiếp nhận", "Trạng thái", "Thao tác"].map((h) => <th key={h} className="p-3">{h}</th>)}</tr></thead>
+            <tbody>{(data?.sosTickets || []).map((ticket) => <tr key={ticket.id} className="border-b"><td className="p-3 font-black">{ticket.machineId}</td><td className="p-3">{ticket.customerName}</td><td className="p-3"><a href={`tel:${ticket.customerPhone}`} className="text-emerald-700">{ticket.customerPhone}</a></td><td className="p-3">{date(ticket.createdAt)}</td><td className="p-3 font-bold">{ticket.status}</td><td className="p-3"><button type="button" disabled={busy} onClick={() => setSosDeleteRequest([ticket.id])} className="ghost-danger px-3 py-2 text-xs disabled:opacity-50"><Icon name="trash" size={14}/>Xóa</button></td></tr>)}</tbody>
           </table>
         </div>
         <div className="divide-y divide-slate-100 md:hidden">
           {(data?.sosTickets || []).map((ticket) => <article key={ticket.id} className="p-4">
             <div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="break-all font-black text-slate-950">Máy {ticket.machineId}</p><p className="mt-1 break-words font-bold text-slate-700">{ticket.customerName}</p><a href={`tel:${ticket.customerPhone}`} className="mt-1 block text-sm font-bold text-emerald-700">{ticket.customerPhone}</a></div><span className="status-pill status-red">{ticket.status}</span></div>
             <p className="mt-3 rounded-xl bg-slate-50 p-3 text-sm text-slate-600">Tiếp nhận: <strong>{date(ticket.createdAt)}</strong></p>
+            <button type="button" disabled={busy} onClick={() => setSosDeleteRequest([ticket.id])} className="ghost-danger mt-3 w-full justify-center px-3 py-3 text-sm disabled:opacity-50"><Icon name="trash" size={14}/>Xóa SOS</button>
           </article>)}
           {!(data?.sosTickets || []).length && <p className="p-8 text-center text-slate-500">Không có SOS.</p>}
         </div>
@@ -410,6 +494,54 @@ export default function AdminReportsPage() {
       busy={busy}
       onCancel={() => setDeleteRequest(null)}
       onConfirm={() => void confirmDeleteMachines()}
+    />
+
+    <ConfirmDialog
+      open={Boolean(dealerDeleteRequest)}
+      tone="danger"
+      title="Xóa đại lý khỏi dữ liệu?"
+      description="Hồ sơ đại lý sẽ được chuyển vào Thùng rác; lịch sử dịch vụ vẫn được giữ và tài khoản đại lý/KTV liên quan sẽ bị khóa."
+      highlight={dealerDeleteRequest?.length === 1 ? dealerDeleteRequest[0] : `${dealerDeleteRequest?.length || 0} đại lý`}
+      confirmLabel="Xóa dữ liệu"
+      busy={busy}
+      onCancel={() => setDealerDeleteRequest(null)}
+      onConfirm={() => void deleteDealers(dealerDeleteRequest || [])}
+    />
+
+    <ConfirmDialog
+      open={Boolean(leadDeleteRequest)}
+      tone="danger"
+      title="Xóa yêu cầu tư vấn?"
+      description="Yêu cầu tư vấn này sẽ bị xóa khỏi mục Dữ liệu."
+      highlight={leadDeleteRequest?.length === 1 ? (data?.leads || []).find((item) => item.id === leadDeleteRequest[0])?.fullName || "1 yêu cầu" : `${leadDeleteRequest?.length || 0} yêu cầu`}
+      confirmLabel="Xóa dữ liệu"
+      busy={busy}
+      onCancel={() => setLeadDeleteRequest(null)}
+      onConfirm={() => void deleteLeads(leadDeleteRequest || [])}
+    />
+
+    <ConfirmDialog
+      open={Boolean(sosDeleteRequest)}
+      tone="danger"
+      title="Xóa SOS?"
+      description="SOS được chọn sẽ bị xóa khỏi hệ thống. Máy và khách hàng liên quan vẫn được giữ."
+      highlight={sosDeleteRequest?.length === 1 ? (data?.sosTickets || []).find((item) => item.id === sosDeleteRequest[0])?.machineId || "1 SOS" : `${sosDeleteRequest?.length || 0} SOS`}
+      confirmLabel="Xóa dữ liệu"
+      busy={busy}
+      onCancel={() => setSosDeleteRequest(null)}
+      onConfirm={() => void deleteSos(sosDeleteRequest || [])}
+    />
+
+    <ConfirmDialog
+      open={resetRequest}
+      tone="danger"
+      title="Xóa sạch toàn bộ dữ liệu test?"
+      description="Xóa khách hàng, đại lý/CTV, tài khoản cấp dưới, máy, ticket, SOS, điều phối, lịch, kho, đối soát, thông báo, dữ liệu nhập thử và Thùng rác. Chỉ giữ tài khoản ADMIN/SUPER_ADMIN."
+      highlight="Giữ lại tài khoản ADMIN / SUPER_ADMIN"
+      confirmLabel="Xóa sạch dữ liệu test"
+      busy={busy}
+      onCancel={() => setResetRequest(false)}
+      onConfirm={() => void resetAllTestData()}
     />
 
     <ConfirmDialog
