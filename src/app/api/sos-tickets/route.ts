@@ -54,3 +54,53 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, message: "Không tạo được yêu cầu SOS." }, { status: 500 });
   }
 }
+
+
+function sosIdsFromBody(body: Record<string, unknown>) {
+  const raw = Array.isArray(body.sosIds)
+    ? body.sosIds
+    : Array.isArray(body.ids)
+      ? body.ids
+      : typeof body.sosId === "string"
+        ? [body.sosId]
+        : typeof body.id === "string"
+          ? [body.id]
+          : [];
+  return Array.from(new Set(raw.map((value) => String(value || "").trim()).filter(Boolean))).slice(0, 500);
+}
+
+export async function DELETE(request: NextRequest) {
+  const auth = await hasRole(request, ["ADMIN"]);
+  if (!auth) return NextResponse.json({ success: false, message: "Chỉ Admin được xóa SOS." }, { status: 403 });
+
+  try {
+    const body = await request.json().catch(() => ({})) as Record<string, unknown>;
+    const ids = sosIdsFromBody(body);
+    if (!ids.length) return NextResponse.json({ success: false, message: "Chưa chọn SOS cần xóa." }, { status: 400 });
+
+    const existing = await prisma.sosTicket.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, machineId: true, customerName: true },
+    });
+    if (!existing.length) return NextResponse.json({ success: false, message: "Không tìm thấy SOS cần xóa." }, { status: 404 });
+
+    const result = await prisma.sosTicket.deleteMany({ where: { id: { in: existing.map((item) => item.id) } } });
+    await prisma.adminLog.createMany({
+      data: existing.map((item) => ({
+        userId: auth.user.id,
+        action: "DELETE_SOS_TICKET",
+        target: item.id,
+        detail: `${item.machineId} · ${item.customerName}`,
+      })),
+    });
+
+    return NextResponse.json({
+      success: true,
+      data: { deleted: result.count },
+      message: result.count === 1 ? "Đã xóa SOS." : `Đã xóa ${result.count} SOS.`,
+    });
+  } catch (error) {
+    console.error("DELETE /api/sos-tickets failed", error);
+    return NextResponse.json({ success: false, message: "Không xóa được SOS." }, { status: 500 });
+  }
+}
