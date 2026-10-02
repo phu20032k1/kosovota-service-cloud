@@ -118,7 +118,8 @@ export default function AdminDealersPage() {
   }
 
   async function deleteDealers(dealerCodes: string[]) {
-    if (!dealerCodes.length) return;
+    if (!dealerCodes.length || busy) return;
+    const codes = [...dealerCodes];
     setBusy(true);
     setNotice(null);
     setBulkErrors([]);
@@ -126,12 +127,14 @@ export default function AdminDealersPage() {
       const response = await fetch("/api/dealers", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(dealerCodes.length === 1 ? { dealerCode: dealerCodes[0] } : { dealerCodes }),
+        body: JSON.stringify(codes.length === 1 ? { dealerCode: codes[0] } : { dealerCodes: codes }),
       });
       const result = await response.json();
       if (!response.ok || !result.success) throw new Error(result.message || "Không xóa được đại lý");
+
+      setItems((current) => current.filter((item) => !codes.includes(item.dealerCode)));
+      setSelectedCodes((current) => current.filter((code) => !codes.includes(code)));
       setNotice({ kind: "success", text: result.message });
-      setSelectedCodes((current) => current.filter((code) => !dealerCodes.includes(code)));
       await load();
     } catch (error) {
       setNotice({ kind: "error", text: error instanceof Error ? error.message : "Không xóa được đại lý" });
