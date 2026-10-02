@@ -13,7 +13,7 @@ type TrashItem = {
   deletedByName?: string | null; deletedAt: string; restoreSupported: boolean;
 };
 type NoticeState = { kind: "success" | "error" | "info"; text: string } | null;
-type ConfirmState = { mode: "restore" | "delete"; items: TrashItem[] } | null;
+type ConfirmState = { mode: "restore" | "delete" | "reset"; items: TrashItem[] } | null;
 
 const TYPE_LABELS: Record<string, string> = {
   USER: "Tài khoản", CUSTOMER: "Khách hàng", DEALER: "Đại lý / CTV",
@@ -64,17 +64,29 @@ export default function TrashPage() {
   }
 
   async function runAction() {
-    if (!confirm?.items.length) return;
+    if (!confirm) return;
+    if (confirm.mode !== "reset" && !confirm.items.length) return;
     setBusy(true); setNotice(null);
     try {
       const ids = confirm.items.map((item) => item.id);
       const response = confirm.mode === "restore"
         ? await fetch("/api/admin/trash/restore-bulk", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids }) })
-        : await fetch("/api/admin/trash", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids }) });
+        : confirm.mode === "delete"
+          ? await fetch("/api/admin/trash", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids }) })
+          : await fetch("/api/admin/reset-test-data", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ confirmation: "RESET_ALL_TEST_DATA" }),
+            });
       const result = await response.json();
       if (!response.ok || !result.success) throw new Error(result.message || "Không thực hiện được thao tác.");
       setNotice({ kind: result.failed?.length ? "info" : "success", text: result.message });
-      setSelected((current) => current.filter((id) => !ids.includes(id)));
+      if (confirm.mode === "reset") {
+        setItems([]);
+        setSelected([]);
+      } else {
+        setSelected((current) => current.filter((id) => !ids.includes(id)));
+      }
       setConfirm(null);
       await load();
     } catch (error) {
@@ -82,12 +94,16 @@ export default function TrashPage() {
     } finally { setBusy(false); }
   }
 
-  const confirmTitle = confirm?.mode === "delete"
-    ? (confirm.items.length > 1 ? `Xóa vĩnh viễn ${confirm.items.length} mục?` : "Xóa vĩnh viễn dữ liệu?")
-    : (confirm?.items.length && confirm.items.length > 1 ? `Khôi phục ${confirm.items.length} mục?` : "Khôi phục dữ liệu?");
-  const confirmHighlight = confirm?.items.length === 1
-    ? confirm.items[0].label
-    : confirm?.items.length ? `${confirm.items.length} mục đã chọn` : "";
+  const confirmTitle = confirm?.mode === "reset"
+    ? "Xóa sạch toàn bộ dữ liệu test?"
+    : confirm?.mode === "delete"
+      ? (confirm.items.length > 1 ? `Xóa vĩnh viễn ${confirm.items.length} mục?` : "Xóa vĩnh viễn dữ liệu?")
+      : (confirm?.items.length && confirm.items.length > 1 ? `Khôi phục ${confirm.items.length} mục?` : "Khôi phục dữ liệu?");
+  const confirmHighlight = confirm?.mode === "reset"
+    ? "Giữ lại tài khoản ADMIN / SUPER_ADMIN"
+    : confirm?.items.length === 1
+      ? confirm.items[0].label
+      : confirm?.items.length ? `${confirm.items.length} mục đã chọn` : "";
 
   return <main className="min-h-screen bg-slate-50/70">
     <OperationsHeader title="Thùng rác dữ liệu" subtitle="Kiểm tra, khôi phục hoặc xóa vĩnh viễn dữ liệu đã xóa" />
@@ -99,6 +115,22 @@ export default function TrashPage() {
         <MetricCard label="Có thể khôi phục" value={items.filter((item) => item.restoreSupported).length} icon="refresh" tone="emerald" />
         <MetricCard label="Tài khoản / khách" value={items.filter((item) => ["USER", "CUSTOMER"].includes(item.entityType)).length} icon="users" tone="blue" />
         <MetricCard label="Vận hành / dịch vụ" value={items.filter((item) => !["USER", "CUSTOMER"].includes(item.entityType)).length} icon="database" tone="amber" />
+      </div>
+
+      <div className="surface-card flex flex-col gap-3 border-rose-200 bg-rose-50/70 p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <p className="text-sm font-black text-rose-900">Reset dữ liệu test toàn hệ thống</p>
+          <p className="mt-1 text-xs leading-5 text-rose-800">Xóa khách hàng, đại lý/CTV, tài khoản cấp dưới, máy, yêu cầu, điều phối, lịch, kho, đối soát, thông báo, dữ liệu nhập thử và Thùng rác. Chỉ giữ tài khoản ADMIN/SUPER_ADMIN.</p>
+        </div>
+        <button
+          data-delete-guard="ignore"
+          type="button"
+          disabled={busy}
+          onClick={() => setConfirm({ mode: "reset", items: [] })}
+          className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-xl bg-rose-700 px-4 text-sm font-black text-white shadow-sm hover:bg-rose-800 disabled:opacity-50"
+        >
+          <Icon name="trash" size={16}/>Xóa sạch dữ liệu test
+        </button>
       </div>
 
       <div className="surface-card space-y-3 p-3 sm:p-4">
@@ -170,13 +202,17 @@ export default function TrashPage() {
       <ConfirmDialog
         open={Boolean(confirm)}
         title={confirmTitle}
-        description={confirm?.mode === "delete" ? "Thao tác này xóa bản lưu khỏi Thùng rác và không thể hoàn tác. Hãy kiểm tra kỹ dữ liệu đã chọn." : "Dữ liệu sẽ được đưa trở lại hệ thống. Nếu mã hoặc dữ liệu liên quan đã được tạo lại, hệ thống sẽ giữ an toàn và báo mục không thể khôi phục."}
+        description={confirm?.mode === "reset"
+          ? "Toàn bộ dữ liệu nghiệp vụ dùng để test sẽ bị xóa vĩnh viễn: khách hàng, đại lý/CTV, tài khoản cấp dưới, máy, ticket, điều phối, lịch bảo trì, kho, đối soát, thông báo, dữ liệu nhập thử và Thùng rác. Tài khoản ADMIN/SUPER_ADMIN được giữ lại để bạn đăng nhập."
+          : confirm?.mode === "delete"
+            ? "Thao tác này xóa bản lưu khỏi Thùng rác và không thể hoàn tác. Hãy kiểm tra kỹ dữ liệu đã chọn."
+            : "Dữ liệu sẽ được đưa trở lại hệ thống. Nếu mã hoặc dữ liệu liên quan đã được tạo lại, hệ thống sẽ giữ an toàn và báo mục không thể khôi phục."}
         highlight={confirmHighlight}
-        confirmLabel={confirm?.mode === "delete" ? "Xóa vĩnh viễn" : "Khôi phục"}
+        confirmLabel={confirm?.mode === "reset" ? "Xóa sạch dữ liệu test" : confirm?.mode === "delete" ? "Xóa vĩnh viễn" : "Khôi phục"}
         cancelLabel="Hủy"
-        tone={confirm?.mode === "delete" ? "danger" : "info"}
+        tone={confirm?.mode === "reset" || confirm?.mode === "delete" ? "danger" : "info"}
         busy={busy}
-        icon={confirm?.mode === "delete" ? "trash" : "refresh"}
+        icon={confirm?.mode === "reset" || confirm?.mode === "delete" ? "trash" : "refresh"}
         onConfirm={() => void runAction()}
         onCancel={() => { if (!busy) setConfirm(null); }}
       />
