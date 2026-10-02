@@ -1,4 +1,4 @@
-import { archiveToTrash } from "@/lib/trash";
+import { ensureTrashStorage } from "@/lib/trash";
 import { Prisma } from "@prisma/client";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -108,6 +108,11 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ success: false, message: "Chưa chọn khách hàng cần xóa." }, { status: 400 });
     }
 
+    // Create/verify trash storage once before the interactive transaction.
+    // Previously this DDL ran once per customer, causing Prisma P2028 timeouts
+    // when deleting a few hundred customers at once.
+    await ensureTrashStorage(prisma);
+
     const result = await prisma.$transaction(async (tx) => {
       const existing = await tx.customer.findMany({
         where: { id: { in: customerIds } },
@@ -120,25 +125,36 @@ export async function DELETE(request: NextRequest) {
       const existingIds = existing.map((customer) => customer.id);
       if (!existingIds.length) return { deleted: 0, customers: existing };
 
-      for (const customer of existing) {
+      const trashRows: Prisma.TrashItemCreateManyInput[] = existing.map((customer) => {
         const { activities, machines, tickets, ...record } = customer;
-        await archiveToTrash(tx, {
+        return {
           entityType: "CUSTOMER",
           entityId: customer.id,
           label: customer.name + " · " + customer.phone,
-          snapshot: { record, activities, machineIds: machines.map((item) => item.id), ticketIds: tickets.map((item) => item.id) },
+          snapshot: JSON.parse(JSON.stringify({
+            record,
+            activities,
+            machineIds: machines.map((item) => item.id),
+            ticketIds: tickets.map((item) => item.id),
+          })) as Prisma.InputJsonValue,
           deletedById: auth.user.id,
           deletedByName: auth.user.name,
           source: "/api/crm/customers",
-        });
+        };
+      });
+
+      // Keep each INSERT reasonably sized while avoiding hundreds of round trips.
+      for (let offset = 0; offset < trashRows.length; offset += 100) {
+        await tx.trashItem.createMany({ data: trashRows.slice(offset, offset + 100) });
       }
 
       await tx.machine.updateMany({ where: { customerId: { in: existingIds } }, data: { customerId: null } });
       await tx.supportTicket.updateMany({ where: { customerId: { in: existingIds } }, data: { customerId: null } });
       await tx.customerActivity.deleteMany({ where: { customerId: { in: existingIds } } });
       const deleted = await tx.customer.deleteMany({ where: { id: { in: existingIds } } });
-      return { deleted: deleted.count, customers: existing };
-    });
+      const auditCustomers = existing.map(({ id, name, phone }) => ({ id, name, phone }));
+      return { deleted: deleted.count, customers: auditCustomers };
+    }, { timeout: 20_000 });
 
     await writeAudit({
       request,
