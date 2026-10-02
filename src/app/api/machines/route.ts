@@ -234,7 +234,7 @@ export async function DELETE(request: NextRequest) {
           detail: "Xóa máy cùng dữ liệu kích hoạt, bảo trì, ticket và lệnh dịch vụ liên quan.",
         })),
       });
-    });
+    }, { timeout: 30_000 });
 
     return NextResponse.json({
       success: true,
