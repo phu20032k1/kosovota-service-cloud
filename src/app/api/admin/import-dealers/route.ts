@@ -11,22 +11,64 @@ import { bumpDealerCacheVersion } from "@/lib/redis";
 
 function normalizedHeader(value: unknown) {
   return String(value ?? "")
+    .replace(/[\u200B-\u200D\u2060\uFEFF]/g, "")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/đ/g, "d")
     .replace(/Đ/g, "D")
     .trim()
     .toLowerCase()
-    .replace(/[._/-]+/g, " ")
-    .replace(/\s+/g, " ");
+    .replace(/[()[\]{}:;,+|\\._/*#?-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
+
+const DEALER_CODE_HEADERS = [
+  "ma dai ly",
+  "dealer code",
+  "dealercode",
+  "ma khach hang crm",
+  "ma khach hang",
+  "ma kh",
+  "ma crm",
+  "crm code",
+  "crm id",
+  "customer code",
+  "customer id",
+];
+
+const DEALER_NAME_HEADERS = [
+  "ten dai ly",
+  "ten khach hang",
+  "ten kh",
+  "khach hang",
+  "ten",
+  "name",
+  "customer name",
+  "dai ly",
+  "cong ty",
+  "ten cong ty",
+];
+
+const PHONE_HEADERS = [
+  "sdt",
+  "so dt",
+  "so dien thoai",
+  "so dien thoai kh",
+  "dien thoai",
+  "dien thoai di dong",
+  "phone",
+  "phone number",
+  "mobile",
+  "mobile phone",
+];
 
 function spreadsheetRows(cells: unknown[][]) {
   const headerIndex = cells.findIndex((row) => {
     const headings = row.map(normalizedHeader);
-    const hasDealerCode = headings.some((h) => ["ma dai ly", "dealer code", "dealercode", "ma khach hang crm", "ma crm", "crm code"].includes(h));
-    const hasPhone = headings.some((h) => ["sdt", "so dien thoai", "phone", "dien thoai"].includes(h));
-    const hasName = headings.some((h) => ["ten dai ly", "ten", "name", "dai ly", "cong ty", "ten cong ty"].includes(h));
+    const hasDealerCode = headings.some((h) => DEALER_CODE_HEADERS.includes(h));
+    const hasPhone = headings.some((h) => PHONE_HEADERS.includes(h));
+    const hasName = headings.some((h) => DEALER_NAME_HEADERS.includes(h));
     return hasDealerCode && hasPhone && hasName;
   });
   if (headerIndex < 0) return null;
@@ -173,7 +215,7 @@ export async function POST(request: NextRequest) {
     if (!parsedRows) {
       return NextResponse.json({
         success: false,
-        message: "Không tìm thấy tiêu đề hợp lệ. File bắt buộc có Mã đại lý/Mã CRM, Tên đại lý và Số điện thoại.",
+        message: "Không tìm thấy tiêu đề hợp lệ. Chấp nhận Mã đại lý/Mã CRM/Mã khách hàng, Tên đại lý/Tên khách hàng và SĐT/Số điện thoại/Điện thoại.",
       }, { status: 422 });
     }
     if (parsedRows.length > 10_000) return NextResponse.json({ success: false, message: "Mỗi lần import tối đa 10.000 dòng." }, { status: 413 });
@@ -191,10 +233,10 @@ export async function POST(request: NextRequest) {
 
     for (const { data: row, rowNumber } of parsedRows) {
       try {
-        const dealerCode = value(row, "Mã đại lý", "Ma dai ly", "Dealer Code", "dealerCode", "Mã khách hàng CRM", "Mã CRM", "CRM Code").toUpperCase();
-        const name = value(row, "Tên đại lý", "Ten dai ly", "Tên", "Name", "Công ty", "Company", "Tên công ty");
+        const dealerCode = value(row, ...DEALER_CODE_HEADERS).toUpperCase();
+        const name = value(row, ...DEALER_NAME_HEADERS);
         const representativeName = value(row, "Đại diện", "Người đại diện", "Nguoi dai dien", "Representative", "Họ tên", "Ho ten");
-        const phone = normalizePhone(value(row, "SĐT", "Số điện thoại", "Phone", "Điện thoại"));
+        const phone = normalizePhone(value(row, ...PHONE_HEADERS));
         const province = value(row, "Tỉnh", "Province", "Tỉnh/Thành", "Tinh thanh");
         const address = value(row, "Địa chỉ", "Address");
         const services = value(row, "Dịch vụ", "Năng lực dịch vụ", "Services");
