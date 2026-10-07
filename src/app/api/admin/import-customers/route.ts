@@ -9,21 +9,47 @@ type Coordinates = { lat: number | null; lng: number | null; explicit: boolean }
 
 function normalizedHeader(input: unknown) {
   return String(input ?? "")
+    .replace(/[\u200B-\u200D\u2060\uFEFF]/g, "")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/đ/g, "d")
     .replace(/Đ/g, "D")
     .trim()
     .toLowerCase()
-    .replace(/[._/-]+/g, " ")
-    .replace(/\s+/g, " ");
+    .replace(/[()[\]{}:;,+|\\._/*#?-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
+
+const CUSTOMER_NAME_HEADERS = [
+  "ten khach hang",
+  "ten kh",
+  "khach hang",
+  "ho ten",
+  "ho va ten",
+  "customer name",
+  "ten",
+  "name",
+];
+
+const PHONE_HEADERS = [
+  "sdt",
+  "so dt",
+  "so dien thoai",
+  "so dien thoai kh",
+  "dien thoai",
+  "dien thoai di dong",
+  "phone",
+  "phone number",
+  "mobile",
+  "mobile phone",
+];
 
 function rowsFromSheet(cells: unknown[][]) {
   const headerIndex = cells.findIndex((row) => {
     const headers = row.map(normalizedHeader);
-    return headers.some((value) => ["ten khach hang", "ho ten", "customer name", "ten"].includes(value))
-      && headers.some((value) => ["sdt", "so dien thoai", "dien thoai", "phone"].includes(value));
+    return headers.some((header) => CUSTOMER_NAME_HEADERS.includes(header))
+      && headers.some((header) => PHONE_HEADERS.includes(header));
   });
   if (headerIndex < 0) return null;
   const headers = cells[headerIndex].map((cell) => normalizedHeader(cell));
@@ -162,7 +188,7 @@ export async function POST(request: NextRequest) {
     if (!/\.(xlsx|xlsm|csv)$/i.test(file.name)) return NextResponse.json({ success: false, message: "Chỉ hỗ trợ file .xlsx, .xlsm hoặc .csv." }, { status: 415 });
 
     const parsedRows = await readRows(file);
-    if (!parsedRows) return NextResponse.json({ success: false, message: "Không tìm thấy cột Tên khách hàng và Số điện thoại." }, { status: 422 });
+    if (!parsedRows) return NextResponse.json({ success: false, message: "Không tìm thấy cột Tên khách hàng/Họ tên và SĐT/Số điện thoại/Điện thoại." }, { status: 422 });
     if (parsedRows.length > 10_000) return NextResponse.json({ success: false, message: "Mỗi lần nhập tối đa 10.000 dòng." }, { status: 413 });
 
     let createdCount = 0;
@@ -177,12 +203,12 @@ export async function POST(request: NextRequest) {
 
     for (const { data: row, rowNumber } of parsedRows) {
       try {
-        const name = value(row, "Tên khách hàng", "Họ tên", "Customer name", "Tên");
-        const phone = normalizePhone(value(row, "SĐT", "Số điện thoại", "Điện thoại", "Phone"));
+        const name = value(row, ...CUSTOMER_NAME_HEADERS);
+        const phone = normalizePhone(value(row, ...PHONE_HEADERS));
         if (!name) throw new Error("Thiếu tên khách hàng");
         if (!isValidVietnamPhone(phone)) throw new Error(`Số điện thoại không hợp lệ: ${phone || "trống"}`);
 
-        const address = value(row, "Địa chỉ", "Address");
+        const address = value(row, "Địa chỉ", "Địa chỉ khách hàng", "Địa chỉ giao hàng", "Địa chỉ (Giao hàng)", "Address", "Shipping Address");
         const machineKey = value(row, "ID máy", "Mã máy", "Số Seri", "Số Serial", "Seri", "Serial").toUpperCase();
         const machineModel = value(row, "Model", "Dòng máy");
         const machineName = value(row, "Tên máy", "Tên thiết bị", "Tên sản phẩm");
@@ -212,7 +238,7 @@ export async function POST(request: NextRequest) {
 
         const outcome = await prisma.$transaction(async (tx) => {
           const existed = await tx.customer.findUnique({ where: { phone }, select: { id: true } });
-          const ownerText = value(row, "CSKH phụ trách", "Nhân viên phụ trách", "Owner");
+          const ownerText = value(row, "CSKH phụ trách", "Nhân viên phụ trách", "NV CSKH sau bán hàng", "Chủ sở hữu", "Owner");
           const owner = ownerText
             ? await tx.user.findFirst({ where: { active: true, role: { in: ["ADMIN", "CSKH"] }, OR: [{ name: ownerText }, { phone: normalizePhone(ownerText) }] }, select: { id: true } })
             : null;
@@ -224,7 +250,7 @@ export async function POST(request: NextRequest) {
               email: value(row, "Email") || null,
               address: address || null,
               segment: value(row, "Phân khúc", "Segment").toUpperCase() || "STANDARD",
-              tags: value(row, "Nhãn", "Tags") || null,
+              tags: value(row, "Nhãn", "Tags", "Trạng thái KH", "Trạng thái khách hàng") || null,
               ownerId: owner?.id || null,
             },
             update: {
@@ -232,7 +258,7 @@ export async function POST(request: NextRequest) {
               email: value(row, "Email") || undefined,
               address: address || undefined,
               segment: value(row, "Phân khúc", "Segment").toUpperCase() || undefined,
-              tags: value(row, "Nhãn", "Tags") || undefined,
+              tags: value(row, "Nhãn", "Tags", "Trạng thái KH", "Trạng thái khách hàng") || undefined,
               ownerId: owner?.id || undefined,
             },
           });
