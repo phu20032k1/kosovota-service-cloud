@@ -73,8 +73,8 @@ export default function ImportCustomersButton({ onComplete }: { onComplete?: () 
           <p className="text-xs font-black uppercase tracking-[.18em] text-blue-700">Excel / CSV import</p>
           <h2 className="mt-1 text-lg font-black">Nhập khách hàng hàng loạt</h2>
           <p className="mt-1 text-sm leading-6 text-slate-500">
-            Đồng bộ Tên khách hàng, SĐT, địa chỉ, Seri/ID máy, Model, Tên máy, Ngày SX, Ngày lắp,
-            kích hoạt bảo hành, thời hạn bảo hành và GPS. Dòng lỗi được giữ riêng để không rollback các dòng hợp lệ.
+            Dùng được file mẫu hoặc file CRM có các tên cột phổ biến như Tên khách hàng/Tên KH/Họ tên và SĐT/Số điện thoại/Điện thoại.
+            Ô điện thoại có nhiều số hoặc kèm tên được tự lấy số di động hợp lệ đầu tiên. Các cột máy, bảo hành, GPS có dữ liệu thì hệ thống tự đồng bộ.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -88,9 +88,9 @@ export default function ImportCustomersButton({ onComplete }: { onComplete?: () 
       </div>
 
       <div className="mt-4 grid gap-2 rounded-2xl border border-dashed border-blue-200 bg-blue-50/60 p-3 text-xs text-blue-900 md:grid-cols-3">
-        <span><strong>1.</strong> Tải file mẫu CSV hoặc dùng file Excel hiện có.</span>
-        <span><strong>2.</strong> Không đổi tên các cột chính; để trống cột chưa có dữ liệu.</span>
-        <span><strong>3.</strong> Hỗ trợ .xlsx, .xlsm, .csv; lỗi chỉ rõ dòng/KH/SĐT/Seri.</span>
+        <span><strong>1.</strong> Tải file mẫu CSV hoặc dùng file Excel/CRM hiện có.</span>
+        <span><strong>2.</strong> Tên cột phổ biến được tự nhận; cột chưa có dữ liệu có thể để trống.</span>
+        <span><strong>3.</strong> Hỗ trợ .xlsx, .xlsm, .csv; dòng lỗi không chặn các dòng hợp lệ.</span>
       </div>
 
       <input ref={inputRef} type="file" accept=".xlsx,.xlsm,.csv" onChange={upload} className="sr-only" />
