@@ -237,8 +237,17 @@ export async function POST(request: NextRequest) {
         const name = value(row, ...DEALER_NAME_HEADERS);
         const representativeName = value(row, "Đại diện", "Người đại diện", "Nguoi dai dien", "Representative", "Họ tên", "Ho ten");
         const phone = normalizePhone(value(row, ...PHONE_HEADERS));
-        const province = value(row, "Tỉnh", "Province", "Tỉnh/Thành", "Tinh thanh");
-        const address = value(row, "Địa chỉ", "Address");
+        const province = value(
+          row,
+          "Tỉnh",
+          "Province",
+          "Tỉnh/Thành",
+          "Tỉnh/Thành phố",
+          "Tỉnh/Thành phố (Giao hàng)",
+          "Tỉnh giao hàng",
+          "Shipping Province",
+        );
+        const address = value(row, "Địa chỉ", "Địa chỉ giao hàng", "Địa chỉ (Giao hàng)", "Address", "Shipping Address");
         const services = value(row, "Dịch vụ", "Năng lực dịch vụ", "Services");
         const technicianCount = integerCount(value(
           row,
@@ -248,7 +257,7 @@ export async function POST(request: NextRequest) {
           "Kỹ thuật viên",
           "Technician Count",
         ));
-        const serviceArea = value(row, "Khu vực phụ trách", "Service Area");
+        const serviceArea = value(row, "Khu vực phụ trách", "Service Area", "Khu vực", "Tỉnh/Thành phố (Giao hàng)");
         const companyName = value(row, "Tên công ty", "Company");
         const email = value(row, "Email");
         const birthDate = dateOrNull(row["Ngày sinh"] ?? row[normalizedHeader("Ngày sinh")] ?? row["Birth date"] ?? row[normalizedHeader("Birth date")]);
