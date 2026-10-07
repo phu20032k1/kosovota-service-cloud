@@ -56,8 +56,9 @@ export default function ImportDealersButton({ onComplete }: { onComplete?: () =>
           <p className="text-xs font-black uppercase tracking-[.18em] text-blue-700">Excel / CSV import</p>
           <h3 className="mt-1 text-lg font-black text-slate-950">Import danh sách đại lý</h3>
           <p className="mt-1 text-sm leading-6 text-slate-500">
-            File mẫu có sẵn cột Số kỹ thuật viên, địa chỉ và GPS. Khi có địa chỉ nhưng chưa có tọa độ,
-            hệ thống tự ghim vị trí bằng MapTiler. Mã bắt đầu bằng CTV được tự nhận đúng vai trò CTV kể cả file không có cột Loại đăng ký.
+            Dùng được file mẫu hoặc file xuất trực tiếp từ CRM. Hệ thống nhận Mã đại lý/Mã CRM/Mã khách hàng,
+            Tên đại lý/Tên khách hàng và SĐT/Số điện thoại/Điện thoại; ô điện thoại có nhiều số hoặc kèm tên vẫn tự lấy số di động hợp lệ đầu tiên.
+            Tỉnh/Thành phố (Giao hàng) cũng được đồng bộ vào khu vực đại lý.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -70,8 +71,8 @@ export default function ImportDealersButton({ onComplete }: { onComplete?: () =>
         </div>
       </div>
       <div className="mt-4 grid gap-2 rounded-2xl border border-dashed border-blue-200 bg-blue-50/70 p-3 text-xs text-blue-900 sm:grid-cols-3">
-        <span><strong>1.</strong> Tải mẫu CSV hoặc dùng trực tiếp file Excel hiện có.</span>
-        <span><strong>2.</strong> Cột “Số kỹ thuật viên” được đồng bộ trực tiếp.</span>
+        <span><strong>1.</strong> Tải mẫu CSV hoặc dùng trực tiếp file Excel/CRM hiện có.</span>
+        <span><strong>2.</strong> Các dòng hợp lệ vẫn được import nếu một số dòng bị lỗi.</span>
         <span><strong>3.</strong> Địa chỉ tự sinh GPS; nếu không ghim được sẽ báo đúng dòng.</span>
       </div>
       <input ref={inputRef} type="file" accept=".xlsx,.xlsm,.csv" onChange={handleUpload} disabled={loading} className="sr-only" />
