@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { hasRole } from "@/lib/auth";
-import { normalizePhone } from "@/lib/phone";
+import { isValidVietnamPhone, normalizePhone } from "@/lib/phone";
 import { buildMaintenanceSchedulesFromTemplates, type MaintenanceTemplate } from "@/lib/maintenance";
 import { getConfiguredMaintenanceTemplates } from "@/lib/maintenance-config";
 import { readSheet } from "read-excel-file/node";
@@ -10,20 +10,56 @@ import { provinceFromAddress, provinceLetterCodeOrNull } from "@/lib/province";
 
 function normalizedHeader(value: unknown) {
   return String(value ?? "")
+    .replace(/[\u200B-\u200D\u2060\uFEFF]/g, "")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/đ/g, "d")
     .replace(/Đ/g, "D")
     .trim()
     .toLowerCase()
-    .replace(/\s+/g, " ");
+    .replace(/[()[\]{}:;,+|\\._/*#?-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
+
+const MACHINE_ID_HEADERS = [
+  "id may",
+  "machine id",
+  "machineid",
+  "ma may",
+  "seri can in",
+  "so seri",
+  "so serial",
+  "seri",
+  "serial",
+];
+
+const MODEL_HEADERS = [
+  "model",
+  "dong may",
+  "ten may",
+  "ten san pham",
+  "ten thiet bi",
+  "thong tin may",
+  "ma so",
+];
+
+const CUSTOMER_PHONE_HEADERS = [
+  "sdt khach hang",
+  "so dien thoai khach hang",
+  "so dien thoai kh",
+  "sdt",
+  "so dien thoai",
+  "dien thoai",
+  "phone",
+  "mobile",
+];
 
 function spreadsheetRows(cells: unknown[][]) {
   const headerIndex = cells.findIndex((row) => {
     const headings = row.map(normalizedHeader);
-    const hasMachineId = headings.some((heading) => ["id may", "machineid", "ma may", "seri can in", "so seri", "seri", "serial"].includes(heading));
-    const hasModel = headings.some((heading) => ["model", "dong may", "ten may", "thong tin may", "ma so"].includes(heading));
+    const hasMachineId = headings.some((heading) => MACHINE_ID_HEADERS.includes(heading));
+    const hasModel = headings.some((heading) => MODEL_HEADERS.includes(heading));
     return hasMachineId && hasModel;
   });
   if (headerIndex < 0) return null;
@@ -43,6 +79,38 @@ function spreadsheetRows(cells: unknown[][]) {
     if (hasValue) rows.push({ data: record, rowNumber: headerIndex + dataIndex + 2 });
   });
   return rows;
+}
+
+function parseCsv(text: string) {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = "";
+  let quoted = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (char === '"') {
+      if (quoted && text[index + 1] === '"') { cell += '"'; index += 1; }
+      else quoted = !quoted;
+    } else if (char === "," && !quoted) {
+      row.push(cell); cell = "";
+    } else if ((char === "\n" || char === "\r") && !quoted) {
+      if (char === "\r" && text[index + 1] === "\n") index += 1;
+      row.push(cell); cell = "";
+      if (row.some((value) => value.trim())) rows.push(row);
+      row = [];
+    } else cell += char;
+  }
+  row.push(cell);
+  if (row.some((value) => value.trim())) rows.push(row);
+  return rows;
+}
+
+async function readRows(file: File) {
+  const buffer = Buffer.from(await file.arrayBuffer());
+  if (/\.csv$/i.test(file.name)) {
+    return spreadsheetRows(parseCsv(buffer.toString("utf8").replace(/^\uFEFF/, "")));
+  }
+  return spreadsheetRows(await readSheet(buffer));
 }
 
 function parseExcelDate(value: unknown) {
@@ -93,7 +161,7 @@ function integerFromText(text: string) {
 
 function machineInfo(row: Record<string, unknown>) {
   const rawSpec = value(row, "Tên máy", "Ten may", "Thông tin máy", "Thong tin may");
-  const serial = value(row, "Seri cần in", "Seri", "Số Seri", "Serial") || specValue(rawSpec, "Số seri máy");
+  const serial = value(row, "Seri cần in", "Seri", "Số Seri", "Số Serial", "Serial") || specValue(rawSpec, "Số seri máy");
   const model = value(row, "Model", "Dòng máy", "Mã số") || specValue(rawSpec, "Mã số") || serial.split(".").slice(0, 2).join(".");
   const machineName = specValue(rawSpec, "Tên máy") || value(row, "Tên máy", "Ten may", "Tên sản phẩm", "Tên thiết bị") || model;
   const capacity = value(row, "Công suất", "Dung tích", "Dung tích chứa")
@@ -140,16 +208,15 @@ export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
     const file = formData.get("file");
-    if (!(file instanceof File)) return NextResponse.json({ success: false, message: "Chưa chọn file Excel." }, { status: 400 });
-    if (file.size > 15 * 1024 * 1024) return NextResponse.json({ success: false, message: "File Excel tối đa 15 MB." }, { status: 413 });
+    if (!(file instanceof File)) return NextResponse.json({ success: false, message: "Chưa chọn file dữ liệu." }, { status: 400 });
+    if (file.size > 15 * 1024 * 1024) return NextResponse.json({ success: false, message: "File tối đa 15 MB." }, { status: 413 });
 
-    if (!/\.(xlsx|xlsm)$/i.test(file.name)) {
-      return NextResponse.json({ success: false, message: "Chỉ hỗ trợ file .xlsx hoặc .xlsm." }, { status: 415 });
+    if (!/\.(xlsx|xlsm|csv)$/i.test(file.name)) {
+      return NextResponse.json({ success: false, message: "Chỉ hỗ trợ file .xlsx, .xlsm hoặc .csv." }, { status: 415 });
     }
-    const cells = await readSheet(Buffer.from(await file.arrayBuffer()));
-    const parsedRows = spreadsheetRows(cells);
+    const parsedRows = await readRows(file);
     if (!parsedRows) {
-      return NextResponse.json({ success: false, message: "Không tìm thấy cột hợp lệ. File cần có cột Seri cần in và Tên máy, hoặc ID máy/Seri và Model." }, { status: 422 });
+      return NextResponse.json({ success: false, message: "Không tìm thấy cột hợp lệ. Chấp nhận ID máy/Mã máy/Seri/Số Serial và Model/Dòng máy/Tên máy." }, { status: 422 });
     }
     if (parsedRows.length > 10_000) {
       return NextResponse.json({ success: false, message: "Mỗi lần import tối đa 10.000 dòng." }, { status: 413 });
@@ -163,15 +230,16 @@ export async function POST(request: NextRequest) {
     for (const { data: row, rowNumber } of parsedRows) {
       try {
         const info = machineInfo(row);
-        const machineId = (value(row, "ID máy", "ID Máy", "machineId", "Mã máy") || info.serial).toUpperCase();
+        const machineId = (value(row, ...MACHINE_ID_HEADERS) || info.serial).toUpperCase();
         const model = info.model;
         if (!machineId || !model) throw new Error("Thiếu ID máy/Seri hoặc Model/Mã số");
 
-        const phone = normalizePhone(value(row, "SĐT khách hàng", "Số điện thoại", "SĐT"));
-        const customerName = value(row, "Tên khách hàng", "Họ tên khách hàng");
-        const address = value(row, "Địa chỉ", "Địa chỉ khách hàng");
+        const normalizedCustomerPhone = normalizePhone(value(row, ...CUSTOMER_PHONE_HEADERS));
+        const phone = isValidVietnamPhone(normalizedCustomerPhone) ? normalizedCustomerPhone : "";
+        const customerName = value(row, "Tên khách hàng", "Tên KH", "Họ tên khách hàng", "Customer Name");
+        const address = value(row, "Địa chỉ", "Địa chỉ khách hàng", "Địa chỉ giao hàng", "Địa chỉ (Giao hàng)", "Address", "Shipping Address");
         const installDate = parseExcelDate(row["Ngày lắp"] ?? row["Ngày lắp đặt"] ?? row["ngay lap"] ?? row["ngay lap dat"]);
-        const provinceInput = value(row, "Mã tỉnh", "Tỉnh", "Tỉnh/Thành", "Tỉnh/Thành phố", "Province");
+        const provinceInput = value(row, "Mã tỉnh", "Tỉnh", "Tỉnh/Thành", "Tỉnh/Thành phố", "Tỉnh/Thành phố (Giao hàng)", "Tỉnh giao hàng", "Province", "Shipping Province");
         const status = value(row, "Trạng thái", "Status");
         let lat = numberValue(row, "Vĩ độ", "Latitude", "lat");
         let lng = numberValue(row, "Kinh độ", "Longitude", "lng");
@@ -237,7 +305,7 @@ export async function POST(request: NextRequest) {
             ...(lng !== null ? { lng } : {}),
           };
 
-          const machine = await tx.machine.upsert({
+          await tx.machine.upsert({
             where: { id: targetMachineId },
             update: machineUpdate,
             create: {
@@ -275,9 +343,9 @@ export async function POST(request: NextRequest) {
       }
     }
     await prisma.adminLog.create({ data: { userId: auth.user.id, action: "IMPORT_MACHINES", target: file.name, detail: `Tạo mới ${createdCount}, cập nhật ${updatedCount}, lỗi ${errors.length}` } });
-    return NextResponse.json({ success: true, message: "Đã xử lý file Excel và đồng bộ các cột có dữ liệu.", summary: { successCount, errorCount: errors.length, createdCount, updatedCount }, errors });
+    return NextResponse.json({ success: true, message: "Đã xử lý file và đồng bộ các cột có dữ liệu.", summary: { successCount, errorCount: errors.length, createdCount, updatedCount }, errors });
   } catch (error) {
     console.error("import machines failed", error);
-    return NextResponse.json({ success: false, message: "Không đọc được file Excel." }, { status: 500 });
+    return NextResponse.json({ success: false, message: "Không đọc được file máy/seri." }, { status: 500 });
   }
 }
