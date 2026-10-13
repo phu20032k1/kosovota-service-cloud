@@ -22,7 +22,7 @@ jobs:
           python - <<'PY'
           from pathlib import Path
 
-          path = Path('src/app/maintenance-plans/page.tsx')
+          path = Path("src/app/maintenance-plans/page.tsx")
           text = path.read_text()
 
           replacements = [
@@ -31,27 +31,12 @@ jobs:
                   '        body: JSON.stringify({ dueDate }),',
               ),
               (
-                  '''      if (!response.ok || !result.success) throw new Error(result.message || "Không đổi được hạn.");
-      setNotice(`Đã đổi hạn ${schedule.machineId} – ${schedule.title}.`);
-      await loadSchedules(true);''',
-                  '''      if (!response.ok || !result.success) throw new Error(result.message || "Không đổi được hạn.");
-      const savedDueDate = typeof result.data?.dueDate === "string" ? result.data.dueDate : `${dueDate}T12:00:00.000Z`;
-      setSchedules((current) => current.map((item) => item.id === schedule.id ? { ...item, dueDate: savedDueDate } : item));
-      const movedToUrgent = dayDiff(savedDueDate) <= 0;
-      setNotice(movedToUrgent
-        ? `Đã đổi hạn ${schedule.machineId} – ${schedule.title}. Lịch đã chuyển lên mục Đến hạn và quá hạn.`
-        : `Đã đổi hạn ${schedule.machineId} – ${schedule.title}.`);
-      window.setTimeout(() => {
-        const target = document.getElementById(`maintenance-schedule-${movedToUrgent ? "urgent" : "upcoming"}-${schedule.id}`);
-        target?.scrollIntoView({ behavior: "smooth", block: "center" });
-      }, 0);''',
+                  '      if (!response.ok || !result.success) throw new Error(result.message || "Không đổi được hạn.");\n      setNotice(`Đã đổi hạn ${schedule.machineId} – ${schedule.title}.`);\n      await loadSchedules(true);',
+                  '      if (!response.ok || !result.success) throw new Error(result.message || "Không đổi được hạn.");\n      const savedDueDate = typeof result.data?.dueDate === "string" ? result.data.dueDate : `${dueDate}T12:00:00.000Z`;\n      setSchedules((current) => current.map((item) => item.id === schedule.id ? { ...item, dueDate: savedDueDate } : item));\n      const movedToUrgent = dayDiff(savedDueDate) <= 0;\n      setNotice(movedToUrgent\n        ? `Đã đổi hạn ${schedule.machineId} – ${schedule.title}. Lịch đã chuyển lên mục Đến hạn và quá hạn.`\n        : `Đã đổi hạn ${schedule.machineId} – ${schedule.title}.`);\n      window.setTimeout(() => {\n        const target = document.getElementById(`maintenance-schedule-${movedToUrgent ? "urgent" : "upcoming"}-${schedule.id}`);\n        target?.scrollIntoView({ behavior: "smooth", block: "center" });\n      }, 0);',
               ),
               (
                   '  const [dueDate, setDueDate] = useState(() => new Date(item.dueDate).toISOString().slice(0, 10));',
-                  '''  const [dueDate, setDueDate] = useState(() => item.dueDate.slice(0, 10));
-  useEffect(() => {
-    setDueDate(item.dueDate.slice(0, 10));
-  }, [item.dueDate]);''',
+                  '  const [dueDate, setDueDate] = useState(() => item.dueDate.slice(0, 10));\n  useEffect(() => {\n    setDueDate(item.dueDate.slice(0, 10));\n  }, [item.dueDate]);',
               ),
               (
                   '    <article className={`grid min-w-0 gap-4 p-4 transition hover:bg-slate-50/70 sm:p-5 ${urgent ? "lg:grid-cols-[minmax(0,1fr)_auto]" : "lg:grid-cols-[minmax(0,1fr)_auto]"}`}>',
@@ -65,7 +50,7 @@ jobs:
 
           for old, new in replacements:
               if old not in text:
-                  raise SystemExit(f'Expected source block not found:\n{old}')
+                  raise SystemExit(f"Expected source block not found: {old}")
               text = text.replace(old, new, 1)
 
           path.write_text(text)
