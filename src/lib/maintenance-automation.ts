@@ -2,7 +2,8 @@ import { prisma } from "@/lib/prisma";
 import { buildMaintenanceSchedulesFromTemplates, type MaintenanceTemplate } from "@/lib/maintenance";
 import { getConfiguredMaintenanceTemplates } from "@/lib/maintenance-config";
 import { createOrderCode } from "@/lib/order-code";
-import { queueServiceOrderCreatedNotifications } from "@/lib/notifications/events";
+import { queueDealerServiceOrderEmail, queueServiceOrderCreatedNotifications } from "@/lib/notifications/events";
+import { expandProvinceScope, findProvince, provinceFromAddress } from "@/lib/province";
 
 function prismaCode(error: unknown) {
   return error && typeof error === "object" && "code" in error
@@ -94,19 +95,130 @@ function normalizedTitle(value: string) {
   return value.trim().toLowerCase();
 }
 
+type ApprovedDealer = {
+  id: string;
+  dealerCode: string;
+  name: string;
+  phone: string;
+  email: string | null;
+  province: string | null;
+  serviceArea: string | null;
+};
+
+function normalizeDealerCode(value?: string | null) {
+  return value?.trim().toUpperCase() || "";
+}
+
+function machineProvinceCode(machineProvince?: string | null, customerAddress?: string | null) {
+  return findProvince(machineProvince)?.[1] || provinceFromAddress(customerAddress)?.[1] || null;
+}
+
+function dealerServesProvince(dealer: ApprovedDealer, provinceCode: string | null) {
+  if (!provinceCode) return false;
+  const direct = findProvince(dealer.province)?.[1];
+  if (direct === provinceCode) return true;
+  return expandProvinceScope(dealer.serviceArea).some((value) => findProvince(value)?.[1] === provinceCode);
+}
+
+function chooseMaintenanceDealer(input: {
+  activationDealerCode?: string | null;
+  provinceCode?: string | null;
+  customerAddress?: string | null;
+  dealers: ApprovedDealer[];
+}) {
+  const activationDealerCode = normalizeDealerCode(input.activationDealerCode);
+  if (activationDealerCode) {
+    const activationDealer = input.dealers.find(
+      (dealer) => normalizeDealerCode(dealer.dealerCode) === activationDealerCode,
+    );
+    if (activationDealer) return activationDealer;
+  }
+
+  const provinceCode = machineProvinceCode(input.provinceCode, input.customerAddress);
+  if (!provinceCode) return null;
+  return input.dealers.find((dealer) => dealerServesProvince(dealer, provinceCode)) || null;
+}
+
+function appBaseUrl() {
+  const configured = process.env.NEXT_PUBLIC_APP_URL?.trim();
+  if (configured) return configured.replace(/\/$/, "");
+  const vercel = process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim();
+  if (vercel) return `https://${vercel.replace(/^https?:\/\//, "").replace(/\/$/, "")}`;
+  return "";
+}
+
+function dealerOrderNotification(input: {
+  dealer: ApprovedDealer;
+  orderCode: string;
+  customerName: string;
+  customerPhone: string;
+  address: string | null;
+  serviceType: string;
+}) {
+  const baseUrl = appBaseUrl();
+  const detailUrl = baseUrl ? `${baseUrl}/agent-portal` : "/agent-portal";
+  return {
+    phone: input.dealer.phone,
+    channel: "ZALO",
+    kind: "SERVICE_ORDER",
+    content: [
+      `KOSOVOTA: Đại lý có lệnh dịch vụ mới ${input.orderCode}.`,
+      `Khách hàng: ${input.customerName} - ${input.customerPhone}.`,
+      `Địa chỉ: ${input.address || "Chưa cập nhật"}.`,
+      `Dịch vụ: ${input.serviceType}.`,
+      `Chi tiết: ${detailUrl}`,
+    ].join(" "),
+    payload: JSON.stringify({
+      templateId: process.env.ZALO_ZBS_SERVICE_ORDER_TEMPLATE_ID || process.env.ZALO_ZBS_TEMPLATE_ID,
+      templateData: {
+        order_code: input.orderCode,
+        customer_name: input.customerName,
+        customer_phone: input.customerPhone,
+        address: input.address || "Chưa cập nhật",
+        service_name: input.serviceType,
+        detail_url: detailUrl,
+      },
+    }),
+  };
+}
+
 export async function generateDueMaintenanceOrders(throughInput: Date = new Date(), limitInput = 1_000) {
   const through = new Date(throughInput);
   if (Number.isNaN(through.getTime())) throw new Error("Mốc thời gian không hợp lệ.");
   const limit = Math.min(2_000, Math.max(1, Number(limitInput) || 1_000));
 
-  const schedules = await prisma.maintenanceSchedule.findMany({
-    where: { status: "PENDING", dueDate: { lte: through }, serviceOrder: null },
-    include: { machine: { include: { customer: true } } },
-    orderBy: { dueDate: "asc" },
-    take: limit,
-  });
+  const [schedules, approvedDealers] = await Promise.all([
+    prisma.maintenanceSchedule.findMany({
+      where: { status: "PENDING", dueDate: { lte: through }, serviceOrder: null },
+      include: {
+        machine: {
+          include: {
+            customer: true,
+            activations: { orderBy: { createdAt: "desc" }, take: 1 },
+          },
+        },
+      },
+      orderBy: { dueDate: "asc" },
+      take: limit,
+    }),
+    prisma.dealer.findMany({
+      where: { status: "APPROVED" },
+      select: {
+        id: true,
+        dealerCode: true,
+        name: true,
+        phone: true,
+        email: true,
+        province: true,
+        serviceArea: true,
+      },
+      orderBy: { dealerCode: "asc" },
+    }),
+  ]);
 
   let created = 0;
+  let assigned = 0;
+  let unassigned = 0;
   let skipped = 0;
   let careOnly = 0;
   const failed: Array<{ scheduleId: string; machineId: string; reason: string }> = [];
@@ -134,6 +246,13 @@ export async function generateDueMaintenanceOrders(throughInput: Date = new Date
       continue;
     }
 
+    const dealer = chooseMaintenanceDealer({
+      activationDealerCode: schedule.machine.activations[0]?.dealerCode,
+      provinceCode: schedule.machine.provinceCode,
+      customerAddress: customer.address,
+      dealers: approvedDealers,
+    });
+
     try {
       const orderCode = await createOrderCode(schedule.machine.provinceCode || "01");
       const order = await prisma.$transaction(async (tx) => {
@@ -148,18 +267,31 @@ export async function generateDueMaintenanceOrders(throughInput: Date = new Date
             orderCode,
             machineId: schedule.machineId,
             maintenanceScheduleId: schedule.id,
+            dealerId: dealer?.id || null,
             customerName: customer.name,
             customerPhone: customer.phone,
             address: customer.address,
             serviceType: schedule.title,
             dueDate: schedule.dueDate,
-            status: "NEW",
+            status: dealer ? "ASSIGNED" : "NEW",
           },
         });
         await tx.maintenanceSchedule.update({
           where: { id: schedule.id },
           data: { status: "ORDER_CREATED" },
         });
+        if (dealer) {
+          await tx.notification.create({
+            data: dealerOrderNotification({
+              dealer,
+              orderCode: createdOrder.orderCode,
+              customerName: createdOrder.customerName,
+              customerPhone: createdOrder.customerPhone,
+              address: createdOrder.address,
+              serviceType: createdOrder.serviceType,
+            }),
+          });
+        }
         return createdOrder;
       });
 
@@ -169,6 +301,9 @@ export async function generateDueMaintenanceOrders(throughInput: Date = new Date
       }
 
       created += 1;
+      if (dealer) assigned += 1;
+      else unassigned += 1;
+
       await queueServiceOrderCreatedNotifications({
         orderCode: order.orderCode,
         machineId: order.machineId,
@@ -176,6 +311,17 @@ export async function generateDueMaintenanceOrders(throughInput: Date = new Date
         dueDate: order.dueDate,
         customer,
       });
+      if (dealer) {
+        await queueDealerServiceOrderEmail({
+          dealer,
+          orderCode: order.orderCode,
+          machineId: order.machineId,
+          customerName: order.customerName,
+          customerPhone: order.customerPhone,
+          address: order.address,
+          serviceType: order.serviceType,
+        });
+      }
     } catch (error) {
       if (prismaCode(error) === "P2002") {
         skipped += 1;
@@ -190,5 +336,5 @@ export async function generateDueMaintenanceOrders(throughInput: Date = new Date
     }
   }
 
-  return { scanned: schedules.length, created, skipped, careOnly, failed, through };
+  return { scanned: schedules.length, created, assigned, unassigned, skipped, careOnly, failed, through };
 }

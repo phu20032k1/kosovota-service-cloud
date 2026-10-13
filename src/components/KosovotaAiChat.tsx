@@ -13,7 +13,7 @@ type ChatMessage = {
   content: string;
 };
 
-const INTRO_MESSAGE = `Tớ là A.I KOSOVOTA. Tớ có thể:
+const INTRO_MESSAGE = `Tôi là Trợ lý KOSOVOTA. Tôi có thể hỗ trợ:
 
 • Tra cứu thông tin máy, số serial và thời hạn bảo hành.
 • Hướng dẫn sử dụng, vệ sinh và bảo trì thiết bị.
@@ -23,7 +23,7 @@ const INTRO_MESSAGE = `Tớ là A.I KOSOVOTA. Tớ có thể:
 • Tìm đại lý hoặc trung tâm dịch vụ KOSOVOTA.
 • Hỗ trợ thao tác trên hệ thống quản lý KOSOVOTA.
 
-Bạn cần tớ hỗ trợ việc gì?`;
+Anh/chị cần hỗ trợ nội dung nào?`;
 
 const SUGGESTIONS = [
   "Kiểm tra bảo hành",
@@ -67,13 +67,13 @@ function getLocalReply(question: string) {
     text.includes("serial") ||
     text.includes("thoi han bao hanh")
   ) {
-    return `Để kiểm tra bảo hành, bạn hãy gửi cho tớ:
+    return `Để kiểm tra bảo hành, anh/chị vui lòng cung cấp:
 
 • Số serial của máy.
 • Mã sản phẩm hoặc tên dòng máy.
 • Số điện thoại khách hàng nếu có.
 
-Tính năng tra cứu tự động sẽ hoạt động sau khi hệ thống được kết nối với cơ sở dữ liệu máy và bảo hành.`;
+Tôi sẽ hỗ trợ kiểm tra theo thông tin hiện có trên hệ thống.`;
   }
 
   if (
@@ -81,7 +81,7 @@ Tính năng tra cứu tự động sẽ hoạt động sau khi hệ thống đư
     text.includes("ve sinh") ||
     text.includes("bao duong")
   ) {
-    return `Tớ có thể hỗ trợ bảo trì thiết bị theo các bước:
+    return `Tôi có thể hỗ trợ bảo trì thiết bị theo các bước:
 
 1. Kiểm tra tình trạng hoạt động của máy.
 2. Vệ sinh các bộ phận theo hướng dẫn.
@@ -89,7 +89,7 @@ Tính năng tra cứu tự động sẽ hoạt động sau khi hệ thống đư
 4. Kiểm tra lịch bảo trì gần nhất.
 5. Tạo lịch bảo trì tiếp theo.
 
-Bạn hãy gửi tên máy hoặc số serial để tớ hướng dẫn cụ thể hơn.`;
+Anh/chị vui lòng gửi tên máy hoặc số serial để được hướng dẫn cụ thể hơn.`;
   }
 
   if (
@@ -99,7 +99,7 @@ Bạn hãy gửi tên máy hoặc số serial để tớ hướng dẫn cụ th�
     text.includes("khong hoat dong") ||
     text.includes("khong chay")
   ) {
-    return `Tớ sẽ hỗ trợ kiểm tra lỗi máy. Bạn hãy cung cấp:
+    return `Tôi sẽ hỗ trợ kiểm tra lỗi máy. Anh/chị vui lòng cung cấp:
 
 • Tên hoặc model máy.
 • Số serial.
@@ -107,7 +107,7 @@ Bạn hãy gửi tên máy hoặc số serial để tớ hướng dẫn cụ th�
 • Mã lỗi hiển thị trên máy nếu có.
 • Ảnh hoặc video tình trạng máy nếu có.
 
-Nếu lỗi không thể xử lý từ xa, tớ sẽ hướng dẫn tạo yêu cầu kỹ thuật.`;
+Nếu cần hỗ trợ kỹ thuật trực tiếp, hệ thống có thể tạo yêu cầu để bộ phận phụ trách tiếp nhận.`;
   }
 
   if (
@@ -116,13 +116,11 @@ Nếu lỗi không thể xử lý từ xa, tớ sẽ hướng dẫn tạo yêu c
     text.includes("ky thuat vien") ||
     text.includes("noi sua")
   ) {
-    return `Tớ có thể giúp bạn tìm đại lý hoặc trung tâm dịch vụ gần nhất.
+    return `Tôi có thể hỗ trợ xác định đại lý hoặc trung tâm dịch vụ phù hợp.
 
-Bạn hãy cho tớ biết tỉnh/thành phố và quận/huyện hiện tại. Ví dụ:
+Anh/chị vui lòng cho biết tỉnh/thành phố và quận/huyện hiện tại. Ví dụ:
 
-"Hà Nội, quận Cầu Giấy"
-
-Khi dịch vụ bản đồ được cấu hình, tớ sẽ tìm trên dữ liệu đại lý và vị trí KOSOVOTA.`;
+"Hà Nội, quận Cầu Giấy"`;
   }
 
   if (
@@ -131,7 +129,7 @@ Khi dịch vụ bản đồ được cấu hình, tớ sẽ tìm trên dữ li�
     text.includes("mat khau") ||
     text.includes("otp")
   ) {
-    return `Tớ có thể hỗ trợ vấn đề đăng nhập như:
+    return `Tôi có thể hỗ trợ các vấn đề đăng nhập như:
 
 • Không nhận được mã OTP.
 • Quên mật khẩu.
@@ -139,7 +137,7 @@ Khi dịch vụ bản đồ được cấu hình, tớ sẽ tìm trên dữ li�
 • Không truy cập được trang quản trị.
 • Kiểm tra quyền của tài khoản.
 
-Bạn hãy mô tả lỗi hoặc gửi nội dung thông báo đang xuất hiện.`;
+Anh/chị vui lòng mô tả lỗi hoặc gửi nội dung thông báo đang xuất hiện.`;
   }
 
   if (
@@ -150,17 +148,15 @@ Bạn hãy mô tả lỗi hoặc gửi nội dung thông báo đang xuất hiệ
     return INTRO_MESSAGE;
   }
 
-  return `Tớ đã nhận được câu hỏi của bạn.
+  return `Tôi đã nhận được câu hỏi.
 
-Tớ chưa tìm thấy dữ liệu phù hợp. Bạn có thể hỏi theo một trong các nội dung:
+Hiện chưa có đủ thông tin để đưa ra kết quả phù hợp. Anh/chị có thể hỏi theo một trong các nội dung:
 
 • Kiểm tra bảo hành máy.
 • Máy đang gặp lỗi.
 • Hướng dẫn bảo trì.
 • Tìm trung tâm dịch vụ.
-• Hỗ trợ đăng nhập.
-
-Khi API dữ liệu được cấu hình, câu trả lời sẽ được đối chiếu theo từng máy và khách hàng.`;
+• Hỗ trợ đăng nhập.`;
 }
 
 export default function KosovotaAiChat() {

@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { geocodeAddress } from "@/lib/maps/geocode";
 import { bumpDealerCacheVersion } from "@/lib/redis";
 import { writeAudit } from "@/lib/audit";
+import { addressWithProvince } from "@/lib/province";
 
 const PAGE_SIZE = 20;
 
@@ -31,11 +32,11 @@ function geocodingConfigurationError() {
 
 function fullAddress(address: string, province?: string | null) {
   const trimmedAddress = address.trim();
-  const trimmedProvince = province?.trim() || "";
-  if (!trimmedProvince || trimmedAddress.toLocaleLowerCase("vi").includes(trimmedProvince.toLocaleLowerCase("vi"))) {
-    return trimmedAddress;
-  }
-  return `${trimmedAddress}, ${trimmedProvince}`;
+  if (!trimmedAddress) return "";
+  // province trong dữ liệu lịch sử có thể là mã số (01), mã chữ (HN) hoặc tên.
+  // Luôn đổi sang tên tỉnh trước khi gửi nhà cung cấp bản đồ để tránh query kiểu
+  // "địa chỉ, 01" khiến MapTiler/Google không nhận diện đúng địa phương.
+  return addressWithProvince(trimmedAddress, province);
 }
 
 export async function POST(request: NextRequest) {
@@ -91,10 +92,11 @@ export async function POST(request: NextRequest) {
 
       attempted += 1;
       try {
-        const location = await geocodeAddress(fullAddress(address, dealer.province));
+        const query = fullAddress(address, dealer.province);
+        const location = await geocodeAddress(query);
         if (!location || !hasUsableCoordinates(location.lat, location.lng)) {
           failed += 1;
-          if (errors.length < 20) errors.push({ dealerCode: dealer.dealerCode, message: "Không tìm thấy tọa độ phù hợp từ địa chỉ." });
+          if (errors.length < 20) errors.push({ dealerCode: dealer.dealerCode, message: `Không tìm thấy tọa độ phù hợp cho: ${query}` });
           continue;
         }
 
