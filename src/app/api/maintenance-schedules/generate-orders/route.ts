@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { hasRole } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { generateDueMaintenanceOrders } from "@/lib/maintenance-automation";
+import { endOfVietnamCalendarDay } from "@/lib/maintenance-time";
 
 export async function POST(request: NextRequest) {
   const auth = await hasRole(request, ["ADMIN", "CSKH"]);
@@ -9,11 +10,15 @@ export async function POST(request: NextRequest) {
 
   try {
     const cutoff = request.nextUrl.searchParams.get("through");
-    const through = cutoff ? new Date(cutoff) : new Date();
-    if (Number.isNaN(through.getTime())) {
+    const requestedThrough = cutoff ? new Date(cutoff) : new Date();
+    if (Number.isNaN(requestedThrough.getTime())) {
       return NextResponse.json({ success: false, message: "Mốc thời gian không hợp lệ." }, { status: 400 });
     }
 
+    // Lịch bảo trì là lịch theo ngày. Bao trọn ngày Việt Nam để một lịch được
+    // chỉnh thành "hôm nay" (ví dụ lưu lúc 12:00 +07) vẫn được sinh lệnh ngay
+    // cả khi nút được bấm vào buổi sáng.
+    const through = endOfVietnamCalendarDay(requestedThrough);
     const result = await generateDueMaintenanceOrders(through);
     await prisma.adminLog.create({
       data: {
