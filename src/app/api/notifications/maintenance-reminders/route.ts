@@ -108,9 +108,13 @@ async function run(request: NextRequest, daysInput?: unknown) {
     console.error("maintenance notification queue failed", error);
   }
 
+  const simulatedText = notificationDelivery?.simulated
+    ? `; ${notificationDelivery.simulated} thông báo chỉ mô phỏng, chưa gửi thật`
+    : "";
+
   return NextResponse.json({
     success: true,
-    message: `Đã chuẩn hóa ${provinceNormalization.updated} phạm vi tỉnh, bổ sung ${dealerIntegrity.created} hồ sơ đại lý, cập nhật GPS ${dealerGeocoding.updated} đại lý, đồng bộ ${maintenanceSync.createdSchedules} lịch, sinh ${orderGeneration.created} lệnh (${orderGeneration.assigned} đã giao đại lý, ${orderGeneration.unassigned} chờ điều phối), tạo ${queued} nhắc lịch và gửi ${notificationDelivery?.sent || 0} thông báo.`,
+    message: `Đã chuẩn hóa ${provinceNormalization.updated} phạm vi tỉnh, bổ sung ${dealerIntegrity.created} hồ sơ đại lý, cập nhật GPS ${dealerGeocoding.updated} đại lý, đồng bộ ${maintenanceSync.createdSchedules} lịch, sinh ${orderGeneration.created} lệnh (${orderGeneration.assigned} đã giao đại lý, ${orderGeneration.unassigned} chờ điều phối), tạo ${queued} nhắc lịch và gửi thật ${notificationDelivery?.sent || 0} thông báo${simulatedText}.`,
     data: {
       queued,
       skipped,
