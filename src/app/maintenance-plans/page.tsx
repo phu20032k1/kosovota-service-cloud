@@ -56,7 +56,7 @@ function dateOnly(value: string | Date) {
 }
 
 function formatDate(value: string | Date) {
-  return new Date(value).toLocaleDateString("vi-VN");
+  return new Date(value).toLocaleDateString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" });
 }
 
 function dayDiff(value: string | Date) {
@@ -229,12 +229,20 @@ export default function MaintenancePlansPage() {
       const response = await fetch(`/api/maintenance-schedules/${schedule.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dueDate: `${dueDate}T12:00:00+07:00` }),
+        body: JSON.stringify({ dueDate }),
       });
       const result = await response.json();
       if (!response.ok || !result.success) throw new Error(result.message || "Không đổi được hạn.");
-      setNotice(`Đã đổi hạn ${schedule.machineId} – ${schedule.title}.`);
-      await loadSchedules(true);
+      const savedDueDate = typeof result.data?.dueDate === "string" ? result.data.dueDate : `${dueDate}T12:00:00.000Z`;
+      setSchedules((current) => current.map((item) => item.id === schedule.id ? { ...item, dueDate: savedDueDate } : item));
+      const movedToUrgent = dayDiff(savedDueDate) <= 0;
+      setNotice(movedToUrgent
+        ? `Đã đổi hạn ${schedule.machineId} – ${schedule.title}. Lịch đã chuyển lên mục Đến hạn và quá hạn.`
+        : `Đã đổi hạn ${schedule.machineId} – ${schedule.title}.`);
+      window.setTimeout(() => {
+        const target = document.getElementById(`maintenance-schedule-${movedToUrgent ? "urgent" : "upcoming"}-${schedule.id}`);
+        target?.scrollIntoView({ behavior: "smooth", block: "center" });
+      }, 0);
     } catch (value) {
       setError(value instanceof Error ? value.message : "Không đổi được hạn.");
     } finally {
@@ -582,7 +590,10 @@ function ScheduleRow({ item, saving, onSave, urgent = false }: {
   onSave: (schedule: Schedule, dueDate: string) => Promise<void>;
   urgent?: boolean;
 }) {
-  const [dueDate, setDueDate] = useState(() => new Date(item.dueDate).toISOString().slice(0, 10));
+  const [dueDate, setDueDate] = useState(() => item.dueDate.slice(0, 10));
+  useEffect(() => {
+    setDueDate(item.dueDate.slice(0, 10));
+  }, [item.dueDate]);
   const hasOrder = Boolean(item.serviceOrder);
   const days = dayDiff(item.dueDate);
   const tone = days < 0 ? "rose" : days === 0 ? "amber" : days <= 7 ? "blue" : "slate";
@@ -594,7 +605,7 @@ function ScheduleRow({ item, saving, onSave, urgent = false }: {
   }[tone];
 
   return (
-    <article className={`grid min-w-0 gap-4 p-4 transition hover:bg-slate-50/70 sm:p-5 ${urgent ? "lg:grid-cols-[minmax(0,1fr)_auto]" : "lg:grid-cols-[minmax(0,1fr)_auto]"}`}>
+    <article id={`maintenance-schedule-${urgent ? "urgent" : "upcoming"}-${item.id}`} className={`grid min-w-0 gap-4 p-4 transition hover:bg-slate-50/70 sm:p-5 ${urgent ? "lg:grid-cols-[minmax(0,1fr)_auto]" : "lg:grid-cols-[minmax(0,1fr)_auto]"}`}>
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2">
           <span className={`rounded-full border px-2.5 py-1 text-[11px] font-black ${toneClasses}`}>{dueText(item.dueDate)}</span>
