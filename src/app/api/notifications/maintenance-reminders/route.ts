@@ -2,8 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { hasRole } from "@/lib/auth";
 import { queueMaintenanceReminderEmail } from "@/lib/notifications/events";
+import { processNotificationQueue } from "@/lib/notifications/process";
 import { generateDueMaintenanceOrders, syncMissingMaintenanceSchedules } from "@/lib/maintenance-automation";
 import { normalizeUserProvinceScopes } from "@/lib/data-normalization";
+import { geocodeMissingDealerCoordinates, reconcileDealerProfiles } from "@/lib/data-integrity";
 
 function hasCronSecret(request: NextRequest) {
   const configured = process.env.CRON_SECRET;
@@ -33,10 +35,11 @@ async function run(request: NextRequest, daysInput?: unknown) {
 
   const days = Math.min(Math.max(Number(daysInput) || 7, 1), 30);
 
-  // Cron tự chuẩn hóa dữ liệu tỉnh, bù lịch còn thiếu và sinh lệnh đến hạn.
-  // Lệnh được sinh trước để đại lý nhận việc ngay; truy vấn nhắc lịch bên dưới
-  // vẫn giữ ORDER_CREATED để việc tạo lệnh không vô tình làm mất nhắc lịch khách.
+  // Một lượt cron phải tự khép kín toàn bộ luồng cốt lõi: sửa dữ liệu có thể
+  // suy ra chắc chắn, bổ sung GPS, bù lịch, sinh lệnh, tạo nhắc và gửi hàng đợi.
   const provinceNormalization = await normalizeUserProvinceScopes(1_000);
+  const dealerIntegrity = await reconcileDealerProfiles(1_000);
+  const dealerGeocoding = await geocodeMissingDealerCoordinates(20);
   const maintenanceSync = await syncMissingMaintenanceSchedules(1_000);
   const orderGeneration = await generateDueMaintenanceOrders(new Date(), 1_000);
 
@@ -96,9 +99,18 @@ async function run(request: NextRequest, daysInput?: unknown) {
     queued += 1;
   }
 
+  let notificationDelivery: Awaited<ReturnType<typeof processNotificationQueue>> | null = null;
+  let notificationDeliveryError: string | null = null;
+  try {
+    notificationDelivery = await processNotificationQueue(100);
+  } catch (error) {
+    notificationDeliveryError = error instanceof Error ? error.message : "Không xử lý được hàng đợi thông báo.";
+    console.error("maintenance notification queue failed", error);
+  }
+
   return NextResponse.json({
     success: true,
-    message: `Đã chuẩn hóa ${provinceNormalization.updated} phạm vi tỉnh, tự đồng bộ ${maintenanceSync.createdSchedules} lịch, sinh ${orderGeneration.created} lệnh đến hạn (${orderGeneration.assigned} đã giao đại lý, ${orderGeneration.unassigned} chờ điều phối) và tạo ${queued} email nhắc lịch; bỏ qua ${skipped} thông báo đã có.`,
+    message: `Đã chuẩn hóa ${provinceNormalization.updated} phạm vi tỉnh, bổ sung ${dealerIntegrity.created} hồ sơ đại lý, cập nhật GPS ${dealerGeocoding.updated} đại lý, đồng bộ ${maintenanceSync.createdSchedules} lịch, sinh ${orderGeneration.created} lệnh (${orderGeneration.assigned} đã giao đại lý, ${orderGeneration.unassigned} chờ điều phối), tạo ${queued} nhắc lịch và gửi ${notificationDelivery?.sent || 0} thông báo.`,
     data: {
       queued,
       skipped,
@@ -108,8 +120,12 @@ async function run(request: NextRequest, daysInput?: unknown) {
       today: todayCount,
       upcoming,
       provinceNormalization,
+      dealerIntegrity,
+      dealerGeocoding,
       maintenanceSync,
       orderGeneration,
+      notificationDelivery,
+      notificationDeliveryError,
     },
   });
 }
