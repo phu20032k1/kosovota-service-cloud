@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { hasRole } from "@/lib/auth";
 import { hashPassword } from "@/lib/password";
 import { normalizePhone, isValidVietnamPhone } from "@/lib/phone";
+import { canonicalProvinceScope } from "@/lib/data-normalization";
 
 const CREATABLE_ROLES = new Set(["CSKH", "DEALER", "CTV", "KTV"]);
 
@@ -57,13 +58,13 @@ export async function POST(request: NextRequest) {
   const role = text(body.role).toUpperCase();
   const phone = normalizePhone(text(body.phone));
   const name = text(body.name);
-  const provinceScope = text(body.provinceScope) || null;
+  const provinceScope = canonicalProvinceScope(text(body.provinceScope));
   const dealerCode = text(body.dealerCode).toUpperCase() || null;
   const dealerProvince = text(body.dealerProvince) || null;
 
   if (!CREATABLE_ROLES.has(role)) return NextResponse.json({ success: false, message: "Admin chỉ tạo CSKH, Đại lý, CTV hoặc KTV." }, { status: 400 });
   if (!name || !isValidVietnamPhone(phone)) return NextResponse.json({ success: false, message: "Vui lòng nhập họ tên và số điện thoại Việt Nam hợp lệ." }, { status: 400 });
-  if (role === "CSKH" && !provinceScope) return NextResponse.json({ success: false, message: "CSKH cần provinceScope, ví dụ 01 hoặc 01,33." }, { status: 400 });
+  if (role === "CSKH" && !provinceScope) return NextResponse.json({ success: false, message: "CSKH cần được chọn ít nhất một tỉnh/thành phụ trách." }, { status: 400 });
   if (["DEALER", "KTV"].includes(role) && !dealerCode) return NextResponse.json({ success: false, message: "Đại lý/KTV bắt buộc phải có mã đại lý." }, { status: 400 });
 
   try {
@@ -168,7 +169,8 @@ export async function PATCH(request: NextRequest) {
     data.phone = phone;
   }
   if (nextRole === "CSKH") {
-    const provinceScope = "provinceScope" in body ? text(body.provinceScope) : current.provinceScope || "";
+    const rawProvinceScope = "provinceScope" in body ? text(body.provinceScope) : current.provinceScope || "";
+    const provinceScope = canonicalProvinceScope(rawProvinceScope);
     if (!provinceScope) return NextResponse.json({ success: false, message: "Tài khoản CSKH cần phạm vi tỉnh." }, { status: 400 });
     data.provinceScope = provinceScope;
     data.dealerCode = null;
