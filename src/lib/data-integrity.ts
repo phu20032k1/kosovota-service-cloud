@@ -101,6 +101,15 @@ function hasMissingCoordinates(lat: number | null, lng: number | null) {
   return !isVietnamCoordinates(lat, lng) || (Math.abs(lat) < 0.000001 && Math.abs(lng) < 0.000001);
 }
 
+async function moveGeocodeCandidateToBack(id: string) {
+  // updatedAt cũng đóng vai trò cursor mềm cho job GPS. Khi địa chỉ không thể
+  // geocode, đẩy bản ghi về cuối hàng để các đại lý khác không bị chặn mãi.
+  await prisma.dealer.update({
+    where: { id },
+    data: { updatedAt: new Date() },
+  }).catch(() => undefined);
+}
+
 /**
  * Tự xử lý một lô nhỏ đại lý có địa chỉ nhưng chưa có GPS. Job này chạy từ
  * cron nên bản đồ không còn phụ thuộc vào việc một người mở trang và bấm đồng bộ.
@@ -139,6 +148,7 @@ export async function geocodeMissingDealerCoordinates(limitInput = 25) {
       const location = await geocodeAddress(query);
       if (!location || !isVietnamCoordinates(location.lat, location.lng)) {
         failed += 1;
+        await moveGeocodeCandidateToBack(dealer.id);
         if (errors.length < 10) {
           errors.push({ dealerCode: dealer.dealerCode, message: `Không xác định được GPS cho: ${query}` });
         }
@@ -151,6 +161,7 @@ export async function geocodeMissingDealerCoordinates(limitInput = 25) {
       updated += 1;
     } catch (error) {
       failed += 1;
+      await moveGeocodeCandidateToBack(dealer.id);
       if (errors.length < 10) {
         errors.push({
           dealerCode: dealer.dealerCode,
