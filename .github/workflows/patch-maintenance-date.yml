@@ -68,3 +68,5 @@ jobs:
           git add src/app/maintenance-plans/page.tsx
           git commit -m "fix: keep adjusted maintenance date stable"
           git push origin HEAD:fix/maintenance-date-reschedule
+
+# temporary branch-only trigger
