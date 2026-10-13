@@ -3,7 +3,7 @@ import nodemailer from "nodemailer";
 import { normalizePhone } from "@/lib/phone";
 import { renderEmailHtml } from "./email-template";
 
-export type DeliveryResult = { providerMessageId: string; raw?: unknown };
+export type DeliveryResult = { providerMessageId: string; raw?: unknown; simulated?: boolean };
 export type DeliveryInput = {
   id: string;
   phone?: string | null;
@@ -112,6 +112,8 @@ async function sendEmail(input: DeliveryInput): Promise<DeliveryResult> {
 export function notificationDryRun(channel: string) {
   const normalized = channel.toUpperCase();
   if (normalized === "EMAIL") return process.env.EMAIL_DRY_RUN === "true";
+  // An toàn mặc định: SMS/Zalo không tự gửi thật nếu biến production bị thiếu.
+  // Worker sẽ đánh dấu lượt mô phỏng là chưa gửi thật thay vì báo SENT giả.
   return process.env.NOTIFICATION_DRY_RUN !== "false";
 }
 
@@ -119,7 +121,11 @@ export async function deliverNotification(input: DeliveryInput): Promise<Deliver
   const channel = input.channel.toUpperCase();
   if (notificationDryRun(channel)) {
     console.info(`[DRY RUN] ${input.channel} -> ${input.email || input.phone || "unknown"}: ${input.subject ? `${input.subject} - ` : ""}${input.content}`);
-    return { providerMessageId: `dry_${input.id}` };
+    return {
+      providerMessageId: `dry_${input.id}`,
+      simulated: true,
+      raw: { dryRun: true, channel },
+    };
   }
   if (channel === "SMS") {
     const provider = (process.env.SMS_PROVIDER || "esms").toLowerCase();
