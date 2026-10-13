@@ -4,11 +4,18 @@ import { hasRole } from "@/lib/auth";
 import { createOrderCode } from "@/lib/order-code";
 import { normalizePhone } from "@/lib/phone";
 import { queueDealerServiceOrderEmail } from "@/lib/notifications/events";
+import { processNotificationQueue } from "@/lib/notifications/process";
+import { findProvince } from "@/lib/province";
 
-function canAccessProvince(role: string, scopeValue: string | null, provinceCode?: string | null) {
+function provinceCode(value?: string | null) {
+  return findProvince(value)?.[1] || value?.trim().toUpperCase() || "";
+}
+
+function canAccessProvince(role: string, scopeValue: string | null, machineProvince?: string | null) {
   if (role !== "CSKH") return true;
-  const scopes = scopeValue?.split(",").map((value) => value.trim()).filter(Boolean) || [];
-  return !scopes.length || Boolean(provinceCode && scopes.includes(provinceCode));
+  const scopes = scopeValue?.split(",").map((value) => provinceCode(value)).filter(Boolean) || [];
+  const machineCode = provinceCode(machineProvince);
+  return !scopes.length || Boolean(machineCode && scopes.includes(machineCode));
 }
 
 function buildNotification(order: {
@@ -21,7 +28,7 @@ function buildNotification(order: {
   machine: { buildingPhoto: string | null; machinePhoto: string | null };
 }, dealer: { phone: string }, baseUrl: string) {
   const content = [
-    `KOSOVOTA: Bạn có lệnh dịch vụ mới ${order.orderCode}.`,
+    `KOSOVOTA: Đại lý có lệnh dịch vụ mới ${order.orderCode}.`,
     `Khách hàng: ${order.customerName} - ${order.customerPhone}.`,
     `Địa chỉ: ${order.address || "Chưa cập nhật"}.`,
     `Dịch vụ: ${order.serviceType}.`,
@@ -130,7 +137,23 @@ export async function POST(request: NextRequest) {
       serviceType: order.serviceType,
     });
 
-    return NextResponse.json({ success: true, message: "Đã giao lệnh và xếp thông báo gửi đại lý.", data: order });
+    // Gửi ngay sau khi giao lệnh thay vì chờ cron kế tiếp. Worker tự khóa bản ghi
+    // theo trạng thái PROCESSING nên vẫn an toàn nếu cron chạy đồng thời.
+    let delivery = null;
+    try {
+      delivery = await processNotificationQueue(20);
+    } catch (deliveryError) {
+      console.error("immediate notification processing failed", deliveryError);
+    }
+
+    return NextResponse.json({
+      success: true,
+      message: delivery?.sent
+        ? `Đã giao lệnh và gửi ${delivery.sent} thông báo đang chờ.`
+        : "Đã giao lệnh; thông báo đã được xếp hàng gửi.",
+      data: order,
+      notificationDelivery: delivery,
+    });
   } catch (error) {
     console.error("assign dealer failed", error);
     return NextResponse.json({ success: false, message: "Không giao được lệnh." }, { status: 500 });
