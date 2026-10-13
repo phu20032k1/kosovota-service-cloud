@@ -100,8 +100,6 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ success: true, data: activation ? [activation] : [] });
     }
 
-    
-
     const activations = await prisma.activation.findMany({
       where,
       include: {
@@ -122,8 +120,15 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const auth = await hasRole(request, ["DEALER", "CTV", "KTV"]);
-  if (!auth?.user.dealerCode) return errorResponse("Cần đăng nhập Đại lý, CTV hoặc KTV đã liên kết đại lý", 401);
+  const auth = await hasRole(request, ["ADMIN", "DEALER", "CTV", "KTV"]);
+  if (!auth) return errorResponse("Cần đăng nhập Admin, Đại lý, CTV hoặc KTV", 401);
+
+  const isAdmin = auth.user.role === "ADMIN";
+  const linkedDealerCode = readString(auth.user.dealerCode).toUpperCase();
+  if (!isAdmin && !linkedDealerCode) {
+    return errorResponse("Cần tài khoản Đại lý, CTV hoặc KTV đã liên kết đại lý", 401);
+  }
+
   let body: JsonObject;
 
   try {
@@ -159,7 +164,16 @@ export async function POST(request: NextRequest) {
       return saveStepOne(body, machineId);
     }
 
-    return saveStepTwo({ ...body, dealerCode: auth.user.dealerCode, installerName: readString(body.installerName) || auth.user.name, installerPhone: normalizeVietnamPhone(readString(body.installerPhone)) || auth.user.phone }, machineId, machine.model);
+    const dealerCodeForActivation = isAdmin
+      ? readString(body.dealerCode).toUpperCase()
+      : linkedDealerCode;
+
+    return saveStepTwo({
+      ...body,
+      dealerCode: dealerCodeForActivation,
+      installerName: readString(body.installerName) || auth.user.name,
+      installerPhone: normalizeVietnamPhone(readString(body.installerPhone)) || auth.user.phone,
+    }, machineId, machine.model);
   } catch (error) {
     console.error("POST /api/activations failed", error);
     return errorResponse("Không thể lưu dữ liệu kích hoạt", 500, error);
