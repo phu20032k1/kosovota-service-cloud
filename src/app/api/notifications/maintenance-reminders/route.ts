@@ -32,8 +32,9 @@ async function run(request: NextRequest, daysInput?: unknown) {
 
   const days = Math.min(Math.max(Number(daysInput) || 7, 1), 30);
 
-  // Cron này cũng tự sửa dữ liệu cũ: máy đã có ngày lắp nhưng thiếu lịch sẽ
-  // được sinh lịch trước, sau đó lịch đến hạn tự tạo lệnh dịch vụ.
+  // Cron tự bù lịch còn thiếu và sinh lệnh đến hạn. Lệnh được sinh trước để
+  // đại lý nhận việc ngay; truy vấn nhắc lịch bên dưới vẫn giữ ORDER_CREATED
+  // để việc tạo lệnh không vô tình làm mất nhắc lịch của khách hàng.
   const maintenanceSync = await syncMissingMaintenanceSchedules(1_000);
   const orderGeneration = await generateDueMaintenanceOrders(new Date(), 1_000);
 
@@ -44,11 +45,12 @@ async function run(request: NextRequest, daysInput?: unknown) {
   const dueTo = new Date(today);
   dueTo.setDate(dueTo.getDate() + days + 1);
 
-  // Không đặt gte: lịch quá hạn vẫn phải được quét và nhắc; lệnh dedupe bên dưới
-  // ngăn một lịch đã xếp hàng/gửi thành công bị tạo thông báo trùng.
+  // Không đặt gte: lịch quá hạn vẫn phải được quét và nhắc. ORDER_CREATED vẫn
+  // cần nhắc vì đây chỉ là trạng thái lệnh đã được sinh, không phải khách đã được
+  // thông báo. Dedupe notification ngăn một lịch bị xếp email nhiều lần.
   const schedules = await prisma.maintenanceSchedule.findMany({
     where: {
-      status: "PENDING",
+      status: { in: ["PENDING", "ORDER_CREATED"] },
       dueDate: { lt: dueTo },
       machine: { customer: { email: { not: null } } },
     },
@@ -94,7 +96,7 @@ async function run(request: NextRequest, daysInput?: unknown) {
 
   return NextResponse.json({
     success: true,
-    message: `Đã tự đồng bộ ${maintenanceSync.createdSchedules} lịch, sinh ${orderGeneration.created} lệnh đến hạn và tạo ${queued} email nhắc lịch; bỏ qua ${skipped} thông báo đã có.`,
+    message: `Đã tự đồng bộ ${maintenanceSync.createdSchedules} lịch, sinh ${orderGeneration.created} lệnh đến hạn (${orderGeneration.assigned} đã giao đại lý, ${orderGeneration.unassigned} chờ điều phối) và tạo ${queued} email nhắc lịch; bỏ qua ${skipped} thông báo đã có.`,
     data: {
       queued,
       skipped,
