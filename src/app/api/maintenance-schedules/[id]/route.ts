@@ -4,6 +4,34 @@ import { prisma } from "@/lib/prisma";
 import { hasRole } from "@/lib/auth";
 
 type Params = { params: Promise<{ id: string }> };
+
+function parseCalendarDueDate(value: unknown) {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(trimmed);
+    if (match) {
+      const year = Number(match[1]);
+      const month = Number(match[2]);
+      const day = Number(match[3]);
+      // Lịch bảo trì là dữ liệu theo ngày, không phải một thời điểm theo timezone.
+      // Lưu giữa ngày UTC để ngày người dùng chọn không bị nhảy sang hôm trước/sau
+      // khi trình duyệt, server và dữ liệu cũ đang ở timezone khác nhau.
+      const date = new Date(Date.UTC(year, month - 1, day, 12, 0, 0, 0));
+      if (
+        date.getUTCFullYear() === year
+        && date.getUTCMonth() === month - 1
+        && date.getUTCDate() === day
+      ) {
+        return date;
+      }
+      return null;
+    }
+  }
+
+  const parsed = new Date(value as string | number | Date);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
 export async function PATCH(request: NextRequest, { params }: Params) {
   const auth = await hasRole(request, ["ADMIN", "CSKH"]);
   if (!auth) return NextResponse.json({ success: false, message: "Chưa được cấp quyền." }, { status: 401 });
@@ -26,8 +54,8 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     data.status = body.status;
   }
   if ("dueDate" in body) {
-    const dueDate = new Date(body.dueDate);
-    if (Number.isNaN(dueDate.getTime())) return NextResponse.json({ success: false, message: "Ngày đến hạn không hợp lệ." }, { status: 400 });
+    const dueDate = parseCalendarDueDate(body.dueDate);
+    if (!dueDate) return NextResponse.json({ success: false, message: "Ngày đến hạn không hợp lệ." }, { status: 400 });
     if (current.serviceOrder) return NextResponse.json({ success: false, message: "Lịch đã sinh lệnh dịch vụ; hãy đổi hạn trên lệnh để tránh lệch dữ liệu." }, { status: 409 });
     data.dueDate = dueDate;
   }
@@ -41,6 +69,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   const schedule = await prisma.maintenanceSchedule.update({ where: { id }, data });
   return NextResponse.json({ success: true, data: schedule });
 }
+
 export async function DELETE(request: NextRequest, { params }: Params) {
   const auth = await hasRole(request, ["ADMIN"]);
   if (!auth) return NextResponse.json({ success: false, message: "Chỉ Admin được xóa lịch." }, { status: 403 });
