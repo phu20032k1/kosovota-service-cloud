@@ -15,7 +15,14 @@ export async function processNotificationQueue(limit = 20) {
     orderBy: { createdAt: "asc" },
     take: Math.min(Math.max(limit, 1), 100),
   });
-  const summary = { total: pending.length, sent: 0, failed: 0, retried: 0, items: [] as { id: string; status: string; error?: string }[] };
+  const summary = {
+    total: pending.length,
+    sent: 0,
+    simulated: 0,
+    failed: 0,
+    retried: 0,
+    items: [] as { id: string; status: string; error?: string }[],
+  };
 
   for (const notification of pending) {
     if (notification.attempts >= notification.maxAttempts) {
@@ -33,6 +40,24 @@ export async function processNotificationQueue(limit = 20) {
 
     try {
       const result = await deliverNotification(notification);
+      if (result.simulated) {
+        const error = "Kênh đang ở chế độ thử nghiệm (DRY RUN), thông báo chưa được gửi ra nhà cung cấp.";
+        await prisma.notification.update({
+          where: { id: notification.id },
+          data: {
+            status: "FAILED",
+            attempts: notification.maxAttempts,
+            providerMessageId: result.providerMessageId,
+            sentAt: null,
+            error,
+          },
+        });
+        summary.simulated += 1;
+        summary.failed += 1;
+        summary.items.push({ id: notification.id, status: "FAILED", error });
+        continue;
+      }
+
       await prisma.notification.update({
         where: { id: notification.id },
         data: { status: "SENT", providerMessageId: result.providerMessageId, sentAt: new Date(), error: null },
