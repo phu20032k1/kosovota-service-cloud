@@ -146,11 +146,17 @@ export async function POST(request: NextRequest) {
       console.error("immediate notification processing failed", deliveryError);
     }
 
+    const deliveryMessage = delivery?.simulated
+      ? `Đã giao lệnh nhưng có ${delivery.simulated} thông báo đang ở chế độ thử nghiệm, chưa gửi ra nhà cung cấp.`
+      : delivery?.sent
+        ? `Đã giao lệnh và gửi thật ${delivery.sent} thông báo đang chờ.`
+        : delivery?.failed
+          ? `Đã giao lệnh nhưng có ${delivery.failed} thông báo gửi thất bại. Vui lòng kiểm tra Trung tâm thông báo.`
+          : "Đã giao lệnh; thông báo đã được xếp hàng gửi.";
+
     return NextResponse.json({
       success: true,
-      message: delivery?.sent
-        ? `Đã giao lệnh và gửi ${delivery.sent} thông báo đang chờ.`
-        : "Đã giao lệnh; thông báo đã được xếp hàng gửi.",
+      message: deliveryMessage,
       data: order,
       notificationDelivery: delivery,
     });
