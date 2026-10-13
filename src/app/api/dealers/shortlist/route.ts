@@ -30,16 +30,30 @@ function serviceScore(serviceType: string, services?: string | null) {
   return tokens.reduce((score, token) => score + (haystack.includes(token) ? 1 : 0), 0);
 }
 
-function isTechnicalDealer(dealer: { dealerCode: string; registrationType?: string | null; technicianCount?: number | null }) {
+function isTechnicalDealer(dealer: {
+  dealerCode: string;
+  registrationType?: string | null;
+  technicianCount?: number | null;
+  services?: string | null;
+}) {
   const registration = normalize(dealer.registrationType || "");
-  if (/commercial|thuong mai/.test(registration)) return false;
-  if (/service|dich vu|collaborator|cong tac|freelancer|ctv/.test(registration)) return true;
+  const services = normalize(dealer.services || "");
+
+  // Hồ sơ CRM cũ thường chỉ ghi loại chung là "dealer" và không có số KTV.
+  // Chỉ loại khỏi điều phối khi hồ sơ được đánh dấu rõ là thương mại/bán hàng thuần túy.
+  if (/commercial|thuong mai|sales|ban hang/.test(registration)) return false;
+
+  if (/service|dich vu|collaborator|cong tac|freelancer|ctv|dealer|dai ly/.test(registration)) return true;
+  if (/lap dat|bao tri|sua chua|ky thuat|thay loi/.test(services)) return true;
   if (/ctv/.test(normalize(dealer.dealerCode))) return true;
-  return (dealer.technicianCount || 0) > 0;
+  if ((dealer.technicianCount || 0) > 0) return true;
+
+  // registrationType trống là dữ liệu legacy; hồ sơ đã APPROVED vẫn phải có thể được chọn điều phối.
+  return !registration;
 }
 
 function cacheKey(fingerprint: string, machineId: string, machineUpdatedAt: Date, serviceType: string, limit: number) {
-  return `kosovota:dealer-shortlist:${fingerprint}:${machineId}:${machineUpdatedAt.getTime()}:${cachePart(serviceType)}:${limit}`;
+  return `kosovota:dealer-shortlist:v2:${fingerprint}:${machineId}:${machineUpdatedAt.getTime()}:${cachePart(serviceType)}:${limit}`;
 }
 
 export async function POST(request: NextRequest) {
@@ -160,7 +174,9 @@ export async function POST(request: NextRequest) {
         distanceKm: Number(distanceKm(machine.lat!, machine.lng!, dealer.lat!, dealer.lng!).toFixed(2)),
       };
     })
-    .sort((a, b) => b.serviceMatchScore - a.serviceMatchScore || a.distanceKm - b.distanceKm)
+    // Lấy đại lý gần nhất trước để bộ lọc bán kính ở giao diện không bị mất
+    // ứng viên gần chỉ vì 30 hồ sơ ở xa có mô tả dịch vụ khớp từ khóa hơn.
+    .sort((a, b) => a.distanceKm - b.distanceKm || b.serviceMatchScore - a.serviceMatchScore)
     .slice(0, limit)
     .map((dealer, index) => ({ ...dealer, rank: index + 1 }));
 
