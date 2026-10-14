@@ -2,6 +2,8 @@ import { archiveToTrash } from "@/lib/trash";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { hasRole } from "@/lib/auth";
+import { generateDueMaintenanceOrders } from "@/lib/maintenance-automation";
+import { endOfVietnamCalendarDay } from "@/lib/maintenance-time";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -67,7 +69,32 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   if (!Object.keys(data).length) return NextResponse.json({ success: false, message: "Không có thay đổi hợp lệ." }, { status: 400 });
 
   const schedule = await prisma.maintenanceSchedule.update({ where: { id }, data });
-  return NextResponse.json({ success: true, data: schedule });
+
+  // Khi Admin/CSKH đưa một mốc kỹ thuật về hôm nay hoặc quá hạn, hệ thống tự
+  // sinh lệnh và tự tìm đại lý ngay. Nút "Tạo lệnh đến hạn" chỉ còn là phương án
+  // dự phòng, không còn là bước bắt buộc trong quy trình vận hành.
+  let automaticOrderGeneration: Awaited<ReturnType<typeof generateDueMaintenanceOrders>> | null = null;
+  let automaticOrderGenerationError: string | null = null;
+  if (data.dueDate && schedule.status === "PENDING") {
+    const through = endOfVietnamCalendarDay(new Date());
+    if (schedule.dueDate <= through) {
+      try {
+        automaticOrderGeneration = await generateDueMaintenanceOrders(through, 1_000);
+      } catch (error) {
+        automaticOrderGenerationError = error instanceof Error ? error.message : "Không tự sinh được lệnh đến hạn.";
+        console.error("automatic maintenance order generation failed", error);
+      }
+    }
+  }
+
+  return NextResponse.json({
+    success: true,
+    data: schedule,
+    automation: {
+      orderGeneration: automaticOrderGeneration,
+      error: automaticOrderGenerationError,
+    },
+  });
 }
 
 export async function DELETE(request: NextRequest, { params }: Params) {
