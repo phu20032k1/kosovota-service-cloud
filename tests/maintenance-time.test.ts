@@ -18,3 +18,14 @@ test("mốc gần nửa đêm UTC vẫn dùng đúng ngày lịch Việt Nam", (
   const cutoff = endOfVietnamCalendarDay(new Date("2026-10-13T18:30:00.000Z"));
   assert.equal(cutoff.toISOString(), "2026-10-14T16:59:59.999Z");
 });
+
+test("cron buổi sáng Việt Nam vẫn sinh mọi lệnh của ngày hiện tại", () => {
+  // 23:45 UTC ngày 14/10 = 06:45 ngày 15/10 tại Việt Nam. Trước đây cron dùng
+  // đúng timestamp này nên một lịch lưu giữa ngày 15/10 có thể bị bỏ sót tới hôm sau.
+  const cronRun = new Date("2026-10-14T23:45:00.000Z");
+  const cutoff = endOfVietnamCalendarDay(cronRun);
+  const storedCalendarDate = new Date("2026-10-15T12:00:00.000Z");
+
+  assert.equal(cutoff.toISOString(), "2026-10-15T16:59:59.999Z");
+  assert.ok(storedCalendarDate <= cutoff);
+});
