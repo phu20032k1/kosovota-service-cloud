@@ -4,6 +4,7 @@ import { hasRole } from "@/lib/auth";
 import { queueMaintenanceReminderEmail } from "@/lib/notifications/events";
 import { processNotificationQueue } from "@/lib/notifications/process";
 import { generateDueMaintenanceOrders, syncMissingMaintenanceSchedules } from "@/lib/maintenance-automation";
+import { endOfVietnamCalendarDay } from "@/lib/maintenance-time";
 import { normalizeUserProvinceScopes } from "@/lib/data-normalization";
 import { geocodeMissingDealerCoordinates, reconcileDealerProfiles } from "@/lib/data-integrity";
 
@@ -41,7 +42,9 @@ async function run(request: NextRequest, daysInput?: unknown) {
   const dealerIntegrity = await reconcileDealerProfiles(1_000);
   const dealerGeocoding = await geocodeMissingDealerCoordinates(20);
   const maintenanceSync = await syncMissingMaintenanceSchedules(1_000);
-  const orderGeneration = await generateDueMaintenanceOrders(new Date(), 1_000);
+  // Lịch bảo trì là dữ liệu theo ngày. Cron có thể chạy vào buổi sáng Việt Nam,
+  // vì vậy phải quét hết ngày lịch hiện tại thay vì chỉ lấy đúng thời điểm chạy.
+  const orderGeneration = await generateDueMaintenanceOrders(endOfVietnamCalendarDay(new Date()), 1_000);
 
   const now = new Date();
   const today = startOfDay(now);
