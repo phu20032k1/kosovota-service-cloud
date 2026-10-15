@@ -7,6 +7,7 @@ import { OperationsHeader } from "@/components/ui/OperationsHeader";
 import { Icon } from "@/components/ui/Icon";
 import { LoadingState } from "@/components/ui/LoadingState";
 import { Notice } from "@/components/ui/Notice";
+import { provinceName } from "@/lib/province";
 
 type MachineDetail = {
   id: string;
@@ -80,12 +81,12 @@ export default function AdminMachineDetailPage() {
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <p className="eyebrow">{isActivatedMachine(machine) ? "Máy cũ / đã kích hoạt" : "Máy mới / chưa kích hoạt"}</p>
-              <h1 className="mt-2 break-all text-2xl font-black text-slate-950">{machine.id}</h1>
+              <h1 className="mt-2 break-all text-2xl font-black text-slate-950">{machine.serial || machine.id}</h1>
               <p className="mt-1 text-slate-600">{machine.name || "Thiết bị KOSOVOTA"} · {machine.model}</p>
             </div>
             <div className="flex flex-wrap gap-2">
               <Link href="/admin/reports" className="btn-secondary"><Icon name="database" size={18}/> Danh sách máy</Link>
-              <Link href="/maintenance-plans" className="btn-secondary"><Icon name="clock" size={18}/> 4 bảng lịch thay lõi</Link>
+              <Link href="/maintenance-plans" className="btn-secondary"><Icon name="clock" size={18}/> Lịch thay lõi</Link>
               <Link href={`/qr/${encodeURIComponent(machine.id)}`} className="btn-secondary"><Icon name="qr" size={18}/> In QR</Link>
               <Link href={`/service-report/${encodeURIComponent(machine.id)}`} className="btn-primary px-4 py-3 font-bold text-white"><Icon name="wrench" size={18}/> Tạo báo cáo dịch vụ</Link>
             </div>
@@ -96,27 +97,27 @@ export default function AdminMachineDetailPage() {
           <div className="surface-card p-5 lg:col-span-2">
             <h2 className="text-lg font-black">Thông tin máy</h2>
             <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              <InfoRow label="ID/SERI" value={machine.id} />
-              <InfoRow label="Seri cần in" value={machine.serial} />
+              <InfoRow label="Mã máy" value={machine.id} />
+              <InfoRow label="Số seri" value={machine.serial} />
               <InfoRow label="Tên máy" value={machine.name} />
               <InfoRow label="Model" value={machine.model} />
               <InfoRow label="Công suất" value={machine.capacity} />
               <InfoRow label="Bảo hành" value={machine.warrantyMonths ? `${machine.warrantyMonths} tháng` : null} />
-              <InfoRow label="Năm SX" value={machine.manufactureDate ? new Date(machine.manufactureDate).getFullYear() : null} />
-              <InfoRow label="Tỉnh" value={machine.provinceCode} />
+              <InfoRow label="Năm sản xuất" value={machine.manufactureDate ? new Date(machine.manufactureDate).getFullYear() : null} />
+              <InfoRow label="Tỉnh / Thành" value={provinceName(machine.provinceCode) || machine.provinceCode} />
               <InfoRow label="Trạng thái" value={machine.status} />
-              <InfoRow label="Ngày lắp" value={date(machine.installDate)} />
+              <InfoRow label="Ngày lắp đặt" value={date(machine.installDate)} />
               <InfoRow label="Vĩ độ" value={machine.lat} />
               <InfoRow label="Kinh độ" value={machine.lng} />
             </div>
-            {machine.specification && <div className="mt-4 rounded-xl border bg-white p-4"><p className="text-xs font-bold uppercase tracking-wide text-slate-500">Thông số/ghi chú từ Excel</p><p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-slate-700">{machine.specification}</p></div>}
+            {machine.specification && <div className="mt-4 rounded-xl border bg-white p-4"><p className="text-xs font-bold uppercase tracking-wide text-slate-500">Thông số / ghi chú</p><p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-slate-700">{machine.specification}</p></div>}
           </div>
 
           <div className="surface-card p-5">
             <h2 className="text-lg font-black">Khách hàng</h2>
             <div className="mt-4 space-y-3">
-              <InfoRow label="Tên khách" value={machine.customer?.name} />
-              <InfoRow label="SĐT" value={machine.customer?.phone} />
+              <InfoRow label="Tên khách hàng" value={machine.customer?.name} />
+              <InfoRow label="Số điện thoại" value={machine.customer?.phone} />
               <InfoRow label="Địa chỉ" value={machine.customer?.address} />
             </div>
           </div>
