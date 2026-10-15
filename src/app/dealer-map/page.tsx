@@ -101,7 +101,6 @@ export default function DealerMapPage() {
   const [capability, setCapability] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [cacheState, setCacheState] = useState<string>("");
   const [syncingGps, setSyncingGps] = useState(false);
   const [forceGpsRefresh, setForceGpsRefresh] = useState(false);
   const [gpsNotice, setGpsNotice] = useState<{ kind: "success" | "error"; text: string } | null>(null);
@@ -115,7 +114,6 @@ export default function DealerMapPage() {
       const result = await response.json();
       if (!response.ok || !result.success) throw new Error(result.message || "Không tải được đại lý.");
       setDealers(result.data || []);
-      setCacheState(result.cache || "");
     } catch (value) {
       setError(value instanceof Error ? value.message : "Không tải được dữ liệu.");
     } finally {
@@ -132,12 +130,11 @@ export default function DealerMapPage() {
 
     setSyncingGps(true);
     setGpsNotice(null);
-    setGpsProgress("Đang bắt đầu đồng bộ GPS...");
+    setGpsProgress("Đang bắt đầu cập nhật vị trí...");
     setError("");
 
     let cursor: string | null = null;
     const totals = { scanned: 0, attempted: 0, updated: 0, skipped: 0, failed: 0 };
-    const sampleErrors: string[] = [];
 
     try {
       do {
@@ -147,7 +144,7 @@ export default function DealerMapPage() {
           body: JSON.stringify({ cursor, force: forceGpsRefresh }),
         });
         const result = await response.json();
-        if (!response.ok || !result.success) throw new Error(result.message || "Không đồng bộ được GPS.");
+        if (!response.ok || !result.success) throw new Error(result.message || "Không cập nhật được vị trí.");
 
         const batch = result.data as GpsSyncBatch;
         totals.scanned += batch.scanned || 0;
@@ -157,23 +154,18 @@ export default function DealerMapPage() {
         totals.failed += batch.failed || 0;
         cursor = batch.nextCursor || null;
 
-        if (Array.isArray(result.errors)) {
-          result.errors.slice(0, Math.max(0, 6 - sampleErrors.length)).forEach((item: { dealerCode?: string; message?: string }) => {
-            sampleErrors.push(`${item.dealerCode || "Không rõ mã"}: ${item.message || "Không xác định được GPS"}`);
-          });
-        }
-
-        setGpsProgress(`Đã quét ${totals.scanned} hồ sơ · cập nhật ${totals.updated} GPS · lỗi ${totals.failed}`);
+        setGpsProgress(`Đã kiểm tra ${totals.scanned} hồ sơ · cập nhật ${totals.updated} vị trí · chưa xác định ${totals.failed}`);
       } while (cursor);
 
       setSelectedId(null);
       await load();
 
-      const base = `Hoàn tất: đã cập nhật ${totals.updated}/${totals.attempted} hồ sơ cần geocode; bỏ qua ${totals.skipped}; lỗi ${totals.failed}.`;
-      const detail = sampleErrors.length ? ` Một số lỗi: ${sampleErrors.join(" · ")}` : "";
-      setGpsNotice({ kind: totals.failed > 0 ? "error" : "success", text: `${base}${detail}` });
+      const text = totals.failed > 0
+        ? `Đã cập nhật ${totals.updated}/${totals.attempted} hồ sơ. Còn ${totals.failed} hồ sơ chưa xác định được vị trí; vui lòng kiểm tra lại địa chỉ.`
+        : `Hoàn tất cập nhật vị trí cho ${totals.updated}/${totals.attempted} hồ sơ.`;
+      setGpsNotice({ kind: totals.failed > 0 ? "error" : "success", text });
     } catch (value) {
-      setGpsNotice({ kind: "error", text: value instanceof Error ? value.message : "Không đồng bộ được GPS hàng loạt." });
+      setGpsNotice({ kind: "error", text: value instanceof Error ? value.message : "Không cập nhật được vị trí đại lý." });
     } finally {
       setSyncingGps(false);
       setGpsProgress("");
@@ -244,14 +236,14 @@ export default function DealerMapPage() {
                 <Icon name="map-pin" size={19} />
               </span>
               <div>
-                <h2 className="font-black text-slate-950">Cập nhật GPS từ địa chỉ cho toàn bộ đại lý</h2>
+                <h2 className="font-black text-slate-950">Cập nhật vị trí từ địa chỉ cho toàn bộ đại lý</h2>
                 <p className="mt-0.5 text-sm text-slate-500">
-                  Mặc định chỉ xử lý hồ sơ có địa chỉ nhưng chưa có GPS hoặc đang ở (0,0). Sau khi xong, bản đồ tự tải lại và căn theo các điểm mới.
+                  Hệ thống tự xác định vị trí cho các hồ sơ đã có địa chỉ nhưng chưa có tọa độ. Sau khi hoàn tất, bản đồ sẽ tự tải lại.
                 </p>
               </div>
             </div>
             <p className="mt-3 text-xs font-bold text-slate-600">
-              {missingGpsCount} hồ sơ chưa có GPS hợp lệ · {addressReadyCount} hồ sơ đang có địa chỉ để tự định vị
+              {missingGpsCount} hồ sơ chưa có vị trí hợp lệ · {addressReadyCount} hồ sơ có thể tự định vị
             </p>
           </div>
           <div className="flex shrink-0 flex-col gap-2 sm:min-w-[340px]">
@@ -263,7 +255,7 @@ export default function DealerMapPage() {
                 disabled={syncingGps}
                 className="mt-0.5"
               />
-              <span>Cập nhật lại cả GPS đã có — dùng khi nghi tọa độ cũ sai</span>
+              <span>Cập nhật lại cả vị trí đã có khi nghi tọa độ cũ chưa chính xác</span>
             </label>
             <button
               type="button"
@@ -272,7 +264,7 @@ export default function DealerMapPage() {
               className="btn-primary inline-flex items-center justify-center gap-2 px-4 py-3 font-black text-white disabled:opacity-50"
             >
               <Icon name="refresh" size={17} className={syncingGps ? "animate-spin" : ""} />
-              {syncingGps ? "Đang cập nhật GPS..." : "Cập nhật GPS từ địa chỉ"}
+              {syncingGps ? "Đang cập nhật vị trí..." : "Cập nhật vị trí từ địa chỉ"}
             </button>
             {gpsProgress && <p className="text-center text-xs font-bold text-emerald-700">{gpsProgress}</p>}
           </div>
@@ -324,9 +316,8 @@ export default function DealerMapPage() {
           </button>
         </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
-          <span>{filtered.length} đại lý phù hợp · {located.length} có GPS</span>
-          {cacheState && <span>Redis: {cacheState}</span>}
+        <div className="text-xs text-slate-500">
+          <span>{filtered.length} đại lý phù hợp · {located.length} có vị trí trên bản đồ</span>
         </div>
 
         <div className="grid gap-3 sm:grid-cols-3">
@@ -364,10 +355,10 @@ export default function DealerMapPage() {
                   </span>
                   <h2 className="mt-4 text-xl font-extrabold">Chọn một đại lý</h2>
                   <p className="mx-auto mt-2 max-w-xs text-sm leading-6 text-slate-500">
-                    Xem nhóm năng lực, kỹ năng, số kỹ thuật viên, rating, ảnh cơ sở và gọi trực tiếp.
+                    Xem nhóm năng lực, kỹ năng, số kỹ thuật viên, đánh giá, ảnh cơ sở và gọi trực tiếp.
                   </p>
                   <p className="mx-auto mt-5 rounded-xl bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
-                    <strong>{missingGpsCount}</strong> đại lý chưa có tọa độ GPS hợp lệ.
+                    <strong>{missingGpsCount}</strong> đại lý chưa có vị trí hợp lệ trên bản đồ.
                   </p>
                 </div>
               )}
