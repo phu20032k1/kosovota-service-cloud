@@ -5,6 +5,7 @@ import { normalizePhone, isValidVietnamPhone } from "@/lib/phone";
 import { bumpDealerCacheVersion } from "@/lib/redis";
 import { checkDistributedRateLimit } from "@/lib/rate-limit";
 import { geocodeAddress } from "@/lib/maps/geocode";
+import { provinceLetterCodeOrNull, provinceName } from "@/lib/province";
 
 const REGISTRATION_TYPES = ["commercial", "service", "collaborator"] as const;
 type RegistrationType = (typeof REGISTRATION_TYPES)[number];
@@ -106,8 +107,9 @@ export async function POST(request: NextRequest) {
     const companyName = text(extra.companyName || body.companyName);
     const phone = normalizePhone(body.phone);
     const email = text(body.email).toLowerCase();
-    const province = text(body.province);
-    const provinceCode = text(body.provinceCode || body.province);
+    const provinceInput = text(body.province);
+    const provinceCodeInput = text(body.provinceCode || body.province);
+    const province = provinceLetterCodeOrNull(provinceCodeInput) || provinceLetterCodeOrNull(provinceInput) || provinceInput;
     const ward = text(body.ward);
     const address = text(body.address);
     const registrationTypeRaw = text(extra.registrationType || body.registrationType).toLowerCase();
@@ -118,7 +120,7 @@ export async function POST(request: NextRequest) {
     const citizenId = text(extra.citizenId || body.citizenId);
     const bankAccount = text(extra.bankAccount || body.bankAccount);
 
-    if (!representativeName || !isValidVietnamPhone(phone) || !/^\S+@\S+\.\S+$/.test(email) || !province || !provinceCode || !ward) {
+    if (!representativeName || !isValidVietnamPhone(phone) || !/^\S+@\S+\.\S+$/.test(email) || !province || !provinceCodeInput || !ward) {
       return NextResponse.json(
         { success: false, message: "Vui lòng nhập đủ họ tên, số điện thoại, email hợp lệ, tỉnh và xã/phường." },
         { status: 400 },
@@ -145,8 +147,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const coordinates = await coordinatesForAddress(address, numberOrNull(body.lat), numberOrNull(body.lng));
-    const { prefix, nextSequence } = await nextDealerCode(provinceCode, ward);
+    const provinceLabel = provinceName(province) || provinceInput;
+    const geocodeAddressText = [address, provinceLabel].filter(Boolean).join(", ");
+    const coordinates = await coordinatesForAddress(geocodeAddressText, numberOrNull(body.lat), numberOrNull(body.lng));
+    const { prefix, nextSequence } = await nextDealerCode(province, ward);
     let createdDealer = null;
 
     for (let offset = 0; offset < 20; offset += 1) {
@@ -230,7 +234,7 @@ export async function POST(request: NextRequest) {
           name: createdDealer.name,
           phone: createdDealer.phone,
           email: createdDealer.email,
-          province: createdDealer.province,
+          province: provinceName(createdDealer.province) || createdDealer.province,
           registrationType: createdDealer.registrationType,
           status: createdDealer.status,
           lat: createdDealer.lat,
