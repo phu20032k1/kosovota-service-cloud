@@ -10,32 +10,35 @@ function canonicalProvinceCode(value?: string | null) {
 }
 
 export async function GET(request: NextRequest) {
-  const auth = await hasRole(request, ["ADMIN", "CSKH"]);
+  const auth = await hasRole(request, ["ADMIN", "SUPER_ADMIN", "CSKH"]);
   if (!auth) return NextResponse.json({ success: false, message: "Chưa được cấp quyền." }, { status: 401 });
 
   const scopes = auth.user.provinceScope?.split(",").map((value) => value.trim()).filter(Boolean) || [];
   const canonicalScopes = new Set(scopes.map(canonicalProvinceCode).filter(Boolean));
   const scopeKey = auth.user.role === "CSKH" ? [...canonicalScopes].sort().join("|") : "ALL";
   const fingerprint = await getDealerCacheFingerprint();
-  const key = `kosovota:dealer-map:${fingerprint}:${cachePart(scopeKey)}`;
+  const key = `kosovota:dealer-map:v2:${fingerprint}:${cachePart(scopeKey)}`;
   const cached = await redisGet<unknown[]>(key);
 
   if (Array.isArray(cached)) {
     return NextResponse.json({ success: true, data: cached, cache: "HIT", cacheFingerprint: fingerprint });
   }
 
-  // Không lọc province trực tiếp trong SQL vì dữ liệu lịch sử có thể đang là
-  // "01", "HN" hoặc "Hà Nội". Lọc bằng mã tỉnh chuẩn sau khi đọc để các alias
-  // cũ vẫn hoạt động trong phạm vi CSKH.
   const dealers = await prisma.dealer.findMany({
     where: { status: "APPROVED" },
     select: {
       id: true,
       dealerCode: true,
       name: true,
+      companyName: true,
+      representativeName: true,
+      birthDate: true,
       phone: true,
+      email: true,
       address: true,
       province: true,
+      locationType: true,
+      serviceArea: true,
       services: true,
       technicianCount: true,
       rating: true,
@@ -44,6 +47,7 @@ export async function GET(request: NextRequest) {
       lng: true,
       storePhoto: true,
       warehousePhoto: true,
+      portraitPhoto: true,
       status: true,
     },
     orderBy: [{ province: "asc" }, { name: "asc" }],
