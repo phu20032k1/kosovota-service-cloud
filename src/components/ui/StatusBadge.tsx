@@ -1,5 +1,6 @@
 const tones: Record<string, string> = {
   NEW: "badge-blue", ASSIGNED: "badge-violet", IN_PROGRESS: "badge-amber", ACCEPTED: "badge-blue",
+  CALLED_NO_ANSWER: "badge-slate", CUSTOMER_ACCEPTED: "badge-blue", CUSTOMER_SELF_SERVICE: "badge-violet", CUSTOMER_INTERNAL: "badge-amber", CUSTOMER_REJECTED: "badge-rose", RESCHEDULED: "badge-blue", COMPLAINT: "badge-rose",
   WAITING_CUSTOMER: "badge-slate", RESOLVED: "badge-emerald", CLOSED: "badge-slate", COMPLETED: "badge-emerald",
   CRITICAL: "badge-rose", HIGH: "badge-rose", NORMAL: "badge-blue", LOW: "badge-slate",
   DRAFT: "badge-slate", SUBMITTED: "badge-amber", APPROVED: "badge-blue", PAID: "badge-emerald", REJECTED: "badge-rose",
@@ -9,6 +10,7 @@ const tones: Record<string, string> = {
 
 const labels: Record<string, string> = {
   NEW: "Mới", ASSIGNED: "Đã giao", IN_PROGRESS: "Đang xử lý", ACCEPTED: "Đã nhận",
+  CALLED_NO_ANSWER: "Chưa liên lạc được", CUSTOMER_ACCEPTED: "Khách đồng ý", CUSTOMER_SELF_SERVICE: "Khách tự thay", CUSTOMER_INTERNAL: "Nội bộ công ty", CUSTOMER_REJECTED: "Khách từ chối", RESCHEDULED: "Hẹn lại", COMPLAINT: "Khiếu nại",
   WAITING_CUSTOMER: "Chờ khách hàng", RESOLVED: "Đã xử lý", CLOSED: "Đã đóng", COMPLETED: "Hoàn thành",
   CRITICAL: "Khẩn cấp", HIGH: "Cao", NORMAL: "Bình thường", LOW: "Thấp",
   DRAFT: "Nháp", SUBMITTED: "Chờ duyệt", APPROVED: "Đã duyệt", PAID: "Đã thanh toán", REJECTED: "Từ chối",
