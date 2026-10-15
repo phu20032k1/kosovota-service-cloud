@@ -5,7 +5,8 @@ import { prisma } from "@/lib/prisma";
 import { hasRole } from "@/lib/auth";
 import { hashPassword } from "@/lib/password";
 import { normalizePhone, isValidVietnamPhone } from "@/lib/phone";
-import { canonicalProvinceScope } from "@/lib/data-normalization";
+import { canonicalProvinceScope, canonicalProvinceValue } from "@/lib/data-normalization";
+import { provinceName, provinceNamesForScope } from "@/lib/province";
 
 const CREATABLE_ROLES = new Set(["CSKH", "DEALER", "CTV", "KTV"]);
 
@@ -18,13 +19,14 @@ function text(value: unknown) {
 }
 
 function safeUser(user: { id: string; phone: string; name: string; role: string; dealerCode: string | null; provinceScope: string | null; active: boolean; createdAt: Date; updatedAt: Date }) {
+  const provinceNames = provinceNamesForScope(user.provinceScope);
   return {
     id: user.id,
     phone: user.phone,
     name: user.name,
     role: user.role,
     dealerCode: user.dealerCode,
-    provinceScope: user.provinceScope,
+    provinceScope: user.provinceScope ? (provinceNames.length ? provinceNames.join(", ") : user.provinceScope) : null,
     active: user.active,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
@@ -47,7 +49,11 @@ export async function GET(request: NextRequest) {
     }),
   ]);
 
-  return NextResponse.json({ success: true, data: { users: users.map(safeUser), dealers } });
+  const readableDealers = dealers.map((dealer) => ({
+    ...dealer,
+    province: provinceName(dealer.province) || dealer.province,
+  }));
+  return NextResponse.json({ success: true, data: { users: users.map(safeUser), dealers: readableDealers } });
 }
 
 export async function POST(request: NextRequest) {
@@ -60,7 +66,7 @@ export async function POST(request: NextRequest) {
   const name = text(body.name);
   const provinceScope = canonicalProvinceScope(text(body.provinceScope));
   const dealerCode = text(body.dealerCode).toUpperCase() || null;
-  const dealerProvince = text(body.dealerProvince) || null;
+  const dealerProvince = canonicalProvinceValue(text(body.dealerProvince));
 
   if (!CREATABLE_ROLES.has(role)) return NextResponse.json({ success: false, message: "Admin chỉ tạo CSKH, Đại lý, CTV hoặc KTV." }, { status: 400 });
   if (!name || !isValidVietnamPhone(phone)) return NextResponse.json({ success: false, message: "Vui lòng nhập họ tên và số điện thoại Việt Nam hợp lệ." }, { status: 400 });

@@ -5,6 +5,8 @@ import { isValidVietnamPhone, normalizePhone } from "@/lib/phone";
 import { writeAudit } from "@/lib/audit";
 import { geocodeAddress } from "@/lib/maps/geocode";
 import { bumpDealerCacheVersion } from "@/lib/redis";
+import { canonicalProvinceValue } from "@/lib/data-normalization";
+import { addressWithProvince, provinceName } from "@/lib/province";
 
 type Params = { params: Promise<{ id: string }> };
 const text = (value: unknown) => typeof value === "string" ? value.trim() : "";
@@ -24,13 +26,11 @@ function hasUsableCoordinates(lat: number | null, lng: number | null) {
   return !(Math.abs(lat) < 0.000001 && Math.abs(lng) < 0.000001);
 }
 
-function fullAddress(address: string, province?: string | null) {
-  const trimmedAddress = address.trim();
-  const trimmedProvince = province?.trim() || "";
-  if (!trimmedProvince || trimmedAddress.toLocaleLowerCase("vi").includes(trimmedProvince.toLocaleLowerCase("vi"))) {
-    return trimmedAddress;
-  }
-  return `${trimmedAddress}, ${trimmedProvince}`;
+function readableDealer<T extends { province: string | null }>(dealer: T) {
+  return {
+    ...dealer,
+    province: provinceName(dealer.province) || dealer.province,
+  };
 }
 
 export async function GET(request: NextRequest, { params }: Params) {
@@ -39,8 +39,8 @@ export async function GET(request: NextRequest, { params }: Params) {
   const { id } = await params;
   const dealer = await prisma.dealer.findUnique({ where: { id }, include: { serviceOrders: { orderBy: { createdAt: "desc" }, take: 100 }, supportTickets: { orderBy: { createdAt: "desc" }, take: 100 }, paymentBatches: { orderBy: { createdAt: "desc" }, take: 50 } } });
   if (!dealer) return NextResponse.json({ success: false, message: "Không tìm thấy đại lý." }, { status: 404 });
-  const data = hasUsableCoordinates(dealer.lat, dealer.lng) ? dealer : { ...dealer, lat: null, lng: null };
-  return NextResponse.json({ success: true, data });
+  const withCoordinates = hasUsableCoordinates(dealer.lat, dealer.lng) ? dealer : { ...dealer, lat: null, lng: null };
+  return NextResponse.json({ success: true, data: readableDealer(withCoordinates) });
 }
 
 export async function PUT(request: NextRequest, { params }: Params) {
@@ -59,8 +59,10 @@ export async function PUT(request: NextRequest, { params }: Params) {
 
   try {
     const address = text(body.address);
-    const province = text(body.province);
-    const addressChanged = address !== (current.address || "").trim() || province !== (current.province || "").trim();
+    const provinceInput = text(body.province);
+    const province = canonicalProvinceValue(provinceInput);
+    const currentProvince = canonicalProvinceValue(current.province);
+    const addressChanged = address !== (current.address || "").trim() || province !== currentProvince;
     const requestedLat = numberOrNull(body.lat);
     const requestedLng = numberOrNull(body.lng);
     const manualCoordinates = hasUsableCoordinates(requestedLat, requestedLng);
@@ -75,7 +77,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
     } else if (!manualCoordinates && (addressChanged || !hasUsableCoordinates(current.lat, current.lng))) {
       geocodeAttempted = true;
       try {
-        const location = await geocodeAddress(fullAddress(address, province));
+        const location = await geocodeAddress(addressWithProvince(address, province));
         if (location && hasUsableCoordinates(location.lat, location.lng)) {
           nextLat = location.lat;
           nextLng = location.lng;
@@ -100,7 +102,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
         birthDate: text(body.birthDate) ? new Date(text(body.birthDate)) : null,
         locationType: text(body.locationType) || null,
         email: text(body.email) || null,
-        province: province || null,
+        province,
         address: address || null,
         lat: nextLat,
         lng: nextLng,
@@ -129,10 +131,10 @@ export async function PUT(request: NextRequest, { params }: Params) {
     let message = "Đã cập nhật hồ sơ và đồng bộ mã tài khoản đại lý/KTV.";
     if (gpsAutoFilled) message += " GPS đã tự cập nhật từ địa chỉ.";
     else if (geocodeAttempted && address && !hasUsableCoordinates(nextLat, nextLng)) {
-      message += " Chưa tự ghim được GPS từ địa chỉ này; hãy kiểm tra địa chỉ hoặc cấu hình geocoding.";
+      message += " Chưa tự ghim được GPS từ địa chỉ này; hãy kiểm tra lại địa chỉ.";
     }
 
-    return NextResponse.json({ success: true, message, data: updated });
+    return NextResponse.json({ success: true, message, data: readableDealer(updated) });
   } catch (error) {
     console.error("PUT dealer detail failed", error);
     return NextResponse.json({ success: false, message: "Không cập nhật được hồ sơ đại lý." }, { status: 500 });

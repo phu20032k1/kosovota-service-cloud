@@ -5,7 +5,7 @@ import { queueMaintenanceReminderEmail } from "@/lib/notifications/events";
 import { processNotificationQueue } from "@/lib/notifications/process";
 import { generateDueMaintenanceOrders, syncMissingMaintenanceSchedules } from "@/lib/maintenance-automation";
 import { endOfVietnamCalendarDay } from "@/lib/maintenance-time";
-import { normalizeUserProvinceScopes } from "@/lib/data-normalization";
+import { normalizeStoredProvinceData } from "@/lib/data-normalization";
 import { geocodeMissingDealerCoordinates, reconcileDealerProfiles } from "@/lib/data-integrity";
 
 function hasCronSecret(request: NextRequest) {
@@ -38,7 +38,7 @@ async function run(request: NextRequest, daysInput?: unknown) {
 
   // Một lượt cron phải tự khép kín toàn bộ luồng cốt lõi: sửa dữ liệu có thể
   // suy ra chắc chắn, bổ sung GPS, bù lịch, sinh lệnh, tạo nhắc và gửi hàng đợi.
-  const provinceNormalization = await normalizeUserProvinceScopes(1_000);
+  const provinceNormalization = await normalizeStoredProvinceData(1_000);
   const dealerIntegrity = await reconcileDealerProfiles(1_000);
   const dealerGeocoding = await geocodeMissingDealerCoordinates(20);
   const maintenanceSync = await syncMissingMaintenanceSchedules(1_000);
@@ -117,7 +117,7 @@ async function run(request: NextRequest, daysInput?: unknown) {
 
   return NextResponse.json({
     success: true,
-    message: `Đã chuẩn hóa ${provinceNormalization.updated} phạm vi tỉnh, bổ sung ${dealerIntegrity.created} hồ sơ đại lý, cập nhật GPS ${dealerGeocoding.updated} đại lý, đồng bộ ${maintenanceSync.createdSchedules} lịch, sinh ${orderGeneration.created} lệnh (${orderGeneration.assigned} đã giao đại lý, ${orderGeneration.unassigned} chờ điều phối), tạo ${queued} nhắc lịch và gửi thật ${notificationDelivery?.sent || 0} thông báo${simulatedText}.`,
+    message: `Đã chuẩn hóa ${provinceNormalization.updated} dữ liệu tỉnh/thành, bổ sung ${dealerIntegrity.created} hồ sơ đại lý, cập nhật GPS ${dealerGeocoding.updated} đại lý, đồng bộ ${maintenanceSync.createdSchedules} lịch, sinh ${orderGeneration.created} lệnh (${orderGeneration.assigned} đã giao đại lý, ${orderGeneration.unassigned} chờ điều phối), tạo ${queued} nhắc lịch và gửi thật ${notificationDelivery?.sent || 0} thông báo${simulatedText}.`,
     data: {
       queued,
       skipped,
