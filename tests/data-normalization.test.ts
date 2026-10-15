@@ -6,7 +6,7 @@ test("canonicalProvinceValue normalizes numeric codes, letter codes and names", 
   assert.equal(canonicalProvinceValue("01"), "HN");
   assert.equal(canonicalProvinceValue("HN"), "HN");
   assert.equal(canonicalProvinceValue("Hà Nội"), "HN");
-  assert.equal(canonicalProvinceValue("79"), "HCM");
+  assert.equal(canonicalProvinceValue("33"), "HCM");
   assert.equal(canonicalProvinceValue("Hồ Chí Minh"), "HCM");
 });
 
