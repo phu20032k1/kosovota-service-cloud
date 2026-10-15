@@ -435,12 +435,6 @@ export default function InteractiveMap({
     }
   }, [normalizedMarkers, activeId, onSelect, ready]);
 
-  const providerLabel = maptilerKey
-    ? "MapTiler · Tiếng Việt"
-    : provider === "google" && googleKey
-      ? "Google Maps"
-      : "OpenStreetMap";
-
   return (
     <div className={`map-frame ${className}`} style={{ height }}>
       <div ref={containerRef} className="h-full w-full" aria-label="Bản đồ KOSOVOTA" />
@@ -453,13 +447,13 @@ export default function InteractiveMap({
       {error && (
         <div className="map-overlay map-error">
           <Icon name="alert" size={24} />
-          <strong>{error}</strong>
-          <span>Kiểm tra Internet hoặc khóa API trong Environment Variables.</span>
+          <strong>Không tải được bản đồ.</strong>
+          <span>Vui lòng kiểm tra kết nối mạng và thử lại.</span>
         </div>
       )}
       <div className="map-provider-badge">
         <Icon name="map" size={14} />
-        <span>Việt Nam · {providerLabel}</span>
+        <span>Bản đồ Việt Nam</span>
       </div>
     </div>
   );
