@@ -41,7 +41,6 @@ const STATUS_META: Record<MachineStatus, { label: string; color: string; classNa
 
 function statusOf(machine: Machine): MachineStatus {
   if (["INACTIVE", "BROKEN", "STOPPED"].includes(machine.status)) return "inactive";
-  if (machine.careDisabled) return "inactive";
   const pending = (machine.maintenanceSchedules || []).filter((item) => !CLOSED_SCHEDULE_STATUSES.includes(item.status));
   if (pending.some((item) => new Date(item.dueDate).getTime() < Date.now())) return "overdue";
   if (pending.some((item) => new Date(item.dueDate).getTime() < Date.now() + 30 * 86400000)) return "due";
