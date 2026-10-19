@@ -101,6 +101,7 @@ export default function ServiceOrderDetailPage() {
   const [status, setStatus] = useState("NEW");
   const [dueDate, setDueDate] = useState("");
   const [serviceFee, setServiceFee] = useState("");
+  const [workflowTicket, setWorkflowTicket] = useState<{ id: string; code: string } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -129,6 +130,7 @@ export default function ServiceOrderDetailPage() {
     if (!order) return;
     setBusy(true);
     setNotice(null);
+    setWorkflowTicket(null);
     try {
       const response = await fetch(`/api/service-orders/${order.id}`, {
         method: "PUT",
@@ -138,6 +140,8 @@ export default function ServiceOrderDetailPage() {
       const result = await readApiResponse<Order>(response);
       if (!response.ok || !result.success) throw new Error(result.message || "Không cập nhật được lệnh.");
       setNotice({ kind: "success", text: result.message || "Đã lưu trạng thái, lịch hẹn và phí dịch vụ." });
+      const workflow = result.workflow as { ticketId?: string; ticketCode?: string } | undefined;
+      if (workflow?.ticketId && workflow.ticketCode) setWorkflowTicket({ id: workflow.ticketId, code: workflow.ticketCode });
       await load();
     } catch (error) {
       setNotice({ kind: "error", text: error instanceof Error ? error.message : "Không cập nhật được lệnh." });
@@ -150,6 +154,7 @@ export default function ServiceOrderDetailPage() {
     <OperationsHeader title={order ? `Chi tiết lệnh ${order.orderCode}` : "Chi tiết lệnh dịch vụ"} subtitle="CSKH cập nhật kết quả chăm sóc, lịch hẹn, điều phối và báo cáo hiện trường" actions={<button type="button" onClick={load} className="icon-button" title="Tải lại"><Icon name="refresh" size={18}/></button>} />
     <div className="page-container space-y-5">
       {notice && <Notice kind={notice.kind}>{notice.text}</Notice>}
+      {workflowTicket && <Link href={`/admin/tickets?ticket=${encodeURIComponent(workflowTicket.id)}`} className="btn-secondary inline-flex items-center gap-2 px-4 py-3 font-bold"><Icon name="file" size={17}/>Mở yêu cầu {workflowTicket.code} để xử lý</Link>}
       {loading ? <LoadingState label="Đang tải chi tiết lệnh..."/> : !order ? <Notice kind="error">Không tìm thấy lệnh dịch vụ.</Notice> : <>
         <section className="surface-card overflow-hidden">
           <div className="order-detail-hero">

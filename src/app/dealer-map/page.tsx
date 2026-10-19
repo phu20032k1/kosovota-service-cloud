@@ -46,7 +46,7 @@ type GpsSyncBatch = {
 const META: Record<DealerType, { label: string; description: string; color: string; glyph: MapMarker["glyph"]; icon: "store" | "settings" | "wrench" }> = {
   commercial: { label: "Đại lý thương mại", description: "Bán hàng, không làm dịch vụ kỹ thuật", color: "#eab308", glyph: "store", icon: "store" },
   service: { label: "Đại lý dịch vụ", description: "Có kỹ thuật viên bảo hành, sửa chữa", color: "#16a34a", glyph: "wrench", icon: "settings" },
-  freelancer: { label: "CTV / Thợ tự do", description: "Màu marker thay đổi theo nhóm năng lực", color: "#dc2626", glyph: "user", icon: "wrench" },
+  freelancer: { label: "CTV / Thợ tự do", description: "Màu marker theo năng lực chính (đầu tiên theo ABC)", color: "#dc2626", glyph: "user", icon: "wrench" },
 };
 
 const CAPABILITY_COLORS = ["#dc2626", "#7c3aed", "#ea580c", "#0891b2", "#db2777", "#4f46e5", "#0f766e", "#b45309"];
@@ -78,8 +78,8 @@ function colorFromText(value: string) {
 function markerColor(dealer: Dealer) {
   const kind = typeOf(dealer);
   if (kind !== "freelancer") return META[kind].color;
-  const capabilities = serviceList(dealer).slice().sort((a, b) => a.localeCompare(b, "vi"));
-  return capabilities.length ? colorFromText(capabilities.join("|")) : META.freelancer.color;
+  const primaryCapability = serviceList(dealer).slice().sort((a, b) => a.localeCompare(b, "vi"))[0];
+  return primaryCapability ? colorFromText(primaryCapability) : META.freelancer.color;
 }
 
 function hasUsableCoordinates(lat?: number | null, lng?: number | null) {
@@ -162,6 +162,7 @@ export default function DealerMapPage() {
 
   const provinces = useMemo(() => [...new Set(dealers.map((dealer) => dealer.province).filter(Boolean) as string[])].sort(), [dealers]);
   const capabilities = useMemo(() => [...new Set(dealers.flatMap(serviceList))].sort((a, b) => a.localeCompare(b, "vi")), [dealers]);
+  const freelancerPrimaryCapabilities = useMemo(() => [...new Set(dealers.filter((dealer) => typeOf(dealer) === "freelancer").map((dealer) => serviceList(dealer).sort((a, b) => a.localeCompare(b, "vi"))[0]).filter((value): value is string => Boolean(value)))].sort((a, b) => a.localeCompare(b, "vi")), [dealers]);
   const filtered = useMemo(() => dealers.filter((dealer) => {
     const text = `${dealer.dealerCode} ${dealer.name} ${dealer.companyName || ""} ${dealer.representativeName || ""} ${dealer.phone} ${dealer.services || ""} ${dealer.address || ""}`.toLowerCase();
     return (!search || text.includes(search.toLowerCase())) && (!kind || typeOf(dealer) === kind) && (!province || dealer.province === province) && (!capability || serviceList(dealer).includes(capability));
@@ -185,7 +186,7 @@ export default function DealerMapPage() {
   });
 
   return <main className="min-h-screen bg-slate-50/70">
-    <OperationsHeader title="Bản đồ mạng lưới đại lý" subtitle="Vàng: thương mại · Xanh: đại lý dịch vụ · CTV/thợ: màu theo nhóm năng lực" actions={<button type="button" onClick={load} disabled={syncingGps} className="icon-button disabled:opacity-50" title="Tải lại"><Icon name="refresh" size={18}/></button>} />
+    <OperationsHeader title="Bản đồ mạng lưới đại lý" subtitle="Vàng: thương mại · Xanh: đại lý dịch vụ · CTV/thợ: màu theo năng lực chính" actions={<button type="button" onClick={load} disabled={syncingGps} className="icon-button disabled:opacity-50" title="Tải lại"><Icon name="refresh" size={18}/></button>} />
     <section className="mx-auto max-w-[1480px] space-y-4 p-3 sm:p-5">
       {error && <Notice kind="error">{error}</Notice>}
       {gpsNotice && <Notice kind={gpsNotice.kind}>{gpsNotice.text}</Notice>}
@@ -203,7 +204,7 @@ export default function DealerMapPage() {
         <button type="button" onClick={() => { setSearch(""); setProvince(""); setKind(""); setCapability(""); }} className="btn-secondary"><Icon name="x" size={17}/> Xóa lọc</button>
       </div>
 
-      <div className="surface-card flex flex-wrap items-center gap-2 px-4 py-3 text-xs text-slate-600"><strong className="mr-1 text-slate-800">Màu CTV theo năng lực:</strong>{capabilities.slice(0, 8).map((item) => <button type="button" key={item} onClick={() => setCapability(capability === item ? "" : item)} className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-1.5 font-semibold"><span className="h-2.5 w-2.5 rounded-full" style={{ background: colorFromText(item) }}/>{item}</button>)}</div>
+      <div className="surface-card flex flex-wrap items-center gap-2 px-4 py-3 text-xs text-slate-600"><strong className="mr-1 text-slate-800">Màu CTV theo năng lực chính:</strong>{freelancerPrimaryCapabilities.map((item) => <button type="button" key={item} onClick={() => setCapability(capability === item ? "" : item)} className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-1.5 font-semibold"><span className="h-2.5 w-2.5 rounded-full" style={{ background: colorFromText(item) }}/>{item}</button>)}</div>
       <div className="text-xs text-slate-500"><span>{filtered.length} đại lý phù hợp · {located.length} có vị trí trên bản đồ</span></div>
 
       <div className="grid gap-3 sm:grid-cols-3">{(Object.keys(META) as DealerType[]).map((key) => <button type="button" key={key} onClick={() => setKind(kind === key ? "" : key)} className={`metric-card text-left ${kind === key ? "ring-2 ring-emerald-500" : ""}`}><span className="metric-icon" style={{ color: META[key].color, background: `${META[key].color}18` }}><Icon name={META[key].icon}/></span><div><p className="metric-label">{META[key].label}</p><p className="metric-value">{dealers.filter((dealer) => typeOf(dealer) === key).length}</p><p className="mt-1 text-xs text-slate-500">{META[key].description}</p></div></button>)}</div>

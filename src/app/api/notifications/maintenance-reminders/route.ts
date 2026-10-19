@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getOptedOutMachineIds } from "@/lib/maintenance-optout";
 import { hasRole } from "@/lib/auth";
 import { queueMaintenanceReminderEmail } from "@/lib/notifications/events";
 import { processNotificationQueue } from "@/lib/notifications/process";
@@ -67,6 +68,7 @@ async function run(request: NextRequest, daysInput?: unknown) {
     take: 1000,
   });
 
+  const optedOut = await getOptedOutMachineIds(schedules.map((schedule) => schedule.machineId));
   let queued = 0;
   let skipped = 0;
   let overdue = 0;
@@ -74,6 +76,7 @@ async function run(request: NextRequest, daysInput?: unknown) {
   let upcoming = 0;
 
   for (const schedule of schedules) {
+    if (optedOut.has(schedule.machineId)) { skipped += 1; continue; }
     if (schedule.dueDate < today) overdue += 1;
     else if (schedule.dueDate < tomorrow) todayCount += 1;
     else upcoming += 1;

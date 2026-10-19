@@ -4,10 +4,20 @@ import { useEffect, useRef, useState } from "react";
 import { Icon } from "@/components/ui/Icon";
 
 type Location = { lat: number; lng: number };
+type LeafletMap = {
+  setView: (center: [number, number], zoom: number) => LeafletMap;
+  on: (event: string, handler: (event: { latlng: Location }) => void) => LeafletMap;
+  invalidateSize: () => void;
+  remove: () => void;
+};
+type LeafletMarker = {
+  addTo: (map: LeafletMap) => LeafletMarker;
+  setLatLng: (point: [number, number]) => LeafletMarker;
+};
 type LeafletRuntime = {
-  map: (element: HTMLElement, options?: Record<string, unknown>) => any;
-  tileLayer: (url: string, options?: Record<string, unknown>) => { addTo: (map: any) => void };
-  marker: (point: [number, number], options?: Record<string, unknown>) => any;
+  map: (element: HTMLElement, options?: Record<string, unknown>) => LeafletMap;
+  tileLayer: (url: string, options?: Record<string, unknown>) => { addTo: (map: LeafletMap) => void };
+  marker: (point: [number, number], options?: Record<string, unknown>) => LeafletMarker;
 };
 
 let leafletPromise: Promise<LeafletRuntime> | null = null;
@@ -50,8 +60,9 @@ function loadLeaflet() {
 
 export default function LocationPickerMap({ value, onChange, height = 360 }: { value?: Location | null; onChange: (location: Location) => void; height?: number }) {
   const elementRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<any>(null);
-  const markerRef = useRef<any>(null);
+  const mapRef = useRef<LeafletMap | null>(null);
+  const markerRef = useRef<LeafletMarker | null>(null);
+  const initialValue = useRef(value);
   const onChangeRef = useRef(onChange);
   const [error, setError] = useState("");
 
@@ -64,11 +75,12 @@ export default function LocationPickerMap({ value, onChange, height = 360 }: { v
       try {
         const L = await loadLeaflet();
         if (cancelled || !elementRef.current) return;
-        const center: [number, number] = value ? [value.lat, value.lng] : [16.3, 106.8];
-        const map = L.map(elementRef.current, { zoomControl: true, scrollWheelZoom: true }).setView(center, value ? 16 : 5);
+        const startValue = initialValue.current;
+        const center: [number, number] = startValue ? [startValue.lat, startValue.lng] : [16.3, 106.8];
+        const map = L.map(elementRef.current, { zoomControl: true, scrollWheelZoom: true }).setView(center, startValue ? 16 : 5);
         L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 20, attribution: "&copy; OpenStreetMap contributors" }).addTo(map);
         mapRef.current = map;
-        if (value) markerRef.current = L.marker([value.lat, value.lng]).addTo(map);
+        if (startValue) markerRef.current = L.marker([startValue.lat, startValue.lng]).addTo(map);
         map.on("click", (event: { latlng: { lat: number; lng: number } }) => {
           const next = { lat: event.latlng.lat, lng: event.latlng.lng };
           if (markerRef.current) markerRef.current.setLatLng([next.lat, next.lng]);
