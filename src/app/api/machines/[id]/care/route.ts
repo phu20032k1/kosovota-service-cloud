@@ -37,10 +37,24 @@ export async function PATCH(request: NextRequest, { params }: Params) {
           }
         } catch { /* legacy audit details do not need restoration */ }
       }
-      await prisma.$transaction([
-        prisma.maintenanceSchedule.updateMany({ where: { machineId: id, id: { in: [...ids] }, status: "DISABLED" }, data: { status: "PENDING" } }),
-        prisma.adminLog.create({ data: { userId: auth.user.id, action: CARE_ENABLED_ACTION, target: id, detail: "Admin đã bật lại chăm sóc theo yêu cầu khách hàng." } }),
-      ]);
+      await prisma.$transaction(async (tx) => {
+        const schedules = await tx.maintenanceSchedule.findMany({
+          where: { machineId: id, id: { in: [...ids] }, status: "DISABLED" },
+          include: { serviceOrder: { select: { id: true, dealerId: true, status: true } } },
+        });
+        for (const schedule of schedules) {
+          if (schedule.serviceOrder) {
+            if (schedule.serviceOrder.status === "CANCELLED") await tx.serviceOrder.update({
+              where: { id: schedule.serviceOrder.id },
+              data: { status: schedule.serviceOrder.dealerId ? "ASSIGNED" : "NEW" },
+            });
+            await tx.maintenanceSchedule.update({ where: { id: schedule.id }, data: { status: "ORDER_CREATED" } });
+          } else {
+            await tx.maintenanceSchedule.update({ where: { id: schedule.id }, data: { status: "PENDING" } });
+          }
+        }
+        await tx.adminLog.create({ data: { userId: auth.user.id, action: CARE_ENABLED_ACTION, target: id, detail: "Admin đã bật lại chăm sóc và các lệnh liên quan theo yêu cầu khách hàng." } });
+      });
     }
     return NextResponse.json({ success: true, data: { disabled: body.disabled }, message: body.disabled ? "Đã tắt chăm sóc và lịch nhắc của máy." : "Đã bật lại chăm sóc và lịch nhắc của máy." });
   } catch (error) {
