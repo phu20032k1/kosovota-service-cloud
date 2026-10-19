@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { getOptedOutMachineIds } from "@/lib/maintenance-optout";
 import { buildMaintenanceSchedulesFromTemplates, type MaintenanceTemplate } from "@/lib/maintenance";
 import { getConfiguredMaintenanceTemplates } from "@/lib/maintenance-config";
 import { createOrderCode } from "@/lib/order-code";
@@ -30,13 +31,14 @@ export async function syncMissingMaintenanceSchedules(limitInput = 500) {
     take: limit,
   });
 
+  const optedOut = await getOptedOutMachineIds(machines.map((machine) => machine.id));
   let createdSchedules = 0;
   const syncedMachineIds: string[] = [];
   const failed: Array<{ machineId: string; reason: string }> = [];
   const templateCache = new Map<string, MaintenanceTemplate[]>();
 
   for (const machine of machines) {
-    if (!machine.installDate) continue;
+    if (!machine.installDate || optedOut.has(machine.id)) continue;
     try {
       const cacheKey = machine.model.trim().toUpperCase();
       let templates = templateCache.get(cacheKey);
@@ -216,6 +218,7 @@ export async function generateDueMaintenanceOrders(throughInput: Date = new Date
     }),
   ]);
 
+  const optedOut = await getOptedOutMachineIds(schedules.map((schedule) => schedule.machineId));
   let created = 0;
   let assigned = 0;
   let unassigned = 0;
@@ -225,6 +228,7 @@ export async function generateDueMaintenanceOrders(throughInput: Date = new Date
   const templateCache = new Map<string, MaintenanceTemplate[]>();
 
   for (const schedule of schedules) {
+    if (optedOut.has(schedule.machineId)) { skipped += 1; continue; }
     const modelKey = schedule.machine.model.trim().toUpperCase();
     let templates = templateCache.get(modelKey);
     if (!templates) {
