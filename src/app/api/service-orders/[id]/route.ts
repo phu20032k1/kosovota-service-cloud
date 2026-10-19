@@ -6,6 +6,7 @@ import { queueServiceStatusEmail } from "@/lib/notifications/events";
 import { databaseErrorMessage } from "@/lib/database-errors";
 import { protectServiceOrderCustomerData } from "@/lib/service-order-privacy";
 import { createTicketCode } from "@/lib/enterprise-codes";
+import { CARE_DISABLED_ACTION } from "@/lib/maintenance-optout";
 
 type Params = { params: Promise<{ id: string }> };
 const ALLOWED_STATUSES = ["NEW", "CALLED_NO_ANSWER", "CUSTOMER_ACCEPTED", "CUSTOMER_SELF_SERVICE", "CUSTOMER_INTERNAL", "CUSTOMER_REJECTED", "RESCHEDULED", "COMPLAINT", "ASSIGNED", "ACCEPTED", "IN_PROGRESS", "COMPLETED", "CANCELLED"];
@@ -19,6 +20,21 @@ async function getAuthorizedOrder(request: NextRequest, id: string) {
   if (["DEALER", "CTV"].includes(auth.user.role) && order.dealer?.dealerCode !== auth.user.dealerCode) return { auth: null, order: null };
   if (auth.user.role === "KTV" && order.technicianId !== auth.user.id) return { auth: null, order: null };
   return { auth, order };
+}
+
+async function chooseCareAssignee(user: { id: string; role: string }, ownerId?: string | null, provinceCode?: string | null) {
+  if (user.role === "CSKH") return user.id;
+  if (ownerId) {
+    const owner = await prisma.user.findFirst({ where: { id: ownerId, active: true, role: { in: ["ADMIN", "CSKH"] } }, select: { id: true } });
+    if (owner) return owner.id;
+  }
+  const staff = await prisma.user.findMany({
+    where: { active: true, role: "CSKH" },
+    select: { id: true, provinceScope: true },
+    orderBy: { createdAt: "asc" },
+  });
+  const matched = staff.find((member) => !member.provinceScope || !provinceCode || member.provinceScope.split(",").map((part) => part.trim()).includes(provinceCode));
+  return matched?.id || staff[0]?.id || user.id;
 }
 
 async function ensureCareWorkflowTicket(input: {
@@ -36,12 +52,16 @@ async function ensureCareWorkflowTicket(input: {
     where: {
       machineId: input.machineId,
       type: input.kind,
-      status: { notIn: ["RESOLVED", "CLOSED"] },
       description: { contains: marker },
     },
-    select: { id: true, ticketCode: true },
+    select: { id: true, ticketCode: true, assigneeId: true, status: true },
   });
-  if (existing) return { ticketCode: existing.ticketCode, created: false };
+  if (existing) {
+    if (!existing.assigneeId && input.assigneeId && !["RESOLVED", "CLOSED", "CANCELLED"].includes(existing.status)) {
+      await prisma.supportTicket.update({ where: { id: existing.id }, data: { assigneeId: input.assigneeId, status: "ASSIGNED" } });
+    }
+    return { id: existing.id, ticketCode: existing.ticketCode, created: false };
+  }
 
   const ticketCode = await createTicketCode();
   const materialSale = input.kind === "MATERIAL_SALE";
@@ -60,7 +80,7 @@ async function ensureCareWorkflowTicket(input: {
         source: "CSKH_WORKFLOW",
         subject,
         description,
-        status: "NEW",
+        status: input.assigneeId ? "ASSIGNED" : "NEW",
         priority: "NORMAL",
         customerId: input.customerId || null,
         machineId: input.machineId,
@@ -82,7 +102,8 @@ async function ensureCareWorkflowTicket(input: {
       });
     }
   });
-  return { ticketCode, created: true };
+  const ticket = await prisma.supportTicket.findUniqueOrThrow({ where: { ticketCode }, select: { id: true } });
+  return { id: ticket.id, ticketCode, created: true };
 }
 
 export async function GET(request: NextRequest, { params }: Params) {
@@ -143,7 +164,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
       include: { machine: { include: { customer: true, activations: true, maintenanceSchedules: true } }, dealer: true, technician: true, reports: true, maintenanceSchedule: true, sourceTicket: { include: { messages: { orderBy: { createdAt: "asc" } } } } },
     });
 
-    const workflow: { ticketCode?: string; disabledSchedules?: number; cancelledOrders?: number } = {};
+    const workflow: { ticketCode?: string; ticketId?: string; disabledSchedules?: number; cancelledOrders?: number } = {};
 
     if (status === "CUSTOMER_REJECTED") {
       const openSchedules = await prisma.maintenanceSchedule.findMany({
@@ -157,7 +178,10 @@ export async function PUT(request: NextRequest, { params }: Params) {
           where: { id: { not: current.id }, maintenanceScheduleId: { in: scheduleIds }, status: { in: ACTIVE_SERVICE_STATUSES } },
           data: { status: "CANCELLED" },
         }),
-      ]);
+        prisma.adminLog.create({
+          data: { userId: auth.user.id, action: CARE_DISABLED_ACTION, target: current.machineId, detail: JSON.stringify({ scheduleIds, orderId: current.id }) },
+        }),
+      ]).then(([disabled, cancelled]) => [disabled, cancelled] as const);
       workflow.disabledSchedules = disabled.count;
       workflow.cancelledOrders = cancelled.count;
       if (order.machine.customer?.id) {
@@ -173,6 +197,10 @@ export async function PUT(request: NextRequest, { params }: Params) {
       }
     }
 
+    const careAssigneeId = status === "CUSTOMER_SELF_SERVICE" || status === "CUSTOMER_INTERNAL"
+      ? await chooseCareAssignee(auth.user, current.machine.customer?.ownerId, current.machine.provinceCode)
+      : null;
+
     if (status === "CUSTOMER_SELF_SERVICE") {
       if (current.maintenanceScheduleId) await prisma.maintenanceSchedule.update({ where: { id: current.maintenanceScheduleId }, data: { status: "SELF_SERVICE" } });
       const ticket = await ensureCareWorkflowTicket({
@@ -182,10 +210,11 @@ export async function PUT(request: NextRequest, { params }: Params) {
         customerId: current.machine.customer?.id,
         customerName: current.machine.customer?.name || current.customerName,
         customerPhone: current.machine.customer?.phone || current.customerPhone,
-        assigneeId: auth.user.role === "CSKH" ? auth.user.id : null,
+        assigneeId: careAssigneeId,
         kind: "MATERIAL_SALE",
       });
       workflow.ticketCode = ticket.ticketCode;
+      workflow.ticketId = ticket.id;
     }
 
     if (status === "CUSTOMER_INTERNAL") {
@@ -197,10 +226,11 @@ export async function PUT(request: NextRequest, { params }: Params) {
         customerId: current.machine.customer?.id,
         customerName: current.machine.customer?.name || current.customerName,
         customerPhone: current.machine.customer?.phone || current.customerPhone,
-        assigneeId: auth.user.role === "CSKH" ? auth.user.id : null,
+        assigneeId: careAssigneeId,
         kind: "INTERNAL_CARE",
       });
       workflow.ticketCode = ticket.ticketCode;
+      workflow.ticketId = ticket.id;
     }
 
     if (status && status !== current.status && order.machine.customer && status !== "CUSTOMER_INTERNAL") {
