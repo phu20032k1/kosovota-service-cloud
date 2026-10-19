@@ -39,6 +39,7 @@ export function MaterialSaleEditor({ ticketId, onSaved }: { ticketId: string; on
   const editable = order?.status === "DRAFT" || order?.status === "CONFIRMED";
   const total = useMemo(() => (order?.lines || []).reduce((sum, line) => sum + Number(line.quantity || 0) * Number(line.unitPrice || 0), 0), [order]);
   const selectedWarehouse = data?.warehouses.find((item) => item.id === order?.warehouseId);
+  const unsavedDetails = Boolean(data && order && (JSON.stringify(order.lines) !== JSON.stringify(data.order.lines) || order.note !== data.order.note));
   function updateLine(index: number, patch: Partial<MaterialSaleLine>) {
     setOrder((current) => current ? { ...current, lines: current.lines.map((line, position) => position === index ? { ...line, ...patch } : line) } : current);
   }
@@ -107,7 +108,8 @@ export function MaterialSaleEditor({ ticketId, onSaved }: { ticketId: string; on
       <label className="block text-xs font-bold text-slate-600">Ghi chú giao hàng<textarea rows={2} value={order.note} disabled={!editable || busy} onChange={(event) => setOrder({ ...order, note: event.target.value })} className="mt-1 w-full" placeholder="Địa chỉ nhận, cách thanh toán, lưu ý cho CSKH..."/></label>
       <div className="flex flex-wrap gap-2">
         {order.status === "DRAFT" && <><button type="button" disabled={busy} onClick={() => void save("DRAFT")} className="btn-secondary">Lưu nháp</button><button type="button" disabled={busy || !order.lines.length} onClick={() => void save("CONFIRMED")} className="btn-primary px-4 py-2 font-bold text-white disabled:opacity-50">Chốt đơn</button></>}
-        {order.status === "CONFIRMED" && <><button type="button" disabled={busy} onClick={() => void save("CONFIRMED")} className="btn-secondary">Lưu chỉnh sửa</button><button type="button" disabled={busy || !order.warehouseId} onClick={() => void save("SHIPPED")} className="btn-primary px-4 py-2 font-bold text-white disabled:opacity-50">Xuất kho & giao</button></>}
+        {order.status === "CONFIRMED" && <><button type="button" disabled={busy} onClick={() => void save("CONFIRMED")} className="btn-secondary">Lưu chỉnh sửa</button><button type="button" disabled={busy || !order.warehouseId || unsavedDetails} onClick={() => void save("SHIPPED")} className="btn-primary px-4 py-2 font-bold text-white disabled:opacity-50">Xuất kho & giao</button></>}
+        {order.status === "CONFIRMED" && unsavedDetails && <p className="w-full text-xs font-semibold text-amber-700">Lưu chỉnh sửa vật tư và giá trước khi xuất kho.</p>}
         {order.status === "SHIPPED" && <button type="button" disabled={busy} onClick={() => void save("DELIVERED")} className="btn-primary px-4 py-2 font-bold text-white disabled:opacity-50">Xác nhận đã giao</button>}
         {editable && <button type="button" disabled={busy} onClick={() => void save("CANCELLED")} className="rounded-xl border border-rose-200 px-4 py-2 text-sm font-bold text-rose-700 disabled:opacity-50">Hủy đơn</button>}
       </div>
