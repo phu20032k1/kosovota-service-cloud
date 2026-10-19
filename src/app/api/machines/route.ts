@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getOptedOutMachineIds } from "@/lib/maintenance-optout";
 import { hasRole } from "@/lib/auth";
 import { geocodeAddress } from "@/lib/maps/geocode";
 import { provinceFromAddress, provinceLetterCodeOrNull } from "@/lib/province";
@@ -117,10 +118,11 @@ export async function GET(request: NextRequest) {
     });
 
     const gpsBackfilledCount = await backfillMachineGpsFromCustomerAddress(machines);
+    const careDisabled = await getOptedOutMachineIds(machines.map((machine) => machine.id));
 
     return NextResponse.json({
       success: true,
-      data: machines,
+      data: machines.map((machine) => ({ ...machine, careDisabled: careDisabled.has(machine.id) })),
       gpsBackfilledCount,
       message: gpsBackfilledCount
         ? `Đã tự ghim GPS cho ${gpsBackfilledCount} máy từ địa chỉ khách hàng.`
