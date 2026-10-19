@@ -18,6 +18,7 @@ type Machine = {
   model: string;
   serial?: string | null;
   status: string;
+  careDisabled?: boolean;
   installDate?: string | null;
   lat?: number | null;
   lng?: number | null;
@@ -40,6 +41,7 @@ const STATUS_META: Record<MachineStatus, { label: string; color: string; classNa
 
 function statusOf(machine: Machine): MachineStatus {
   if (["INACTIVE", "BROKEN", "STOPPED"].includes(machine.status)) return "inactive";
+  if (machine.careDisabled) return "inactive";
   const pending = (machine.maintenanceSchedules || []).filter((item) => !CLOSED_SCHEDULE_STATUSES.includes(item.status));
   if (pending.some((item) => new Date(item.dueDate).getTime() < Date.now())) return "overdue";
   if (pending.some((item) => new Date(item.dueDate).getTime() < Date.now() + 30 * 86400000)) return "due";
@@ -66,6 +68,7 @@ export default function CustomerMapPage() {
   const [editingLocation, setEditingLocation] = useState(false);
   const [draftLocation, setDraftLocation] = useState<Location | null>(null);
   const [savingLocation, setSavingLocation] = useState(false);
+  const [savingCare, setSavingCare] = useState(false);
   const [notice, setNotice] = useState<{ kind: "success" | "error" | "info"; text: string } | null>(null);
 
   const load = useCallback(async (silent = false) => {
@@ -159,6 +162,24 @@ export default function CustomerMapPage() {
     }
   }
 
+  async function resumeCare() {
+    if (!selected || savingCare || !window.confirm("Bật lại lịch chăm sóc và nhắc bảo trì cho máy này?")) return;
+    setSavingCare(true);
+    setNotice(null);
+    try {
+      const response = await fetch(`/api/machines/${encodeURIComponent(selected.id)}/care`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ disabled: false }),
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.message || "Không bật lại được chăm sóc.");
+      setMachines((current) => current.map((machine) => machine.id === selected.id ? { ...machine, careDisabled: false } : machine));
+      setNotice({ kind: "success", text: result.message || "Đã bật lại chăm sóc." });
+      void load(true);
+    } catch (error) {
+      setNotice({ kind: "error", text: error instanceof Error ? error.message : "Không cập nhật được chăm sóc." });
+    } finally { setSavingCare(false); }
+  }
+
   return (
     <main className="min-h-screen bg-slate-50/70">
       <OperationsHeader title="Bản đồ máy khách hàng" subtitle="Theo dõi vị trí, trạng thái, lịch sử chăm sóc và vòng đời thiết bị" actions={<button type="button" onClick={() => void load()} className="icon-button" title="Tải lại"><Icon name="refresh" size={18}/></button>} />
@@ -189,6 +210,8 @@ export default function CustomerMapPage() {
                 machine={selected}
                 onClose={() => selectMachine("")}
                 canEditLocation={canEditLocation}
+                savingCare={savingCare}
+                onResumeCare={() => void resumeCare()}
                 editingLocation={editingLocation}
                 draftLocation={draftLocation}
                 savingLocation={savingLocation}
@@ -205,10 +228,12 @@ export default function CustomerMapPage() {
   );
 }
 
-function MachineDetail({ machine, onClose, canEditLocation, editingLocation, draftLocation, savingLocation, onStartLocationEdit, onCancelLocationEdit, onLocationChange, onSaveLocation }: {
+function MachineDetail({ machine, onClose, canEditLocation, savingCare, onResumeCare, editingLocation, draftLocation, savingLocation, onStartLocationEdit, onCancelLocationEdit, onLocationChange, onSaveLocation }: {
   machine: Machine;
   onClose: () => void;
   canEditLocation: boolean;
+  savingCare: boolean;
+  onResumeCare: () => void;
   editingLocation: boolean;
   draftLocation: Location | null;
   savingLocation: boolean;
@@ -237,6 +262,7 @@ function MachineDetail({ machine, onClose, canEditLocation, editingLocation, dra
       <Info icon="map-pin" label="GPS hiện tại" value={machine.lat != null && machine.lng != null ? `${machine.lat.toFixed(6)}, ${machine.lng.toFixed(6)}` : "Chưa có GPS"}/>
     </div>
 
+    {machine.careDisabled && <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-3"><p className="text-sm font-bold text-amber-900">Khách đã từ chối chăm sóc tự động. Hệ thống không sinh lịch, lệnh hoặc email nhắc mới.</p>{canEditLocation && <button type="button" onClick={onResumeCare} disabled={savingCare} className="btn-secondary mt-3 w-full justify-center disabled:opacity-50">{savingCare ? "Đang bật lại..." : "Bật lại chăm sóc theo yêu cầu khách"}</button>}</div>}
     {canEditLocation && !editingLocation && <button type="button" onClick={onStartLocationEdit} className="btn-secondary mt-5 w-full justify-center"><Icon name="map-pin" size={17}/> Chỉnh vị trí máy trên bản đồ</button>}
     {editingLocation && <div className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50/60 p-3">
       <p className="mb-3 text-sm font-black text-emerald-900">Chọn lại vị trí GPS</p>
