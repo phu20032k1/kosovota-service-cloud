@@ -162,6 +162,7 @@ export default function DealerMapPage() {
 
   const provinces = useMemo(() => [...new Set(dealers.map((dealer) => dealer.province).filter(Boolean) as string[])].sort(), [dealers]);
   const capabilities = useMemo(() => [...new Set(dealers.flatMap(serviceList))].sort((a, b) => a.localeCompare(b, "vi")), [dealers]);
+  const freelancerPrimaryCapabilities = useMemo(() => [...new Set(dealers.filter((dealer) => typeOf(dealer) === "freelancer").map((dealer) => serviceList(dealer).sort((a, b) => a.localeCompare(b, "vi"))[0]).filter((value): value is string => Boolean(value)))].sort((a, b) => a.localeCompare(b, "vi")), [dealers]);
   const filtered = useMemo(() => dealers.filter((dealer) => {
     const text = `${dealer.dealerCode} ${dealer.name} ${dealer.companyName || ""} ${dealer.representativeName || ""} ${dealer.phone} ${dealer.services || ""} ${dealer.address || ""}`.toLowerCase();
     return (!search || text.includes(search.toLowerCase())) && (!kind || typeOf(dealer) === kind) && (!province || dealer.province === province) && (!capability || serviceList(dealer).includes(capability));
@@ -203,7 +204,7 @@ export default function DealerMapPage() {
         <button type="button" onClick={() => { setSearch(""); setProvince(""); setKind(""); setCapability(""); }} className="btn-secondary"><Icon name="x" size={17}/> Xóa lọc</button>
       </div>
 
-      <div className="surface-card flex flex-wrap items-center gap-2 px-4 py-3 text-xs text-slate-600"><strong className="mr-1 text-slate-800">Màu CTV theo năng lực chính:</strong>{capabilities.slice(0, 8).map((item) => <button type="button" key={item} onClick={() => setCapability(capability === item ? "" : item)} className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-1.5 font-semibold"><span className="h-2.5 w-2.5 rounded-full" style={{ background: colorFromText(item) }}/>{item}</button>)}</div>
+      <div className="surface-card flex flex-wrap items-center gap-2 px-4 py-3 text-xs text-slate-600"><strong className="mr-1 text-slate-800">Màu CTV theo năng lực chính:</strong>{freelancerPrimaryCapabilities.map((item) => <button type="button" key={item} onClick={() => setCapability(capability === item ? "" : item)} className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-1.5 font-semibold"><span className="h-2.5 w-2.5 rounded-full" style={{ background: colorFromText(item) }}/>{item}</button>)}</div>
       <div className="text-xs text-slate-500"><span>{filtered.length} đại lý phù hợp · {located.length} có vị trí trên bản đồ</span></div>
 
       <div className="grid gap-3 sm:grid-cols-3">{(Object.keys(META) as DealerType[]).map((key) => <button type="button" key={key} onClick={() => setKind(kind === key ? "" : key)} className={`metric-card text-left ${kind === key ? "ring-2 ring-emerald-500" : ""}`}><span className="metric-icon" style={{ color: META[key].color, background: `${META[key].color}18` }}><Icon name={META[key].icon}/></span><div><p className="metric-label">{META[key].label}</p><p className="metric-value">{dealers.filter((dealer) => typeOf(dealer) === key).length}</p><p className="mt-1 text-xs text-slate-500">{META[key].description}</p></div></button>)}</div>
