@@ -3,6 +3,7 @@ import { OperationsHeader } from "@/components/ui/OperationsHeader";
 import { Icon, type IconName } from "@/components/ui/Icon";
 
 const tools: Array<{ href: string; title: string; description: string; icon: IconName }> = [
+  { href: "/cskh/report", title: "Báo cáo chăm sóc hàng ngày", description: "Bảng 22 cột theo mẫu IIPMAP: gọi chăm sóc, chốt dịch vụ, tìm Top 10 đại lý và nhận kết quả dịch vụ.", icon: "file" },
   { href: "/cskh/customers", title: "Khách hàng", description: "Tìm khách hàng, máy và Seri trong đúng phạm vi tỉnh được giao.", icon: "users" },
   { href: "/cskh/dealers", title: "Đại lý theo tỉnh", description: "Danh sách chỉ đọc; không có quyền sửa, xóa hoặc duyệt đại lý.", icon: "store" },
   { href: "/cskh/requests", title: "Yêu cầu khách hàng", description: "Tạo, theo dõi và xem lệnh điều phối liên kết của từng yêu cầu.", icon: "file" },
