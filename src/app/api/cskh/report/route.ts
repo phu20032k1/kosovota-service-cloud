@@ -7,19 +7,6 @@ import { databaseErrorMessage } from "@/lib/database-errors";
 
 const CARE_ACTIVITY_MARKER = /\[service-order:([^\]]+)\]/;
 const FINISHED = new Set(["COMPLETED", "CANCELLED"]);
-const CARED_STATUSES = new Set([
-  "CALLED_NO_ANSWER",
-  "CUSTOMER_ACCEPTED",
-  "CUSTOMER_SELF_SERVICE",
-  "CUSTOMER_INTERNAL",
-  "CUSTOMER_REJECTED",
-  "RESCHEDULED",
-  "COMPLAINT",
-  "ASSIGNED",
-  "ACCEPTED",
-  "IN_PROGRESS",
-  "COMPLETED",
-]);
 
 function iso(value?: Date | null) {
   return value ? value.toISOString() : null;
@@ -107,6 +94,7 @@ export async function GET(request: NextRequest) {
         || order.sourceTicket?.assignee?.name
         || (auth.user.role === "CSKH" ? auth.user.name : "")
         || "";
+      const reportCount = latestReport ? Math.max(1, order.reports.length) : 0;
 
       return {
         id: order.id,
@@ -142,15 +130,18 @@ export async function GET(request: NextRequest) {
         }),
         serviceType: order.serviceType,
         status: order.status,
-        reportCount: order.reports.length,
+        reportCount,
         updatedAt: order.updatedAt.toISOString(),
       };
     });
 
     const todayEnd = new Date();
     todayEnd.setHours(23, 59, 59, 999);
-    const due = new Set(rows.filter((row) => row.date && new Date(row.date) <= todayEnd && !FINISHED.has(row.status)).map((row) => row.machineId)).size;
-    const cared = new Set(rows.filter((row) => Boolean(row.currentCareResult) || CARED_STATUSES.has(row.status)).map((row) => row.machineId)).size;
+    const due = new Set(rows.filter((row) => {
+      const careDate = row.nextCareDate || row.date;
+      return Boolean(careDate && new Date(careDate) <= todayEnd && !FINISHED.has(row.status));
+    }).map((row) => row.machineId)).size;
+    const cared = new Set(rows.filter((row) => Boolean(row.currentCareResult)).map((row) => row.machineId)).size;
     const serviced = new Set(rows.filter((row) => row.reportCount > 0 || row.status === "COMPLETED").map((row) => row.machineId)).size;
     const assigned = new Set(rows.filter((row) => Boolean(row.dealerCode)).map((row) => row.machineId)).size;
 
