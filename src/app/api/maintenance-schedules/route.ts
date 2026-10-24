@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { hasRole } from "@/lib/auth";
+import { expandProvinceScope } from "@/lib/province";
 
 export async function GET(request: NextRequest) {
   const auth = await hasRole(request, ["ADMIN", "CSKH"]);
@@ -11,12 +12,12 @@ export async function GET(request: NextRequest) {
     const statuses = statusParam
       ? statusParam.split(",").map((value) => value.trim()).filter(Boolean)
       : [];
-    const scopes = auth.user.provinceScope?.split(",").map((value: string) => value.trim()).filter(Boolean) || [];
+    const scope = auth.user.role === "CSKH" ? expandProvinceScope(auth.user.provinceScope) : [];
     const schedules = await prisma.maintenanceSchedule.findMany({
       where: {
         ...(machineId ? { machineId } : {}),
         ...(statuses.length === 1 ? { status: statuses[0] } : statuses.length > 1 ? { status: { in: statuses } } : {}),
-        ...(auth.user.role === "CSKH" && scopes.length ? { machine: { provinceCode: { in: scopes } } } : {}),
+        ...(scope.length ? { machine: { provinceCode: { in: scope } } } : {}),
       },
       include: { machine: { include: { customer: true } }, serviceOrder: true },
       orderBy: { dueDate: "asc" },
