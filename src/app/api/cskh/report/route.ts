@@ -6,7 +6,6 @@ import { expandProvinceScope, provinceFromAddress, provinceName } from "@/lib/pr
 import { databaseErrorMessage } from "@/lib/database-errors";
 
 const CARE_ACTIVITY_MARKER = /\[service-order:([^\]]+)\]/;
-const FINISHED = new Set(["COMPLETED", "CANCELLED"]);
 const CLOSED_SCHEDULES = new Set(["COMPLETED", "DISABLED", "SELF_SERVICE", "INTERNAL"]);
 const CARED_STATUSES = new Set([
   "CALLED_NO_ANSWER",
@@ -30,6 +29,10 @@ function orderIdFromActivity(detail?: string | null) {
   return detail?.match(CARE_ACTIVITY_MARKER)?.[1] || null;
 }
 
+function orderTime(order: { dueDate?: Date | null; updatedAt: Date; createdAt: Date }) {
+  return (order.dueDate || order.updatedAt || order.createdAt).getTime();
+}
+
 export async function GET(request: NextRequest) {
   const auth = await hasRole(request, ["SUPER_ADMIN", "ADMIN", "CSKH"]);
   if (!auth) return NextResponse.json({ success: false, message: "Chưa được cấp quyền." }, { status: 401 });
@@ -39,8 +42,6 @@ export async function GET(request: NextRequest) {
     const todayEnd = new Date();
     todayEnd.setHours(23, 59, 59, 999);
 
-    // Báo cáo tác nghiệp CSKH chỉ hiển thị các lịch đang mở đã đến hạn hoặc quá hạn.
-    // Lịch tương lai không xuất hiện; mỗi lịch đến hạn là một dòng riêng để không làm mất công việc.
     const dueSchedules = await prisma.maintenanceSchedule.findMany({
       where: {
         status: { notIn: Array.from(CLOSED_SCHEDULES) },
@@ -67,7 +68,7 @@ export async function GET(request: NextRequest) {
               },
               orderBy: { dueDate: "asc" },
             },
-            serviceReports: { orderBy: { createdAt: "desc" }, take: 10 },
+            serviceReports: { orderBy: { createdAt: "desc" }, take: 20 },
             serviceOrders: {
               where: { status: { not: "CANCELLED" } },
               include: {
@@ -133,10 +134,18 @@ export async function GET(request: NextRequest) {
         const activationDate = machine.installDate || activation?.createdAt || null;
         const currentCareResult = order ? (careActivity?.summary || careStatusLabel(order.status)) : "";
         const previousCareResult = previousCare?.summary || "";
-        const lastCareDate = previousCare?.occurredAt || customer?.lastContactAt || null;
-        const lastCareWork = machine.serviceReports.find((report) => report.id !== latestReport?.id)?.serviceType
-          || (previousCare ? previousCare.summary : "")
-          || "";
+
+        const previousOrders = machine.serviceOrders
+          .filter((item) => item.id !== order?.id)
+          .filter((item) => orderTime(item) < schedule.dueDate.getTime())
+          .sort((a, b) => orderTime(b) - orderTime(a));
+        const previousOrder = previousOrders[0] || null;
+        const previousReport = previousOrder?.reports[0]
+          || machine.serviceReports.find((report) => report.orderId && report.orderId !== order?.id)
+          || null;
+
+        const lastCareDate = previousCare?.occurredAt || previousOrder?.updatedAt || customer?.lastContactAt || null;
+        const lastCareWork = previousOrder?.serviceType || previousReport?.serviceType || "";
         const cskhName = (careActivity?.userId ? userName.get(careActivity.userId) : null)
           || order?.sourceTicket?.assignee?.name
           || "";
