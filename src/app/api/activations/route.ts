@@ -169,7 +169,10 @@ export async function POST(request: NextRequest) {
     if (step === 1) {
       const completed = await prisma.activation.findUnique({ where: { machineId_step: { machineId, step: 2 } }, select: { id: true } });
       if (completed) return errorResponse("Máy đã hoàn tất kích hoạt, không thể ghi đè bước 1", 409);
-      return saveStepOne(body, machineId);
+      const dealerCodeForStepOne = isAdmin
+        ? readString(body.dealerCode).toUpperCase()
+        : linkedDealerCode;
+      return saveStepOne({ ...body, dealerCode: dealerCodeForStepOne }, machineId);
     }
 
     const dealerCodeForActivation = isAdmin
@@ -194,6 +197,7 @@ async function saveStepOne(body: JsonObject, machineId: string) {
   const ownerEmail = readOptionalString(body.ownerEmail ?? body.email ?? body.customerEmail);
   const address = readOptionalString(body.address);
   const mode = readString(body.mode).toLowerCase() || "normal";
+  const dealerCode = readString(body.dealerCode).toUpperCase();
 
   const location = readNestedObject(body.location);
   const latitude =
@@ -272,11 +276,13 @@ async function saveStepOne(body: JsonObject, machineId: string) {
       create: {
         machineId,
         step: 1,
+        dealerCode: dealerCode || null,
         ownerName,
         ownerPhone,
         note: readOptionalString(body.note) ?? `Chế độ kích hoạt: ${mode}`,
       },
       update: {
+        ...(dealerCode ? { dealerCode } : {}),
         ownerName,
         ownerPhone,
         note: readOptionalString(body.note) ?? `Chế độ kích hoạt: ${mode}`,
@@ -304,7 +310,7 @@ async function saveStepOne(body: JsonObject, machineId: string) {
       data: {
         action: "ACTIVATION_STEP_1_SAVED",
         target: machineId,
-        detail: `Đã lưu bước 1 cho máy ${machineId}, khách hàng ${ownerPhone}`,
+        detail: `Đã lưu bước 1 cho máy ${machineId}, khách hàng ${ownerPhone}${dealerCode ? `, đại lý ${dealerCode}` : ""}`,
       },
     });
 
