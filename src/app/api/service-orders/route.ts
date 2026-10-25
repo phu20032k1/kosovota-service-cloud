@@ -6,7 +6,7 @@ import { createOrderCode } from "@/lib/order-code";
 import { queueServiceOrderCreatedNotifications } from "@/lib/notifications/events";
 import { databaseErrorMessage } from "@/lib/database-errors";
 import { protectServiceOrderCustomerData } from "@/lib/service-order-privacy";
-import { effectiveProvinceCode, provinceScopeAllows } from "@/lib/province-access";
+import { cskhScopeAllows, effectiveProvinceCode } from "@/lib/province-access";
 
 const ORDER_INCLUDE = {
   machine: { include: { customer: true } },
@@ -37,10 +37,13 @@ export async function GET(request: NextRequest) {
     });
 
     const scopedOrders = auth.user.role === "CSKH"
-      ? orders.filter((order) => provinceScopeAllows(
-          auth.user.provinceScope,
-          order.machine.provinceCode,
-          order.machine.customer?.address || order.address,
+      ? orders.filter((order) => cskhScopeAllows(
+          auth.user,
+          {
+            provinceValue: order.machine.provinceCode,
+            address: order.machine.customer?.address || order.address,
+            customerId: order.machine.customerId,
+          },
         ))
       : orders;
 
@@ -60,25 +63,20 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const machineId = typeof body.machineId === "string" ? body.machineId.trim() : "";
     const serviceType = typeof body.serviceType === "string" ? body.serviceType.trim() : "";
-    if (!machineId || !serviceType) {
-      return NextResponse.json({ success: false, message: "Thiếu ID máy hoặc dịch vụ." }, { status: 400 });
-    }
+    if (!machineId || !serviceType) return NextResponse.json({ success: false, message: "Thiếu ID máy hoặc dịch vụ." }, { status: 400 });
 
     const machine = await prisma.machine.findUnique({ where: { id: machineId }, include: { customer: true } });
     if (!machine) return NextResponse.json({ success: false, message: "Không tìm thấy máy." }, { status: 404 });
-    if (auth.user.role === "CSKH" && !provinceScopeAllows(
-      auth.user.provinceScope,
-      machine.provinceCode,
-      machine.customer?.address,
+    if (auth.user.role === "CSKH" && !cskhScopeAllows(
+      auth.user,
+      { provinceValue: machine.provinceCode, address: machine.customer?.address, customerId: machine.customerId },
     )) {
       return NextResponse.json({ success: false, message: "Máy nằm ngoài phạm vi được phân công." }, { status: 403 });
     }
 
     const customerName = (typeof body.customerName === "string" && body.customerName.trim()) || machine.customer?.name;
     const customerPhone = normalizePhone(body.customerPhone || machine.customer?.phone);
-    if (!customerName || !customerPhone) {
-      return NextResponse.json({ success: false, message: "Máy chưa có đủ thông tin khách hàng." }, { status: 400 });
-    }
+    if (!customerName || !customerPhone) return NextResponse.json({ success: false, message: "Máy chưa có đủ thông tin khách hàng." }, { status: 400 });
 
     const orderCode = await createOrderCode(effectiveProvinceCode(machine.provinceCode, machine.customer?.address) || "01");
     const order = await prisma.serviceOrder.create({
@@ -100,13 +98,7 @@ export async function POST(request: NextRequest) {
 
     await prisma.adminLog.create({ data: { userId: auth.user.id, action: "CREATE_SERVICE_ORDER", target: order.orderCode } });
     if (order.machine.customer) {
-      await queueServiceOrderCreatedNotifications({
-        orderCode: order.orderCode,
-        machineId: order.machineId,
-        serviceType: order.serviceType,
-        dueDate: order.dueDate,
-        customer: order.machine.customer,
-      });
+      await queueServiceOrderCreatedNotifications({ orderCode: order.orderCode, machineId: order.machineId, serviceType: order.serviceType, dueDate: order.dueDate, customer: order.machine.customer });
     }
     return NextResponse.json({ success: true, message: "Đã tạo lệnh dịch vụ.", data: order }, { status: 201 });
   } catch (error) {
