@@ -18,7 +18,28 @@ function text(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function safeUser(user: { id: string; phone: string; name: string; role: string; dealerCode: string | null; provinceScope: string | null; active: boolean; createdAt: Date; updatedAt: Date }) {
+function freeScope(value: unknown) {
+  const seen = new Set<string>();
+  return text(value)
+    .split(/[,;|\n]+/)
+    .map((item) => item.trim())
+    .filter((item) => {
+      if (!item) return false;
+      const key = item.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .join(",") || null;
+}
+
+function validateCskhScopes(provinceScope: string | null, wardScope: string | null, customerScope: string | null) {
+  if (!provinceScope && !wardScope && !customerScope) return "CSKH cần được phân ít nhất theo tỉnh/thành, xã/phường hoặc mã khách hàng.";
+  if (wardScope && !provinceScope) return "Khi phân theo xã/phường, cần chọn thêm tỉnh/thành để tránh trùng tên địa bàn.";
+  return null;
+}
+
+function safeUser(user: { id: string; phone: string; name: string; role: string; dealerCode: string | null; provinceScope: string | null; wardScope: string | null; customerScope: string | null; active: boolean; createdAt: Date; updatedAt: Date }) {
   const provinceNames = provinceNamesForScope(user.provinceScope);
   return {
     id: user.id,
@@ -27,6 +48,8 @@ function safeUser(user: { id: string; phone: string; name: string; role: string;
     role: user.role,
     dealerCode: user.dealerCode,
     provinceScope: user.provinceScope ? (provinceNames.length ? provinceNames.join(", ") : user.provinceScope) : null,
+    wardScope: user.wardScope,
+    customerScope: user.customerScope,
     active: user.active,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
@@ -65,12 +88,17 @@ export async function POST(request: NextRequest) {
   const phone = normalizePhone(text(body.phone));
   const name = text(body.name);
   const provinceScope = canonicalProvinceScope(text(body.provinceScope));
+  const wardScope = freeScope(body.wardScope);
+  const customerScope = freeScope(body.customerScope);
   const dealerCode = text(body.dealerCode).toUpperCase() || null;
   const dealerProvince = canonicalProvinceValue(text(body.dealerProvince));
 
   if (!CREATABLE_ROLES.has(role)) return NextResponse.json({ success: false, message: "Admin chỉ tạo CSKH, Đại lý, CTV hoặc KTV." }, { status: 400 });
   if (!name || !isValidVietnamPhone(phone)) return NextResponse.json({ success: false, message: "Vui lòng nhập họ tên và số điện thoại Việt Nam hợp lệ." }, { status: 400 });
-  if (role === "CSKH" && !provinceScope) return NextResponse.json({ success: false, message: "CSKH cần được chọn ít nhất một tỉnh/thành phụ trách." }, { status: 400 });
+  if (role === "CSKH") {
+    const scopeError = validateCskhScopes(provinceScope, wardScope, customerScope);
+    if (scopeError) return NextResponse.json({ success: false, message: scopeError }, { status: 400 });
+  }
   if (["DEALER", "KTV"].includes(role) && !dealerCode) return NextResponse.json({ success: false, message: "Đại lý/KTV bắt buộc phải có mã đại lý." }, { status: 400 });
 
   try {
@@ -125,6 +153,8 @@ export async function POST(request: NextRequest) {
           role,
           dealerCode: ["DEALER", "CTV", "KTV"].includes(role) ? resolvedDealerCode : null,
           provinceScope: role === "CSKH" ? provinceScope : null,
+          wardScope: role === "CSKH" ? wardScope : null,
+          customerScope: role === "CSKH" ? customerScope : null,
           password: hashPassword(initialPassword),
           active: true,
         },
@@ -177,8 +207,13 @@ export async function PATCH(request: NextRequest) {
   if (nextRole === "CSKH") {
     const rawProvinceScope = "provinceScope" in body ? text(body.provinceScope) : current.provinceScope || "";
     const provinceScope = canonicalProvinceScope(rawProvinceScope);
-    if (!provinceScope) return NextResponse.json({ success: false, message: "Tài khoản CSKH cần phạm vi tỉnh." }, { status: 400 });
+    const wardScope = "wardScope" in body ? freeScope(body.wardScope) : current.wardScope;
+    const customerScope = "customerScope" in body ? freeScope(body.customerScope) : current.customerScope;
+    const scopeError = validateCskhScopes(provinceScope, wardScope, customerScope);
+    if (scopeError) return NextResponse.json({ success: false, message: scopeError }, { status: 400 });
     data.provinceScope = provinceScope;
+    data.wardScope = wardScope;
+    data.customerScope = customerScope;
     data.dealerCode = null;
   }
   if (["DEALER", "CTV", "KTV"].includes(nextRole) && ("role" in body || "dealerCode" in body)) {
@@ -202,6 +237,8 @@ export async function PATCH(request: NextRequest) {
     }
     data.dealerCode = dealerCode;
     data.provinceScope = null;
+    data.wardScope = null;
+    data.customerScope = null;
   }
 
   let initialPassword: string | null = null;
