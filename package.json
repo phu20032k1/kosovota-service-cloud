@@ -28,7 +28,7 @@
     "test:sms": "tsx scripts/test-notification.ts SMS",
     "test:zalo": "tsx scripts/test-notification.ts ZALO",
     "test:regression": "node --import tsx --test tests/*.test.ts",
-    "vercel-build": "prisma db execute --file prisma/migrations/20261025233000_add_cskh_ward_customer_scopes/migration.sql --schema prisma/schema.prisma && prisma generate && next build"
+    "vercel-build": "prisma generate && next build"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
