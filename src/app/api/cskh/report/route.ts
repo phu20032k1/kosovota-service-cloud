@@ -60,7 +60,7 @@ export async function GET(request: NextRequest) {
           where: { id: { in: candidateIds } },
           include: {
             customer: { include: { owner: { select: { id: true, name: true } } } },
-            activations: { orderBy: { step: "asc" } },
+            activations: { where: { step: 2 }, orderBy: { createdAt: "desc" }, take: 1 },
             maintenanceSchedules: {
               where: {
                 status: { notIn: Array.from(CLOSED_SCHEDULES) },
@@ -118,8 +118,7 @@ export async function GET(request: NextRequest) {
 
     const rows = scopedMachines.flatMap((machine) => {
       const customer = machine.customer;
-      const stepOneActivation = machine.activations.find((activation) => activation.step === 1) || null;
-      const stepTwoActivation = machine.activations.find((activation) => activation.step === 2) || null;
+      const activation = machine.activations[0] || null;
       const activeSchedules = machine.maintenanceSchedules.filter((schedule) => dueScheduleIds.has(schedule.id));
 
       return activeSchedules.map((schedule) => {
@@ -132,7 +131,7 @@ export async function GET(request: NextRequest) {
         const customerActivities = customer ? activitiesByCustomer.get(customer.id) || [] : [];
         const previousCare = customerActivities.find((activity) => !order || orderIdFromActivity(activity.detail) !== order.id) || null;
         const latestReport = order?.reports[0] || null;
-        const activationDate = machine.installDate || stepTwoActivation?.createdAt || stepOneActivation?.createdAt || null;
+        const activationDate = machine.installDate || activation?.createdAt || null;
         const currentCareResult = order ? (careActivity?.summary || careStatusLabel(order.status)) : "";
         const previousCareResult = previousCare?.summary || "";
 
@@ -170,11 +169,7 @@ export async function GET(request: NextRequest) {
           ward: splitAddress.ward,
           street: splitAddress.street || address,
           cskhName,
-          activationStep1DealerCode: stepOneActivation?.dealerCode || "",
-          activationStep1Date: iso(stepOneActivation?.createdAt || null),
-          activationStep2DealerCode: stepTwoActivation?.dealerCode || "",
-          activationStep2Date: iso(stepTwoActivation?.createdAt || null),
-          activationDealerCode: stepTwoActivation?.dealerCode || "",
+          activationDealerCode: activation?.dealerCode || "",
           activationDate: iso(activationDate),
           lastCareDate: iso(lastCareDate),
           lastCareWork,
