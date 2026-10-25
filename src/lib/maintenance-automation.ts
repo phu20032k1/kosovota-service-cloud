@@ -262,12 +262,8 @@ export async function generateDueMaintenanceOrders(
       templateCache.set(modelKey, templates);
     }
     const configuredTemplate = templates.find((item) => normalizedTitle(item.title) === normalizedTitle(schedule.title));
-    if (configuredTemplate?.customerCare) {
-      // Mốc chăm sóc chỉ cần nhắc CSKH/khách hàng, không tự biến thành lệnh kỹ thuật.
-      careOnly += 1;
-      skipped += 1;
-      continue;
-    }
+    const isCustomerCare = Boolean(configuredTemplate?.customerCare);
+    if (isCustomerCare) careOnly += 1;
 
     const customer = schedule.machine.customer;
     if (!customer?.phone) {
@@ -276,12 +272,17 @@ export async function generateDueMaintenanceOrders(
       continue;
     }
 
-    const dealer = chooseMaintenanceDealer({
-      activationDealerCode: schedule.machine.activations[0]?.dealerCode,
-      provinceCode: schedule.machine.provinceCode,
-      customerAddress: customer.address,
-      dealers: approvedDealers,
-    });
+    // Lịch CSKH cũng cần một lệnh ở trạng thái NEW để nhân viên có thể thao tác
+    // trực tiếp trên Report. Tuy nhiên không tự giao đại lý cho lịch chăm sóc;
+    // chỉ sau khi CSKH ghi nhận khách cần dịch vụ mới chọn/giao đại lý.
+    const dealer = isCustomerCare
+      ? null
+      : chooseMaintenanceDealer({
+          activationDealerCode: schedule.machine.activations[0]?.dealerCode,
+          provinceCode: schedule.machine.provinceCode,
+          customerAddress: customer.address,
+          dealers: approvedDealers,
+        });
 
     try {
       const orderProvince = effectiveProvinceCode(schedule.machine.provinceCode, customer.address) || "01";
