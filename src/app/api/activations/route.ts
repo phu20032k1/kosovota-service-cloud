@@ -6,6 +6,7 @@ import { hasRole } from "@/lib/auth";
 import { normalizePhone as normalizeVietnamPhone, isValidVietnamPhone } from "@/lib/phone";
 import { queueActivationCompletedNotifications } from "@/lib/notifications/events";
 import { provinceFromAddress } from "@/lib/province";
+import { provinceScopeAllows } from "@/lib/province-access";
 type JsonObject = Record<string, unknown>;
 
 function errorResponse(message: string, status = 400, detail?: unknown) {
@@ -88,7 +89,7 @@ export async function GET(request: NextRequest) {
       ...(machineId ? { machineId } : {}),
       ...(step ? { step } : {}),
     };
-    const auth = await hasRole(request, ["ADMIN", "CSKH"]);
+    const auth = await hasRole(request, ["SUPER_ADMIN", "ADMIN", "CSKH"]);
     if (!auth) {
       if (!machineId || !step) {
         return errorResponse("Chỉ được kiểm tra trạng thái kích hoạt của một máy cụ thể", 403);
@@ -112,7 +113,14 @@ export async function GET(request: NextRequest) {
       },
       orderBy: [{ machineId: "asc" }, { step: "asc" }],
     });
-    return NextResponse.json({ success: true, data: activations });
+    const scopedActivations = auth.user.role === "CSKH"
+      ? activations.filter((activation) => provinceScopeAllows(
+          auth.user.provinceScope,
+          activation.machine.provinceCode,
+          activation.machine.customer?.address,
+        ))
+      : activations;
+    return NextResponse.json({ success: true, data: scopedActivations });
   } catch (error) {
     console.error("GET /api/activations failed", error);
     return errorResponse("Không tải được dữ liệu kích hoạt", 500, error);
@@ -120,10 +128,10 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const auth = await hasRole(request, ["ADMIN", "DEALER", "CTV", "KTV"]);
+  const auth = await hasRole(request, ["SUPER_ADMIN", "ADMIN", "DEALER", "CTV", "KTV"]);
   if (!auth) return errorResponse("Cần đăng nhập Admin, Đại lý, CTV hoặc KTV", 401);
 
-  const isAdmin = auth.user.role === "ADMIN";
+  const isAdmin = auth.user.role === "ADMIN" || auth.user.role === "SUPER_ADMIN";
   const linkedDealerCode = readString(auth.user.dealerCode).toUpperCase();
   if (!isAdmin && !linkedDealerCode) {
     return errorResponse("Cần tài khoản Đại lý, CTV hoặc KTV đã liên kết đại lý", 401);
@@ -397,8 +405,6 @@ async function saveStepTwo(body: JsonObject, machineId: string, model: string) {
   let result;
   try {
     result = await prisma.$transaction(async (tx) => {
-      // Dùng create thay vì upsert để unique(machineId, step) làm khóa idempotency.
-      // Hai request đồng thời: chỉ một request được tạo lịch và gửi thông báo.
       const activation = await tx.activation.create({
         data: {
           machineId,
