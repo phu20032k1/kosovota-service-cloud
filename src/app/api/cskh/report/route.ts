@@ -38,11 +38,12 @@ export async function GET(request: NextRequest) {
     const scope = auth.user.role === "CSKH" ? expandProvinceScope(auth.user.provinceScope) : [];
     const machines = await prisma.machine.findMany({
       where: {
-        installDate: { not: null },
         customerId: { not: null },
-        ...(scope.length
-          ? { OR: [{ provinceCode: { in: scope } }, { provinceCode: null }] }
-          : {}),
+        OR: [
+          { installDate: { not: null } },
+          { activations: { some: { step: 2 } } },
+          { maintenanceSchedules: { some: { status: { notIn: Array.from(CLOSED_SCHEDULES) } } } },
+        ],
       },
       include: {
         customer: { include: { owner: { select: { id: true, name: true } } } },
