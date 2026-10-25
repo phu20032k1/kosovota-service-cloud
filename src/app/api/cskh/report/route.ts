@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { hasRole } from "@/lib/auth";
 import { careStatusLabel, monthsBetween, serviceResultLabel, splitVietnamAddress } from "@/lib/cskh-report";
-import { expandProvinceScope, provinceFromAddress, provinceName } from "@/lib/province";
+import { provinceFromAddress, provinceName } from "@/lib/province";
+import { cskhScopeAllows } from "@/lib/province-access";
 import { databaseErrorMessage } from "@/lib/database-errors";
 
 const CARE_ACTIVITY_MARKER = /\[service-order:([^\]]+)\]/;
@@ -21,33 +22,20 @@ const CARED_STATUSES = new Set([
   "COMPLETED",
 ]);
 
-function iso(value?: Date | null) {
-  return value ? value.toISOString() : null;
-}
-
-function orderIdFromActivity(detail?: string | null) {
-  return detail?.match(CARE_ACTIVITY_MARKER)?.[1] || null;
-}
-
-function orderTime(order: { dueDate?: Date | null; updatedAt: Date; createdAt: Date }) {
-  return (order.dueDate || order.updatedAt || order.createdAt).getTime();
-}
+function iso(value?: Date | null) { return value ? value.toISOString() : null; }
+function orderIdFromActivity(detail?: string | null) { return detail?.match(CARE_ACTIVITY_MARKER)?.[1] || null; }
+function orderTime(order: { dueDate?: Date | null; updatedAt: Date; createdAt: Date }) { return (order.dueDate || order.updatedAt || order.createdAt).getTime(); }
 
 export async function GET(request: NextRequest) {
   const auth = await hasRole(request, ["SUPER_ADMIN", "ADMIN", "CSKH"]);
   if (!auth) return NextResponse.json({ success: false, message: "Chưa được cấp quyền." }, { status: 401 });
 
   try {
-    const scope = auth.user.role === "CSKH" ? expandProvinceScope(auth.user.provinceScope) : [];
     const todayEnd = new Date();
     todayEnd.setHours(23, 59, 59, 999);
 
-    // Báo cáo giữ cả lịch đã hoàn thành để làm lịch sử. Chỉ các trạng thái kỹ thuật/không cần theo dõi mới bị ẩn.
     const reportSchedules = await prisma.maintenanceSchedule.findMany({
-      where: {
-        status: { notIn: Array.from(HIDDEN_SCHEDULES) },
-        dueDate: { lte: todayEnd },
-      },
+      where: { status: { notIn: Array.from(HIDDEN_SCHEDULES) }, dueDate: { lte: todayEnd } },
       select: { id: true, machineId: true, title: true, dueDate: true, status: true },
       orderBy: { dueDate: "asc" },
       take: 5000,
@@ -63,13 +51,7 @@ export async function GET(request: NextRequest) {
           include: {
             customer: { include: { owner: { select: { id: true, name: true } } } },
             activations: { where: { step: 2 }, orderBy: { createdAt: "desc" }, take: 1 },
-            maintenanceSchedules: {
-              where: {
-                status: { notIn: Array.from(HIDDEN_SCHEDULES) },
-                dueDate: { lte: todayEnd },
-              },
-              orderBy: { dueDate: "asc" },
-            },
+            maintenanceSchedules: { where: { status: { notIn: Array.from(HIDDEN_SCHEDULES) }, dueDate: { lte: todayEnd } }, orderBy: { dueDate: "asc" } },
             serviceReports: { orderBy: { createdAt: "desc" }, take: 20 },
             serviceOrders: {
               where: { status: { not: "CANCELLED" } },
@@ -85,29 +67,21 @@ export async function GET(request: NextRequest) {
         })
       : [];
 
-    const scopedMachines = scope.length
+    const scopedMachines = auth.user.role === "CSKH"
       ? machines.filter((machine) => {
-          const fallbackAddress = machine.customer?.address || machine.serviceOrders[0]?.address || "";
-          const inferredCode = machine.provinceCode || provinceFromAddress(fallbackAddress)?.[1] || null;
-          return Boolean(inferredCode && scope.includes(inferredCode));
+          const address = machine.customer?.address || machine.serviceOrders[0]?.address || "";
+          return cskhScopeAllows(auth.user, { provinceValue: machine.provinceCode, address, customerId: machine.customerId });
         })
       : machines;
 
     const customerIds = [...new Set(scopedMachines.map((machine) => machine.customer?.id).filter((id): id is string => Boolean(id)))];
     const activities = customerIds.length
-      ? await prisma.customerActivity.findMany({
-          where: { customerId: { in: customerIds }, type: "CARE_RESULT" },
-          orderBy: [{ occurredAt: "desc" }, { createdAt: "desc" }],
-          take: 5000,
-        })
+      ? await prisma.customerActivity.findMany({ where: { customerId: { in: customerIds }, type: "CARE_RESULT" }, orderBy: [{ occurredAt: "desc" }, { createdAt: "desc" }], take: 5000 })
       : [];
 
     const userIds = [...new Set(activities.map((activity) => activity.userId).filter((id): id is string => Boolean(id)))];
-    const users = userIds.length
-      ? await prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true } })
-      : [];
+    const users = userIds.length ? await prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true } }) : [];
     const userName = new Map(users.map((user) => [user.id, user.name]));
-
     const activityByOrder = new Map<string, (typeof activities)[number]>();
     const activitiesByCustomer = new Map<string, (typeof activities)[number][]>();
     for (const activity of activities) {
@@ -122,7 +96,6 @@ export async function GET(request: NextRequest) {
       const customer = machine.customer;
       const activation = machine.activations[0] || null;
       const schedules = machine.maintenanceSchedules.filter((schedule) => reportScheduleIds.has(schedule.id));
-
       return schedules.map((schedule) => {
         const order = machine.serviceOrders.find((item) => item.maintenanceScheduleId === schedule.id) || null;
         const address = customer?.address || order?.address || "";
@@ -135,67 +108,26 @@ export async function GET(request: NextRequest) {
         const latestReport = order?.reports[0] || null;
         const activationDate = machine.installDate || activation?.createdAt || null;
         const previousCareResult = previousCare?.summary || "";
-
-        const previousOrders = machine.serviceOrders
-          .filter((item) => item.id !== order?.id)
-          .filter((item) => orderTime(item) < schedule.dueDate.getTime())
-          .sort((a, b) => orderTime(b) - orderTime(a));
+        const previousOrders = machine.serviceOrders.filter((item) => item.id !== order?.id).filter((item) => orderTime(item) < schedule.dueDate.getTime()).sort((a, b) => orderTime(b) - orderTime(a));
         const previousOrder = previousOrders[0] || null;
-        const previousReport = previousOrder?.reports[0]
-          || machine.serviceReports.find((report) => report.orderId && report.orderId !== order?.id)
-          || null;
-
+        const previousReport = previousOrder?.reports[0] || machine.serviceReports.find((report) => report.orderId && report.orderId !== order?.id) || null;
         const lastCareDate = previousCare?.occurredAt || previousOrder?.updatedAt || customer?.lastContactAt || null;
         const lastCareWork = previousOrder?.serviceType || previousReport?.serviceType || "";
-        const cskhName = (careActivity?.userId ? userName.get(careActivity.userId) : null)
-          || order?.sourceTicket?.assignee?.name
-          || "";
+        const cskhName = (careActivity?.userId ? userName.get(careActivity.userId) : null) || order?.sourceTicket?.assignee?.name || "";
         const serviceType = order?.serviceType || schedule.title;
         const rawStatus = order?.status || schedule.status || "SCHEDULED";
         const reportCount = order?.reports.length || 0;
         const completed = schedule.status === "COMPLETED" || rawStatus === "COMPLETED" || reportCount > 0;
         const status = completed ? "COMPLETED" : rawStatus;
         const currentCareResult = order ? (careActivity?.summary || careStatusLabel(status)) : "";
-
         return {
-          id: order?.id || `schedule:${schedule.id}`,
-          serviceOrderId: order?.id || null,
-          orderCode: order?.orderCode || "",
-          date: iso(schedule.dueDate),
-          machineId: machine.id,
-          machineCode: machine.serial || machine.id,
-          customerId: customer?.id || "",
-          customerName: customer?.name || order?.customerName || "",
-          customerPhone: customer?.phone || order?.customerPhone || "",
-          lastCustomerStatus: previousCareResult,
-          ownerName: customer?.owner?.name || "",
-          province,
-          ward: splitAddress.ward,
-          street: splitAddress.street || address,
-          cskhName,
-          activationDealerCode: activation?.dealerCode || "",
-          activationDate: iso(activationDate),
-          lastCareDate: iso(lastCareDate),
-          lastCareWork,
-          monthsSinceActivation: monthsBetween(activationDate),
-          nextCareTitle: schedule.title,
-          nextCareDate: iso(schedule.dueDate),
-          currentCareResult,
-          dealerId: order?.dealer?.id || null,
-          dealerCode: order?.dealer?.dealerCode || "",
-          dealerName: order?.dealer?.name || "",
-          serviceResult: order
-            ? serviceResultLabel({
-                status,
-                reportServiceType: latestReport?.serviceType,
-                products: latestReport?.products,
-                dealerCode: order.dealer?.dealerCode,
-              })
-            : completed ? "Đã hoàn thành" : "Chưa đến bước thực hiện dịch vụ",
-          serviceType,
-          status,
-          reportCount,
-          updatedAt: (order?.updatedAt || machine.updatedAt).toISOString(),
+          id: order?.id || `schedule:${schedule.id}`, serviceOrderId: order?.id || null, orderCode: order?.orderCode || "", date: iso(schedule.dueDate),
+          machineId: machine.id, machineCode: machine.serial || machine.id, customerId: customer?.id || "", customerName: customer?.name || order?.customerName || "", customerPhone: customer?.phone || order?.customerPhone || "",
+          lastCustomerStatus: previousCareResult, ownerName: customer?.owner?.name || "", province, ward: splitAddress.ward, street: splitAddress.street || address, cskhName,
+          activationDealerCode: activation?.dealerCode || "", activationDate: iso(activationDate), lastCareDate: iso(lastCareDate), lastCareWork, monthsSinceActivation: monthsBetween(activationDate),
+          nextCareTitle: schedule.title, nextCareDate: iso(schedule.dueDate), currentCareResult, dealerId: order?.dealer?.id || null, dealerCode: order?.dealer?.dealerCode || "", dealerName: order?.dealer?.name || "",
+          serviceResult: order ? serviceResultLabel({ status, reportServiceType: latestReport?.serviceType, products: latestReport?.products, dealerCode: order.dealer?.dealerCode }) : completed ? "Đã hoàn thành" : "Chưa đến bước thực hiện dịch vụ",
+          serviceType, status, reportCount, updatedAt: (order?.updatedAt || machine.updatedAt).toISOString(),
         };
       });
     }).sort((a, b) => {
@@ -210,21 +142,7 @@ export async function GET(request: NextRequest) {
     const serviced = new Set(rows.filter((row) => row.reportCount > 0 || row.status === "COMPLETED").map((row) => row.machineId)).size;
     const assigned = new Set(rows.filter((row) => Boolean(row.dealerCode)).map((row) => row.machineId)).size;
 
-    return NextResponse.json({
-      success: true,
-      data: {
-        rows,
-        metrics: { total, due, cared, serviced, assigned },
-        generatedAt: new Date().toISOString(),
-        sources: {
-          dueSchedules: dueSchedules.length,
-          dueScheduleMachines: new Set(dueSchedules.map((item) => item.machineId)).size,
-          candidateMachines: candidateIds.length,
-          scopedMachines: scopedMachines.length,
-          reportRows: rows.length,
-        },
-      },
-    });
+    return NextResponse.json({ success: true, data: { rows, metrics: { total, due, cared, serviced, assigned }, generatedAt: new Date().toISOString(), sources: { dueSchedules: dueSchedules.length, dueScheduleMachines: new Set(dueSchedules.map((item) => item.machineId)).size, candidateMachines: candidateIds.length, scopedMachines: scopedMachines.length, reportRows: rows.length } } });
   } catch (error) {
     console.error("GET /api/cskh/report failed", error);
     return NextResponse.json({ success: false, message: databaseErrorMessage(error, "Không tải được báo cáo CSKH.") }, { status: 500 });
