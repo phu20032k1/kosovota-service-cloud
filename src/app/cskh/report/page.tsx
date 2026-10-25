@@ -24,6 +24,10 @@ type ReportRow = {
   ward: string;
   street: string;
   cskhName: string;
+  activationStep1DealerCode: string;
+  activationStep1Date: string | null;
+  activationStep2DealerCode: string;
+  activationStep2Date: string | null;
   activationDealerCode: string;
   activationDate: string | null;
   lastCareDate: string | null;
@@ -62,12 +66,17 @@ type Filter = "all" | "due" | "uncared" | "unassigned" | "serviced";
 
 const HEADERS = [
   "STT", "Ngày", "Mã máy", "Mã KH", "Khách hàng", "Điện thoại", "Trạng thái KH", "Chủ sở hữu",
-  "Tỉnh/TP", "Xã/phường", "Địa chỉ", "NV CSKH", "Đại lý kích hoạt", "Ngày kích hoạt", "Ngày chăm sóc gần nhất",
-  "Công việc chăm sóc gần nhất", "Thời gian từ lúc kích hoạt (tháng)", "Kỳ chăm sóc tiếp theo", "Kết quả chăm sóc lần này",
-  "Nút tìm kiếm đại lý", "Đại lý nhận DV", "Kết quả dịch vụ",
+  "Tỉnh/TP", "Xã/phường", "Địa chỉ", "NV CSKH",
+  "ĐL kích hoạt B1", "Ngày kích hoạt B1", "ĐL kích hoạt B2", "Ngày kích hoạt B2",
+  "Ngày chăm sóc gần nhất", "Công việc chăm sóc gần nhất", "Thời gian từ lúc kích hoạt (tháng)",
+  "Kỳ chăm sóc tiếp theo", "Kết quả chăm sóc lần này", "Nút tìm kiếm đại lý", "Đại lý nhận DV", "Kết quả dịch vụ",
 ] as const;
 
-const WIDTHS = [64, 105, 130, 145, 190, 135, 190, 155, 145, 145, 230, 170, 145, 125, 155, 220, 180, 240, 230, 150, 175, 220];
+const WIDTHS = [
+  64, 105, 130, 145, 190, 135, 190, 155, 145, 145, 230, 170,
+  150, 135, 150, 135,
+  155, 220, 180, 240, 230, 150, 175, 220,
+];
 
 const WORK_STYLE: Record<string, CSSProperties> = {
   "Lắp đặt mới": { backgroundColor: "#d9ead3", color: "#38761d" },
@@ -187,7 +196,11 @@ export default function CskhReportPage() {
     const keyword = query.trim().toLowerCase();
     const today = new Date().toISOString().slice(0, 10);
     return (data?.rows || []).filter((row) => {
-      const haystack = [row.machineCode, row.machineId, row.customerId, row.customerName, row.customerPhone, row.province, row.ward, row.street, row.dealerCode, row.dealerName, row.orderCode].join(" ").toLowerCase();
+      const haystack = [
+        row.machineCode, row.machineId, row.customerId, row.customerName, row.customerPhone,
+        row.province, row.ward, row.street, row.dealerCode, row.dealerName, row.orderCode,
+        row.activationStep1DealerCode, row.activationStep2DealerCode,
+      ].join(" ").toLowerCase();
       if (keyword && !haystack.includes(keyword)) return false;
       if (filter === "due") return isDue(row, today);
       if (filter === "uncared") return isDue(row, today) && !row.currentCareResult;
@@ -311,7 +324,9 @@ export default function CskhReportPage() {
     const body = rows.map((row, index) => [
       index + 1, date(row.date), row.machineCode, row.customerId, row.customerName, row.customerPhone,
       row.lastCustomerStatus, row.ownerName, row.province, row.ward, row.street, row.cskhName,
-      row.activationDealerCode, date(row.activationDate), date(row.lastCareDate), row.lastCareWork,
+      row.activationStep1DealerCode, date(row.activationStep1Date),
+      row.activationStep2DealerCode, date(row.activationStep2Date),
+      date(row.lastCareDate), row.lastCareWork,
       row.monthsSinceActivation ?? "", [row.serviceType || row.nextCareTitle, date(row.nextCareDate)].filter(Boolean).join(" · "),
       row.currentCareResult, row.serviceOrderId ? "Tìm đại lý" : "Chưa có lệnh", row.dealerCode, row.serviceResult,
     ]);
@@ -367,16 +382,20 @@ export default function CskhReportPage() {
           <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
             <div className="border-b border-slate-200 px-4 py-3">
               <h2 className="font-extrabold text-slate-900">Danh sách chăm sóc khách hàng</h2>
-              <p className="mt-0.5 text-xs text-slate-500">Chỉ hiển thị lịch chăm sóc/thay lõi đã đến hạn hoặc quá hạn. Công việc và kết quả dùng đúng bộ lựa chọn của bảng báo cáo mẫu.</p>
+              <p className="mt-0.5 text-xs text-slate-500">Kích hoạt được tách rõ Bước 1 và Bước 2. B1 cũ không có mã đại lý do hệ thống trước đây chưa lưu sẽ hiển thị “—”, không tự gán từ B2.</p>
             </div>
             <div className="max-h-[70vh] overflow-auto overscroll-contain">
-              <table className="w-full min-w-[3750px] border-separate border-spacing-0 text-[12px] text-slate-700">
+              <table className="w-full min-w-[4100px] border-separate border-spacing-0 text-[12px] text-slate-700">
                 <colgroup>{HEADERS.map((_, index) => <col key={index} style={{ width: WIDTHS[index] }}/>)}</colgroup>
                 <thead className="sticky top-0 z-20">
-                  <tr>{HEADERS.map((header, index) => <th key={header} className={`border-b border-r border-slate-300 bg-slate-900 px-3 py-3 text-left text-[11px] font-black uppercase tracking-wide text-white ${index === 0 ? "sticky left-0 z-30" : ""}`}>{header}</th>)}</tr>
+                  <tr>{HEADERS.map((header, index) => {
+                    const isStep1 = header.includes("B1");
+                    const isStep2 = header.includes("B2");
+                    return <th key={header} className={`border-b border-r border-slate-300 px-3 py-3 text-left text-[11px] font-black uppercase tracking-wide text-white ${index === 0 ? "sticky left-0 z-30" : ""} ${isStep1 ? "bg-sky-800" : isStep2 ? "bg-emerald-800" : "bg-slate-900"}`}>{header}</th>;
+                  })}</tr>
                 </thead>
                 <tbody>
-                  {!rows.length ? <tr><td colSpan={22} className="p-12 text-center text-slate-500">Không có lịch đến hạn phù hợp với bộ lọc hiện tại.</td></tr> : rows.map((row, index) => {
+                  {!rows.length ? <tr><td colSpan={24} className="p-12 text-center text-slate-500">Không có lịch đến hạn phù hợp với bộ lọc hiện tại.</td></tr> : rows.map((row, index) => {
                     const hasOrder = Boolean(row.serviceOrderId);
                     const completed = row.reportCount > 0 || row.status === "COMPLETED";
                     const selectedWork = SERVICE_WORK_OPTIONS.includes(row.serviceType as (typeof SERVICE_WORK_OPTIONS)[number]) ? row.serviceType : "__custom";
@@ -395,8 +414,10 @@ export default function CskhReportPage() {
                         <Cell>{row.ward || "—"}</Cell>
                         <Cell>{row.street || "—"}</Cell>
                         <Cell>{row.cskhName || "—"}</Cell>
-                        <Cell strong>{row.activationDealerCode || "—"}</Cell>
-                        <Cell>{date(row.activationDate) || "—"}</Cell>
+                        <Cell><span className="inline-flex rounded-full bg-sky-50 px-2.5 py-1 font-black text-sky-800">{row.activationStep1DealerCode || "—"}</span></Cell>
+                        <Cell>{date(row.activationStep1Date) || "—"}</Cell>
+                        <Cell><span className="inline-flex rounded-full bg-emerald-50 px-2.5 py-1 font-black text-emerald-800">{row.activationStep2DealerCode || "—"}</span></Cell>
+                        <Cell>{date(row.activationStep2Date) || "—"}</Cell>
                         <Cell>{date(row.lastCareDate) || "—"}</Cell>
                         <Cell>{row.lastCareWork ? <span className="inline-flex min-w-[165px] justify-center rounded-full px-3 py-1 font-bold" style={workStyle(row.lastCareWork)}>{row.lastCareWork}</span> : "—"}</Cell>
                         <Cell center>{row.monthsSinceActivation == null ? "—" : `${row.monthsSinceActivation} tháng`}</Cell>
