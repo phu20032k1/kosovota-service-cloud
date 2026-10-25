@@ -10,6 +10,11 @@ import { extractMachineIdFromQr } from "@/lib/qr";
 
 type ScannerInstance = { clear: () => Promise<void> };
 
+type ActivationCheckResponse = {
+  success?: boolean;
+  data?: Array<{ id: string; machineId: string; step: number }>;
+};
+
 export default function ScanQrPage() {
   const router = useRouter();
   const scannerRef = useRef<ScannerInstance | null>(null);
@@ -18,6 +23,9 @@ export default function ScanQrPage() {
   const [machineId, setMachineId] = useState<string | null>(null);
   const [message, setMessage] = useState("Đang mở camera...");
   const [error, setError] = useState("");
+  const [activationLoading, setActivationLoading] = useState(false);
+  const [step1Done, setStep1Done] = useState(false);
+  const [step2Done, setStep2Done] = useState(false);
 
   const openResult = useCallback(async (rawValue: string) => {
     if (handledRef.current) return;
@@ -34,6 +42,42 @@ export default function ScanQrPage() {
     await scannerRef.current?.clear().catch(() => undefined);
     scannerRef.current = null;
   }, []);
+
+  useEffect(() => {
+    if (!machineId) {
+      setStep1Done(false);
+      setStep2Done(false);
+      return;
+    }
+
+    let cancelled = false;
+    async function checkActivationSteps() {
+      setActivationLoading(true);
+      try {
+        const [step1Response, step2Response] = await Promise.all([
+          fetch(`/api/activations?machineId=${encodeURIComponent(machineId!)}&step=1`, { cache: "no-store" }),
+          fetch(`/api/activations?machineId=${encodeURIComponent(machineId!)}&step=2`, { cache: "no-store" }),
+        ]);
+        const [step1Result, step2Result] = await Promise.all([
+          step1Response.json() as Promise<ActivationCheckResponse>,
+          step2Response.json() as Promise<ActivationCheckResponse>,
+        ]);
+        if (cancelled) return;
+        setStep1Done(Boolean(step1Response.ok && step1Result.success && step1Result.data?.length));
+        setStep2Done(Boolean(step2Response.ok && step2Result.success && step2Result.data?.length));
+      } catch {
+        if (!cancelled) {
+          setStep1Done(false);
+          setStep2Done(false);
+        }
+      } finally {
+        if (!cancelled) setActivationLoading(false);
+      }
+    }
+
+    void checkActivationSteps();
+    return () => { cancelled = true; };
+  }, [machineId]);
 
   useEffect(() => {
     if (machineId) return;
@@ -99,6 +143,8 @@ export default function ScanQrPage() {
     setMachineId(null);
     setManualCode("");
     setError("");
+    setStep1Done(false);
+    setStep2Done(false);
     setMessage("Đang mở camera...");
   }
 
@@ -127,19 +173,57 @@ export default function ScanQrPage() {
               <p className="mt-2 text-sm text-slate-600">{message}</p>
             </div>
 
-            <div className="mt-5 grid gap-4 md:grid-cols-3">
-              <button
-                type="button"
-                onClick={() => router.push(`/activate/${encodeURIComponent(machineId)}/step-1`)}
-                className="rounded-2xl border-2 border-emerald-200 bg-emerald-50 p-5 text-left transition hover:border-emerald-500"
-              >
-                <span className="grid h-11 w-11 place-items-center rounded-xl bg-emerald-600 text-white">
-                  <Icon name="check" size={20} />
-                </span>
-                <strong className="mt-4 block text-lg text-slate-900">1. Kích hoạt máy</strong>
-                <span className="mt-2 block text-sm leading-6 text-slate-600">Mở quy trình kích hoạt và bàn giao thiết bị.</span>
-              </button>
+            <div className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50/50 p-4 sm:p-5">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-black uppercase tracking-[.14em] text-emerald-700">Kích hoạt máy</p>
+                  <h2 className="mt-1 text-xl font-black text-slate-900">Chọn đúng bước cần thực hiện</h2>
+                </div>
+                {activationLoading && <span className="text-xs font-bold text-slate-500">Đang kiểm tra trạng thái...</span>}
+              </div>
 
+              <div className="mt-4 grid gap-4 md:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={() => router.push(`/activate/${encodeURIComponent(machineId)}/step-1`)}
+                  className="rounded-2xl border-2 border-sky-200 bg-white p-5 text-left transition hover:border-sky-500 disabled:cursor-not-allowed disabled:opacity-60"
+                  disabled={activationLoading || step2Done}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <span className="grid h-11 w-11 place-items-center rounded-xl bg-sky-600 text-white">
+                      <strong>1</strong>
+                    </span>
+                    <span className={`rounded-full px-2.5 py-1 text-[11px] font-black ${step1Done ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>
+                      {step1Done ? "Đã hoàn tất" : "Chưa hoàn tất"}
+                    </span>
+                  </div>
+                  <strong className="mt-4 block text-lg text-slate-900">Bước 1 · Thông tin khách & vị trí máy</strong>
+                  <span className="mt-2 block text-sm leading-6 text-slate-600">Nhập chủ nhà, số điện thoại, địa chỉ, GPS và ảnh vị trí máy.</span>
+                  {step2Done && <span className="mt-3 block text-xs font-bold text-slate-500">Máy đã hoàn tất Bước 2 nên Bước 1 được khóa.</span>}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => router.push(`/activate/${encodeURIComponent(machineId)}/step-2`)}
+                  className="rounded-2xl border-2 border-emerald-200 bg-white p-5 text-left transition hover:border-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={activationLoading || !step1Done}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <span className="grid h-11 w-11 place-items-center rounded-xl bg-emerald-600 text-white">
+                      <strong>2</strong>
+                    </span>
+                    <span className={`rounded-full px-2.5 py-1 text-[11px] font-black ${step2Done ? "bg-emerald-100 text-emerald-700" : step1Done ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-500"}`}>
+                      {step2Done ? "Đã hoàn tất" : step1Done ? "Sẵn sàng" : "Chờ Bước 1"}
+                    </span>
+                  </div>
+                  <strong className="mt-4 block text-lg text-slate-900">Bước 2 · Đại lý lắp đặt & hoàn tất kích hoạt</strong>
+                  <span className="mt-2 block text-sm leading-6 text-slate-600">Xác nhận đại lý/người lắp, ngày lắp đặt, tình trạng máy và thông tin nhận quà.</span>
+                  {!step1Done && !activationLoading && <span className="mt-3 block text-xs font-bold text-amber-700">Cần hoàn thành Bước 1 trước.</span>}
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-5 grid gap-4 md:grid-cols-2">
               <button
                 type="button"
                 onClick={() => router.push(`/dealer-register?machineId=${encodeURIComponent(machineId)}`)}
@@ -148,7 +232,7 @@ export default function ScanQrPage() {
                 <span className="grid h-11 w-11 place-items-center rounded-xl bg-blue-600 text-white">
                   <Icon name="store" size={20} />
                 </span>
-                <strong className="mt-4 block text-lg text-slate-900">2. Đăng ký đại lý</strong>
+                <strong className="mt-4 block text-lg text-slate-900">Đăng ký đại lý</strong>
                 <span className="mt-2 block text-sm leading-6 text-slate-600">Đăng ký Đại lý/CTV và sinh mã tự động.</span>
               </button>
 
@@ -160,7 +244,7 @@ export default function ScanQrPage() {
                 <span className="grid h-11 w-11 place-items-center rounded-xl bg-amber-500 text-white">
                   <Icon name="wrench" size={20} />
                 </span>
-                <strong className="mt-4 block text-lg text-slate-900">3. Báo cáo dịch vụ</strong>
+                <strong className="mt-4 block text-lg text-slate-900">Báo cáo dịch vụ</strong>
                 <span className="mt-2 block text-sm leading-6 text-slate-600">Mở phiếu báo cáo sửa chữa/thay lõi của máy.</span>
               </button>
             </div>
