@@ -1,6 +1,5 @@
 export const CARE_RESULT_OPTIONS = [
   { label: "KH tiếp nhận CS + dịch vụ", status: "CUSTOMER_ACCEPTED" },
-  { label: "KH Nội bộ công ty", status: "CUSTOMER_INTERNAL" },
   { label: "KH tiếp nhận CS - tự thay", status: "CUSTOMER_SELF_SERVICE" },
   { label: "KH từ chối chăm sóc", status: "CUSTOMER_REJECTED" },
   { label: "KH không liên lạc được", status: "CALLED_NO_ANSWER" },
@@ -17,7 +16,10 @@ export const SERVICE_WORK_OPTIONS = [
   "Thay vật liệu lọc thô",
 ] as const;
 
-const CARE_STATUS_TO_LABEL = new Map<string, string>(CARE_RESULT_OPTIONS.map((item) => [item.status, item.label]));
+const CARE_STATUS_TO_LABEL = new Map<string, string>([
+  ...CARE_RESULT_OPTIONS.map((item) => [item.status, item.label] as const),
+  ["CUSTOMER_INTERNAL", "KH Nội bộ công ty"],
+]);
 const CARE_LABEL_TO_STATUS = new Map<string, string>(CARE_RESULT_OPTIONS.map((item) => [item.label, item.status]));
 
 export function careStatusLabel(status?: string | null) {
