@@ -5,17 +5,17 @@ import { prisma } from "@/lib/prisma";
 import { hasRole } from "@/lib/auth";
 import { writeAudit } from "@/lib/audit";
 import { databaseErrorMessage } from "@/lib/database-errors";
-import { provinceNamesForScope } from "@/lib/province";
+import { expandProvinceScope, provinceNamesForScope } from "@/lib/province";
 
 export async function GET(request: NextRequest) {
   try {
-    const auth = await hasRole(request, ["ADMIN", "CSKH"]);
+    const auth = await hasRole(request, ["SUPER_ADMIN", "ADMIN", "CSKH"]);
     if (!auth) return NextResponse.json({ success: false, message: "Chưa được cấp quyền." }, { status: 401 });
 
     const q = request.nextUrl.searchParams.get("q")?.trim().slice(0, 120) || "";
     const segment = request.nextUrl.searchParams.get("segment") || undefined;
-    const provinceScope = auth.user.provinceScope?.split(",").map((value) => value.trim()).filter(Boolean) || [];
-    const provinceNames = provinceNamesForScope(provinceScope);
+    const provinceScope = auth.user.role === "CSKH" ? expandProvinceScope(auth.user.provinceScope) : [];
+    const provinceNames = provinceNamesForScope(auth.user.provinceScope);
     const and: Prisma.CustomerWhereInput[] = [];
 
     if (q) {
@@ -93,7 +93,7 @@ export async function GET(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
-    const auth = await hasRole(request, ["ADMIN"]);
+    const auth = await hasRole(request, ["SUPER_ADMIN", "ADMIN"]);
     if (!auth) return NextResponse.json({ success: false, message: "Chỉ Admin được xóa khách hàng." }, { status: 403 });
 
     const body = await request.json().catch(() => ({}));
@@ -108,9 +108,6 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ success: false, message: "Chưa chọn khách hàng cần xóa." }, { status: 400 });
     }
 
-    // Create/verify trash storage once before the interactive transaction.
-    // Previously this DDL ran once per customer, causing Prisma P2028 timeouts
-    // when deleting a few hundred customers at once.
     await ensureTrashStorage(prisma);
 
     const result = await prisma.$transaction(async (tx) => {
@@ -143,7 +140,6 @@ export async function DELETE(request: NextRequest) {
         };
       });
 
-      // Keep each INSERT reasonably sized while avoiding hundreds of round trips.
       for (let offset = 0; offset < trashRows.length; offset += 100) {
         await tx.trashItem.createMany({ data: trashRows.slice(offset, offset + 100) });
       }
