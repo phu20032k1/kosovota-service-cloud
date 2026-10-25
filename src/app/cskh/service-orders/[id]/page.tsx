@@ -89,7 +89,7 @@ export default function CskhServiceOrderDetailPage() {
 
     <div className="mx-auto max-w-6xl space-y-4 p-4 sm:p-5">
       <div className="flex flex-wrap gap-2">
-        <Link href="/csos" className="btn-secondary px-4 py-3 text-sm font-black"><Icon name="chevron-left" size={17}/>Công việc</Link>
+        <Link href="/csos" className="btn-secondary px-4 py-3 text-sm font-black"><Icon name="chevron-right" size={17} className="rotate-180"/>Công việc</Link>
         {order && <Link href={`/operations-map?order=${encodeURIComponent(order.id)}`} className="btn-primary px-4 py-3 text-sm font-black text-white"><Icon name="map" size={17}/>Mở điều phối</Link>}
       </div>
 
