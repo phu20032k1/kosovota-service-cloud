@@ -1,3 +1,3 @@
 ALTER TABLE "User"
-ADD COLUMN "wardScope" TEXT,
-ADD COLUMN "customerScope" TEXT;
+ADD COLUMN IF NOT EXISTS "wardScope" TEXT,
+ADD COLUMN IF NOT EXISTS "customerScope" TEXT;
