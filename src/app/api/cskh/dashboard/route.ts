@@ -58,6 +58,10 @@ function uniqueSize(values: string[]) {
   return new Set(values.filter(Boolean)).size;
 }
 
+function isMissedCall(summary?: string | null) {
+  return /khó liên lạc|khong lien lac|không liên lạc|không nghe|khong nghe|no answer/i.test(summary || "");
+}
+
 export async function GET(request: NextRequest) {
   const auth = await hasRole(request, ["SUPER_ADMIN", "ADMIN", "CSKH"]);
   if (!auth) return NextResponse.json({ success: false, message: "Chưa được cấp quyền." }, { status: 401 });
@@ -77,6 +81,11 @@ export async function GET(request: NextRequest) {
       periodActivities,
       periodReports,
       cskhUsers,
+      customersTotal,
+      periodCustomers,
+      periodTickets,
+      periodMessages,
+      completedOrders,
     ] = await Promise.all([
       prisma.machine.findMany({
         where: {
@@ -141,6 +150,34 @@ export async function GET(request: NextRequest) {
         select: { id: true, name: true, phone: true },
         orderBy: { name: "asc" },
       }),
+      prisma.customer.count(),
+      prisma.customer.findMany({
+        where: { createdAt: { gte: periodStart, lte: periodEnd } },
+        select: { id: true, createdAt: true },
+        orderBy: { createdAt: "asc" },
+        take: 20000,
+      }),
+      prisma.supportTicket.findMany({
+        where: { createdAt: { gte: periodStart, lte: periodEnd } },
+        select: { id: true, status: true, createdAt: true, resolvedAt: true },
+        orderBy: { createdAt: "asc" },
+        take: 20000,
+      }),
+      prisma.ticketMessage.findMany({
+        where: { createdAt: { gte: periodStart, lte: periodEnd } },
+        select: { id: true, ticketId: true, authorId: true, createdAt: true },
+        orderBy: { createdAt: "asc" },
+        take: 30000,
+      }),
+      prisma.serviceOrder.findMany({
+        where: {
+          status: "COMPLETED",
+          updatedAt: { gte: periodStart, lte: periodEnd },
+        },
+        select: { id: true, machineId: true, serviceFee: true, updatedAt: true },
+        orderBy: { updatedAt: "asc" },
+        take: 20000,
+      }),
     ]);
 
     const linkedOrderIds = [...new Set(periodActivities.map((item) => orderIdFromActivity(item.detail)).filter((id): id is string => Boolean(id)))];
@@ -169,6 +206,10 @@ export async function GET(request: NextRequest) {
       .filter((item) => item.serviceOrder?.status === "COMPLETED" || Boolean(item.serviceOrder?.reports.length))
       .map((item) => item.machineId);
 
+    const revenue = completedOrders.reduce((sum, item) => sum + (item.serviceFee || 0), 0);
+    const missedCalls = periodActivities.filter((item) => isMissedCall(item.summary)).length;
+    const resolvedTickets = periodTickets.filter((item) => item.resolvedAt || ["RESOLVED", "CLOSED", "COMPLETED"].includes(item.status)).length;
+
     const metrics = {
       tracked: uniqueSize(trackedMachines.map((item) => item.id)),
       due: uniqueSize(dueMachineIds),
@@ -176,6 +217,16 @@ export async function GET(request: NextRequest) {
       cared: uniqueSize(caredMachineIds),
       assigned: uniqueSize(assignedMachineIds),
       serviced: uniqueSize(servicedMachineIds),
+      customersTotal,
+      customersNew: periodCustomers.length,
+      conversations: uniqueSize(periodMessages.map((item) => item.ticketId)),
+      messages: periodMessages.length,
+      tickets: periodTickets.length,
+      resolvedTickets,
+      revenue,
+      calls: periodActivities.length,
+      answeredCalls: periodActivities.length - missedCalls,
+      missedCalls,
     };
 
     const trend = Array.from({ length: period }, (_, index) => {
@@ -183,6 +234,10 @@ export async function GET(request: NextRequest) {
       const daySchedules = periodSchedules.filter((item) => vnDayKey(item.dueDate) === key);
       const dayActivities = periodActivities.filter((item) => vnDayKey(item.occurredAt) === key);
       const dayReports = periodReports.filter((item) => vnDayKey(item.createdAt) === key);
+      const dayCustomers = periodCustomers.filter((item) => vnDayKey(item.createdAt) === key);
+      const dayTickets = periodTickets.filter((item) => vnDayKey(item.createdAt) === key);
+      const dayMessages = periodMessages.filter((item) => vnDayKey(item.createdAt) === key);
+      const dayOrders = completedOrders.filter((item) => vnDayKey(item.updatedAt) === key);
       const caredMachines = dayActivities
         .map((item) => orderIdFromActivity(item.detail))
         .map((id) => (id ? linkedOrderMap.get(id)?.machineId || "" : ""))
@@ -195,12 +250,20 @@ export async function GET(request: NextRequest) {
         caredMachines: uniqueSize(caredMachines),
         servicedMachines: uniqueSize(dayReports.map((item) => item.machineId)),
         serviceReports: dayReports.length,
+        newCustomers: dayCustomers.length,
+        conversations: uniqueSize(dayMessages.map((item) => item.ticketId)),
+        messages: dayMessages.length,
+        tickets: dayTickets.length,
+        revenue: dayOrders.reduce((sum, item) => sum + (item.serviceFee || 0), 0),
+        calls: dayActivities.length,
+        answeredCalls: dayActivities.filter((item) => !isMissedCall(item.summary)).length,
       };
     });
 
     const hourly = Array.from({ length: 24 }, (_, hour) => ({
       hour,
-      careActions: periodActivities.filter((item) => vnHour(item.occurredAt) === hour).length,
+      calls: periodActivities.filter((item) => vnHour(item.occurredAt) === hour).length,
+      conversations: periodMessages.filter((item) => vnHour(item.createdAt) === hour).length,
     }));
 
     const outcomeMap = new Map<string, number>();
@@ -223,25 +286,29 @@ export async function GET(request: NextRequest) {
 
     const agentRows = cskhUsers.map((user) => {
       const activities = periodActivities.filter((item) => item.userId === user.id);
+      const messages = periodMessages.filter((item) => item.authorId === user.id);
       const orderIds = [...new Set(activities.map((item) => orderIdFromActivity(item.detail)).filter((id): id is string => Boolean(id)))];
       const orders = orderIds.map((id) => linkedOrderMap.get(id)).filter((item): item is NonNullable<typeof item> => Boolean(item));
       const machineIds = orders.map((order) => order.machineId);
       const accepted = activities.filter((item) => /tiếp nhận|dịch vụ/i.test(item.summary)).length;
       const assigned = uniqueSize(orders.filter((order) => Boolean(order.dealerId)).map((order) => order.machineId));
       const serviced = uniqueSize(orders.filter((order) => order.status === "COMPLETED" || Boolean(order.reports.length)).map((order) => order.machineId));
-      const lastActivity = activities.length ? activities[activities.length - 1].occurredAt.toISOString() : null;
+      const lastCare = activities.length ? activities[activities.length - 1].occurredAt : null;
+      const lastMessage = messages.length ? messages[messages.length - 1].createdAt : null;
+      const lastActivity = [lastCare, lastMessage].filter((item): item is Date => Boolean(item)).sort((a, b) => b.getTime() - a.getTime())[0] || null;
       return {
         id: user.id,
         name: user.name,
         phone: user.phone,
-        careActions: activities.length,
+        calls: activities.length,
+        conversations: messages.length,
         machines: uniqueSize(machineIds),
         accepted,
         assigned,
         serviced,
-        lastActivity,
+        lastActivity: lastActivity ? lastActivity.toISOString() : null,
       };
-    }).sort((a, b) => b.careActions - a.careActions || b.serviced - a.serviced || a.name.localeCompare(b.name, "vi"));
+    }).sort((a, b) => b.calls - a.calls || b.conversations - a.conversations || b.serviced - a.serviced || a.name.localeCompare(b.name, "vi"));
 
     return NextResponse.json({
       success: true,
@@ -256,6 +323,12 @@ export async function GET(request: NextRequest) {
         careOutcomes,
         serviceTypes,
         agents: agentRows,
+        capabilities: {
+          hasTelephonyCallLog: false,
+          callDefinition: "CARE_RESULT",
+          revenueDefinition: "ServiceOrder.serviceFee khi COMPLETED",
+          conversationDefinition: "TicketMessage theo SupportTicket",
+        },
       },
     });
   } catch (error) {
