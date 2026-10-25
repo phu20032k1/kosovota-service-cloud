@@ -7,6 +7,7 @@ import { databaseErrorMessage } from "@/lib/database-errors";
 
 const CARE_ACTIVITY_MARKER = /\[service-order:([^\]]+)\]/;
 const FINISHED = new Set(["COMPLETED", "CANCELLED"]);
+const CLOSED_SCHEDULES = new Set(["COMPLETED", "DISABLED", "SELF_SERVICE", "INTERNAL"]);
 const CARED_STATUSES = new Set([
   "CALLED_NO_ANSWER",
   "CUSTOMER_ACCEPTED",
@@ -35,31 +36,32 @@ export async function GET(request: NextRequest) {
 
   try {
     const scope = auth.user.role === "CSKH" ? expandProvinceScope(auth.user.provinceScope) : [];
-    const orders = await prisma.serviceOrder.findMany({
+    const machines = await prisma.machine.findMany({
       where: {
-        status: { not: "CANCELLED" },
-        ...(scope.length ? { machine: { provinceCode: { in: scope } } } : {}),
+        installDate: { not: null },
+        customerId: { not: null },
+        ...(scope.length ? { provinceCode: { in: scope } } : {}),
       },
       include: {
-        dealer: { select: { id: true, dealerCode: true, name: true, phone: true } },
-        technician: { select: { id: true, name: true } },
-        reports: { orderBy: { createdAt: "desc" }, take: 5 },
-        maintenanceSchedule: true,
-        sourceTicket: { include: { assignee: { select: { id: true, name: true } } } },
-        machine: {
+        customer: { include: { owner: { select: { id: true, name: true } } } },
+        activations: { where: { step: 2 }, orderBy: { createdAt: "desc" }, take: 1 },
+        maintenanceSchedules: { orderBy: { dueDate: "asc" } },
+        serviceReports: { orderBy: { createdAt: "desc" }, take: 10 },
+        serviceOrders: {
+          where: { status: { not: "CANCELLED" } },
           include: {
-            customer: { include: { owner: { select: { id: true, name: true } } } },
-            activations: { orderBy: { createdAt: "desc" }, take: 1 },
-            maintenanceSchedules: { orderBy: { dueDate: "asc" } },
-            serviceReports: { orderBy: { createdAt: "desc" }, take: 5 },
+            dealer: { select: { id: true, dealerCode: true, name: true, phone: true } },
+            reports: { orderBy: { createdAt: "desc" }, take: 5 },
+            sourceTicket: { include: { assignee: { select: { id: true, name: true } } } },
           },
+          orderBy: [{ dueDate: "asc" }, { createdAt: "desc" }],
         },
       },
-      orderBy: [{ dueDate: "asc" }, { createdAt: "desc" }],
+      orderBy: [{ installDate: "desc" }, { updatedAt: "desc" }],
       take: 1500,
     });
 
-    const customerIds = [...new Set(orders.map((order) => order.machine.customer?.id).filter((id): id is string => Boolean(id)))];
+    const customerIds = [...new Set(machines.map((machine) => machine.customer?.id).filter((id): id is string => Boolean(id)))];
     const activities = customerIds.length
       ? await prisma.customerActivity.findMany({
           where: { customerId: { in: customerIds }, type: "CARE_RESULT" },
@@ -67,56 +69,67 @@ export async function GET(request: NextRequest) {
           take: 5000,
         })
       : [];
+
     const userIds = [...new Set(activities.map((activity) => activity.userId).filter((id): id is string => Boolean(id)))];
     const users = userIds.length
       ? await prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true } })
       : [];
     const userName = new Map(users.map((user) => [user.id, user.name]));
+
     const activityByOrder = new Map<string, (typeof activities)[number]>();
     const activitiesByCustomer = new Map<string, (typeof activities)[number][]>();
     for (const activity of activities) {
       const linkedOrderId = orderIdFromActivity(activity.detail);
       if (linkedOrderId && !activityByOrder.has(linkedOrderId)) activityByOrder.set(linkedOrderId, activity);
-      const rows = activitiesByCustomer.get(activity.customerId) || [];
-      rows.push(activity);
-      activitiesByCustomer.set(activity.customerId, rows);
+      const customerRows = activitiesByCustomer.get(activity.customerId) || [];
+      customerRows.push(activity);
+      activitiesByCustomer.set(activity.customerId, customerRows);
     }
 
-    const rows = orders.map((order) => {
-      const customer = order.machine.customer;
-      const activation = order.machine.activations[0] || null;
-      const province = provinceName(order.machine.provinceCode) || "";
-      const address = customer?.address || order.address || "";
+    const rows = machines.map((machine) => {
+      const customer = machine.customer;
+      const activation = machine.activations[0] || null;
+      const nextSchedule = machine.maintenanceSchedules.find((schedule) => !CLOSED_SCHEDULES.has(schedule.status)) || null;
+      const scheduleOrder = nextSchedule
+        ? machine.serviceOrders.find((order) => order.maintenanceScheduleId === nextSchedule.id)
+        : null;
+      const order = scheduleOrder
+        || machine.serviceOrders.find((item) => !FINISHED.has(item.status))
+        || machine.serviceOrders[0]
+        || null;
+
+      const province = provinceName(machine.provinceCode) || "";
+      const address = customer?.address || order?.address || "";
       const splitAddress = splitVietnamAddress(address, province);
-      const careActivity = activityByOrder.get(order.id) || null;
+      const careActivity = order ? activityByOrder.get(order.id) || null : null;
       const customerActivities = customer ? activitiesByCustomer.get(customer.id) || [] : [];
-      const previousCare = customerActivities.find((activity) => orderIdFromActivity(activity.detail) !== order.id) || null;
-      const latestReport = order.reports[0] || order.machine.serviceReports[0] || null;
-      const nextSchedule = order.machine.maintenanceSchedules.find((schedule) =>
-        !["COMPLETED", "DISABLED", "SELF_SERVICE", "INTERNAL"].includes(schedule.status)
-        && schedule.dueDate.getTime() >= Date.now() - 24 * 60 * 60 * 1000,
-      ) || null;
-      const activationDate = order.machine.installDate || activation?.createdAt || null;
-      const currentCareResult = careActivity?.summary || careStatusLabel(order.status);
+      const previousCare = customerActivities.find((activity) => !order || orderIdFromActivity(activity.detail) !== order.id) || null;
+      const latestReport = order?.reports[0] || machine.serviceReports[0] || null;
+      const activationDate = machine.installDate || activation?.createdAt || null;
+      const currentCareResult = order ? (careActivity?.summary || careStatusLabel(order.status)) : "";
       const previousCareResult = previousCare?.summary || "";
       const lastCareDate = previousCare?.occurredAt || customer?.lastContactAt || null;
-      const lastCareWork = order.machine.serviceReports.find((report) => report.id !== latestReport?.id)?.serviceType
+      const lastCareWork = machine.serviceReports.find((report) => report.id !== latestReport?.id)?.serviceType
         || (previousCare ? previousCare.summary : "")
         || "";
       const cskhName = (careActivity?.userId ? userName.get(careActivity.userId) : null)
-        || order.sourceTicket?.assignee?.name
-        || (auth.user.role === "CSKH" ? auth.user.name : "")
+        || order?.sourceTicket?.assignee?.name
         || "";
+      const dueDate = order?.dueDate || nextSchedule?.dueDate || activationDate;
+      const serviceType = order?.serviceType || nextSchedule?.title || "";
+      const status = order?.status || "SCHEDULED";
+      const reportCount = order?.reports.length || 0;
 
       return {
-        id: order.id,
-        orderCode: order.orderCode,
-        date: iso(order.dueDate || order.createdAt),
-        machineId: order.machineId,
-        machineCode: order.machine.serial || order.machine.id,
+        id: order?.id || `machine:${machine.id}`,
+        serviceOrderId: order?.id || null,
+        orderCode: order?.orderCode || "",
+        date: iso(dueDate),
+        machineId: machine.id,
+        machineCode: machine.serial || machine.id,
         customerId: customer?.id || "",
-        customerName: customer?.name || order.customerName,
-        customerPhone: customer?.phone || order.customerPhone,
+        customerName: customer?.name || order?.customerName || "",
+        customerPhone: customer?.phone || order?.customerPhone || "",
         lastCustomerStatus: previousCareResult,
         ownerName: customer?.owner?.name || "",
         province,
@@ -128,23 +141,31 @@ export async function GET(request: NextRequest) {
         lastCareDate: iso(lastCareDate),
         lastCareWork,
         monthsSinceActivation: monthsBetween(activationDate),
-        nextCareTitle: nextSchedule?.title || order.serviceType || "",
-        nextCareDate: iso(nextSchedule?.dueDate || order.dueDate),
+        nextCareTitle: nextSchedule?.title || serviceType,
+        nextCareDate: iso(nextSchedule?.dueDate || order?.dueDate),
         currentCareResult,
-        dealerId: order.dealer?.id || null,
-        dealerCode: order.dealer?.dealerCode || "",
-        dealerName: order.dealer?.name || "",
-        serviceResult: serviceResultLabel({
-          status: order.status,
-          reportServiceType: latestReport?.serviceType,
-          products: latestReport?.products,
-          dealerCode: order.dealer?.dealerCode,
-        }),
-        serviceType: order.serviceType,
-        status: order.status,
-        reportCount: order.reports.length,
-        updatedAt: order.updatedAt.toISOString(),
+        dealerId: order?.dealer?.id || null,
+        dealerCode: order?.dealer?.dealerCode || "",
+        dealerName: order?.dealer?.name || "",
+        serviceResult: order
+          ? serviceResultLabel({
+              status: order.status,
+              reportServiceType: latestReport?.serviceType,
+              products: latestReport?.products,
+              dealerCode: order.dealer?.dealerCode,
+            })
+          : nextSchedule
+            ? "Chưa đến bước thực hiện dịch vụ"
+            : "Chưa có lịch chăm sóc / thay lõi",
+        serviceType,
+        status,
+        reportCount,
+        updatedAt: (order?.updatedAt || machine.updatedAt).toISOString(),
       };
+    }).sort((a, b) => {
+      const aTime = a.date ? new Date(a.date).getTime() : Number.MAX_SAFE_INTEGER;
+      const bTime = b.date ? new Date(b.date).getTime() : Number.MAX_SAFE_INTEGER;
+      return aTime - bTime || a.machineCode.localeCompare(b.machineCode, "vi");
     });
 
     const todayEnd = new Date();
@@ -158,7 +179,7 @@ export async function GET(request: NextRequest) {
       success: true,
       data: {
         rows,
-        metrics: { total: new Set(rows.map((row) => row.machineId)).size, due, cared, serviced, assigned },
+        metrics: { total: rows.length, due, cared, serviced, assigned },
         generatedAt: new Date().toISOString(),
       },
     });
