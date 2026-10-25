@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { hasRole } from "@/lib/auth";
 import { careStatusLabel, monthsBetween, serviceResultLabel, splitVietnamAddress } from "@/lib/cskh-report";
-import { expandProvinceScope, provinceName } from "@/lib/province";
+import { expandProvinceScope, provinceFromAddress, provinceName } from "@/lib/province";
 import { databaseErrorMessage } from "@/lib/database-errors";
 
 const CARE_ACTIVITY_MARKER = /\[service-order:([^\]]+)\]/;
@@ -40,7 +40,9 @@ export async function GET(request: NextRequest) {
       where: {
         installDate: { not: null },
         customerId: { not: null },
-        ...(scope.length ? { provinceCode: { in: scope } } : {}),
+        ...(scope.length
+          ? { OR: [{ provinceCode: { in: scope } }, { provinceCode: null }] }
+          : {}),
       },
       include: {
         customer: { include: { owner: { select: { id: true, name: true } } } },
@@ -61,7 +63,14 @@ export async function GET(request: NextRequest) {
       take: 1500,
     });
 
-    const customerIds = [...new Set(machines.map((machine) => machine.customer?.id).filter((id): id is string => Boolean(id)))];
+    const scopedMachines = scope.length
+      ? machines.filter((machine) => {
+          const inferredCode = machine.provinceCode || provinceFromAddress(machine.customer?.address)?.[1] || null;
+          return Boolean(inferredCode && scope.includes(inferredCode));
+        })
+      : machines;
+
+    const customerIds = [...new Set(scopedMachines.map((machine) => machine.customer?.id).filter((id): id is string => Boolean(id)))];
     const activities = customerIds.length
       ? await prisma.customerActivity.findMany({
           where: { customerId: { in: customerIds }, type: "CARE_RESULT" },
@@ -86,7 +95,7 @@ export async function GET(request: NextRequest) {
       activitiesByCustomer.set(activity.customerId, customerRows);
     }
 
-    const rows = machines.map((machine) => {
+    const rows = scopedMachines.map((machine) => {
       const customer = machine.customer;
       const activation = machine.activations[0] || null;
       const nextSchedule = machine.maintenanceSchedules.find((schedule) => !CLOSED_SCHEDULES.has(schedule.status)) || null;
@@ -98,7 +107,8 @@ export async function GET(request: NextRequest) {
         || machine.serviceOrders[0]
         || null;
 
-      const province = provinceName(machine.provinceCode) || "";
+      const effectiveProvinceCode = machine.provinceCode || provinceFromAddress(customer?.address)?.[1] || null;
+      const province = provinceName(effectiveProvinceCode) || "";
       const address = customer?.address || order?.address || "";
       const splitAddress = splitVietnamAddress(address, province);
       const careActivity = order ? activityByOrder.get(order.id) || null : null;
