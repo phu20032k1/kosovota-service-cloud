@@ -36,33 +36,23 @@ export async function GET(request: NextRequest) {
 
   try {
     const scope = auth.user.role === "CSKH" ? expandProvinceScope(auth.user.provinceScope) : [];
+    const todayEnd = new Date();
+    todayEnd.setHours(23, 59, 59, 999);
 
-    // Báo cáo phải nhìn thấy đúng toàn bộ công việc/lịch đang mở, không chỉ 1 lịch đầu tiên của mỗi máy.
-    // KPI vẫn đếm theo máy duy nhất, còn bảng 22 cột hiển thị từng kỳ chăm sóc/thay lõi để không làm mất việc đến hạn.
-    const [openSchedules, completedActivations, installedMachines] = await Promise.all([
-      prisma.maintenanceSchedule.findMany({
-        where: { status: { notIn: Array.from(CLOSED_SCHEDULES) } },
-        select: { id: true, machineId: true, title: true, dueDate: true, status: true },
-        orderBy: { dueDate: "asc" },
-        take: 5000,
-      }),
-      prisma.activation.findMany({
-        where: { step: 2 },
-        select: { machineId: true },
-        take: 5000,
-      }),
-      prisma.machine.findMany({
-        where: { installDate: { not: null } },
-        select: { id: true },
-        take: 5000,
-      }),
-    ]);
+    // Báo cáo tác nghiệp CSKH chỉ hiển thị các lịch đang mở đã đến hạn hoặc quá hạn.
+    // Lịch tương lai không xuất hiện; mỗi lịch đến hạn là một dòng riêng để không làm mất công việc.
+    const dueSchedules = await prisma.maintenanceSchedule.findMany({
+      where: {
+        status: { notIn: Array.from(CLOSED_SCHEDULES) },
+        dueDate: { lte: todayEnd },
+      },
+      select: { id: true, machineId: true, title: true, dueDate: true, status: true },
+      orderBy: { dueDate: "asc" },
+      take: 5000,
+    });
 
-    const candidateIds = [...new Set([
-      ...openSchedules.map((item) => item.machineId),
-      ...completedActivations.map((item) => item.machineId),
-      ...installedMachines.map((item) => item.id),
-    ])];
+    const candidateIds = [...new Set(dueSchedules.map((item) => item.machineId))];
+    const dueScheduleIds = new Set(dueSchedules.map((item) => item.id));
 
     const machines = candidateIds.length
       ? await prisma.machine.findMany({
@@ -70,7 +60,13 @@ export async function GET(request: NextRequest) {
           include: {
             customer: { include: { owner: { select: { id: true, name: true } } } },
             activations: { where: { step: 2 }, orderBy: { createdAt: "desc" }, take: 1 },
-            maintenanceSchedules: { orderBy: { dueDate: "asc" } },
+            maintenanceSchedules: {
+              where: {
+                status: { notIn: Array.from(CLOSED_SCHEDULES) },
+                dueDate: { lte: todayEnd },
+              },
+              orderBy: { dueDate: "asc" },
+            },
             serviceReports: { orderBy: { createdAt: "desc" }, take: 10 },
             serviceOrders: {
               where: { status: { not: "CANCELLED" } },
@@ -122,19 +118,10 @@ export async function GET(request: NextRequest) {
     const rows = scopedMachines.flatMap((machine) => {
       const customer = machine.customer;
       const activation = machine.activations[0] || null;
-      const activeSchedules = machine.maintenanceSchedules.filter((schedule) => !CLOSED_SCHEDULES.has(schedule.status));
-      // Máy đã kích hoạt nhưng chưa có lịch vẫn phải xuất hiện để phát hiện dữ liệu thiếu.
-      const scheduleRows = activeSchedules.length ? activeSchedules : [null];
+      const activeSchedules = machine.maintenanceSchedules.filter((schedule) => dueScheduleIds.has(schedule.id));
 
-      return scheduleRows.map((schedule) => {
-        const scheduleOrder = schedule
-          ? machine.serviceOrders.find((order) => order.maintenanceScheduleId === schedule.id)
-          : null;
-        // Với một lịch cụ thể chỉ dùng lệnh gắn với chính lịch đó. Fallback sang lệnh khác chỉ áp dụng cho máy không có lịch mở.
-        const order = schedule
-          ? scheduleOrder || null
-          : machine.serviceOrders.find((item) => !FINISHED.has(item.status)) || machine.serviceOrders[0] || null;
-
+      return activeSchedules.map((schedule) => {
+        const order = machine.serviceOrders.find((item) => item.maintenanceScheduleId === schedule.id) || null;
         const address = customer?.address || order?.address || "";
         const effectiveProvinceCode = machine.provinceCode || provinceFromAddress(address)?.[1] || null;
         const province = provinceName(effectiveProvinceCode) || "";
@@ -153,16 +140,15 @@ export async function GET(request: NextRequest) {
         const cskhName = (careActivity?.userId ? userName.get(careActivity.userId) : null)
           || order?.sourceTicket?.assignee?.name
           || "";
-        const dueDate = schedule?.dueDate || order?.dueDate || activationDate;
-        const serviceType = order?.serviceType || schedule?.title || "";
-        const status = order?.status || schedule?.status || "SCHEDULED";
+        const serviceType = order?.serviceType || schedule.title;
+        const status = order?.status || schedule.status || "SCHEDULED";
         const reportCount = order?.reports.length || 0;
 
         return {
-          id: order?.id || (schedule ? `schedule:${schedule.id}` : `machine:${machine.id}`),
+          id: order?.id || `schedule:${schedule.id}`,
           serviceOrderId: order?.id || null,
           orderCode: order?.orderCode || "",
-          date: iso(dueDate),
+          date: iso(schedule.dueDate),
           machineId: machine.id,
           machineCode: machine.serial || machine.id,
           customerId: customer?.id || "",
@@ -179,8 +165,8 @@ export async function GET(request: NextRequest) {
           lastCareDate: iso(lastCareDate),
           lastCareWork,
           monthsSinceActivation: monthsBetween(activationDate),
-          nextCareTitle: schedule?.title || serviceType,
-          nextCareDate: iso(schedule?.dueDate || order?.dueDate),
+          nextCareTitle: schedule.title,
+          nextCareDate: iso(schedule.dueDate),
           currentCareResult,
           dealerId: order?.dealer?.id || null,
           dealerCode: order?.dealer?.dealerCode || "",
@@ -192,9 +178,7 @@ export async function GET(request: NextRequest) {
                 products: latestReport?.products,
                 dealerCode: order.dealer?.dealerCode,
               })
-            : schedule
-              ? "Chưa đến bước thực hiện dịch vụ"
-              : "Chưa có lịch chăm sóc / thay lõi",
+            : "Chưa đến bước thực hiện dịch vụ",
           serviceType,
           status,
           reportCount,
@@ -207,10 +191,8 @@ export async function GET(request: NextRequest) {
       return aTime - bTime || a.machineCode.localeCompare(b.machineCode, "vi");
     });
 
-    const todayEnd = new Date();
-    todayEnd.setHours(23, 59, 59, 999);
     const total = new Set(rows.map((row) => row.machineId)).size;
-    const due = new Set(rows.filter((row) => row.date && new Date(row.date) <= todayEnd && !FINISHED.has(row.status)).map((row) => row.machineId)).size;
+    const due = total;
     const cared = new Set(rows.filter((row) => Boolean(row.currentCareResult) || CARED_STATUSES.has(row.status)).map((row) => row.machineId)).size;
     const serviced = new Set(rows.filter((row) => row.reportCount > 0 || row.status === "COMPLETED").map((row) => row.machineId)).size;
     const assigned = new Set(rows.filter((row) => Boolean(row.dealerCode)).map((row) => row.machineId)).size;
@@ -222,10 +204,8 @@ export async function GET(request: NextRequest) {
         metrics: { total, due, cared, serviced, assigned },
         generatedAt: new Date().toISOString(),
         sources: {
-          openSchedules: openSchedules.length,
-          openScheduleMachines: new Set(openSchedules.map((item) => item.machineId)).size,
-          completedActivationMachines: new Set(completedActivations.map((item) => item.machineId)).size,
-          installedMachines: installedMachines.length,
+          dueSchedules: dueSchedules.length,
+          dueScheduleMachines: new Set(dueSchedules.map((item) => item.machineId)).size,
           candidateMachines: candidateIds.length,
           scopedMachines: scopedMachines.length,
           reportRows: rows.length,
