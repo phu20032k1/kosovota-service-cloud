@@ -36,37 +36,59 @@ export async function GET(request: NextRequest) {
 
   try {
     const scope = auth.user.role === "CSKH" ? expandProvinceScope(auth.user.provinceScope) : [];
-    const machines = await prisma.machine.findMany({
-      where: {
-        customerId: { not: null },
-        OR: [
-          { installDate: { not: null } },
-          { activations: { some: { step: 2 } } },
-          { maintenanceSchedules: { some: { status: { notIn: Array.from(CLOSED_SCHEDULES) } } } },
-        ],
-      },
-      include: {
-        customer: { include: { owner: { select: { id: true, name: true } } } },
-        activations: { where: { step: 2 }, orderBy: { createdAt: "desc" }, take: 1 },
-        maintenanceSchedules: { orderBy: { dueDate: "asc" } },
-        serviceReports: { orderBy: { createdAt: "desc" }, take: 10 },
-        serviceOrders: {
-          where: { status: { not: "CANCELLED" } },
+
+    // Lấy machineId từ đúng các nguồn nghiệp vụ đang vận hành thay vì phụ thuộc một relation filter phức tạp.
+    // Nhờ vậy: máy có lịch mở trên màn hình Lịch thay lõi chắc chắn cũng là ứng viên của CSKH Report.
+    const [openSchedules, completedActivations, installedMachines] = await Promise.all([
+      prisma.maintenanceSchedule.findMany({
+        where: { status: { notIn: Array.from(CLOSED_SCHEDULES) } },
+        select: { machineId: true },
+        take: 5000,
+      }),
+      prisma.activation.findMany({
+        where: { step: 2 },
+        select: { machineId: true },
+        take: 5000,
+      }),
+      prisma.machine.findMany({
+        where: { installDate: { not: null } },
+        select: { id: true },
+        take: 5000,
+      }),
+    ]);
+
+    const candidateIds = [...new Set([
+      ...openSchedules.map((item) => item.machineId),
+      ...completedActivations.map((item) => item.machineId),
+      ...installedMachines.map((item) => item.id),
+    ])];
+
+    const machines = candidateIds.length
+      ? await prisma.machine.findMany({
+          where: { id: { in: candidateIds } },
           include: {
-            dealer: { select: { id: true, dealerCode: true, name: true, phone: true } },
-            reports: { orderBy: { createdAt: "desc" }, take: 5 },
-            sourceTicket: { include: { assignee: { select: { id: true, name: true } } } },
+            customer: { include: { owner: { select: { id: true, name: true } } } },
+            activations: { where: { step: 2 }, orderBy: { createdAt: "desc" }, take: 1 },
+            maintenanceSchedules: { orderBy: { dueDate: "asc" } },
+            serviceReports: { orderBy: { createdAt: "desc" }, take: 10 },
+            serviceOrders: {
+              where: { status: { not: "CANCELLED" } },
+              include: {
+                dealer: { select: { id: true, dealerCode: true, name: true, phone: true } },
+                reports: { orderBy: { createdAt: "desc" }, take: 5 },
+                sourceTicket: { include: { assignee: { select: { id: true, name: true } } } },
+              },
+              orderBy: [{ dueDate: "asc" }, { createdAt: "desc" }],
+            },
           },
-          orderBy: [{ dueDate: "asc" }, { createdAt: "desc" }],
-        },
-      },
-      orderBy: [{ installDate: "desc" }, { updatedAt: "desc" }],
-      take: 1500,
-    });
+          orderBy: [{ installDate: "desc" }, { updatedAt: "desc" }],
+        })
+      : [];
 
     const scopedMachines = scope.length
       ? machines.filter((machine) => {
-          const inferredCode = machine.provinceCode || provinceFromAddress(machine.customer?.address)?.[1] || null;
+          const fallbackAddress = machine.customer?.address || machine.serviceOrders[0]?.address || "";
+          const inferredCode = machine.provinceCode || provinceFromAddress(fallbackAddress)?.[1] || null;
           return Boolean(inferredCode && scope.includes(inferredCode));
         })
       : machines;
@@ -108,9 +130,9 @@ export async function GET(request: NextRequest) {
         || machine.serviceOrders[0]
         || null;
 
-      const effectiveProvinceCode = machine.provinceCode || provinceFromAddress(customer?.address)?.[1] || null;
-      const province = provinceName(effectiveProvinceCode) || "";
       const address = customer?.address || order?.address || "";
+      const effectiveProvinceCode = machine.provinceCode || provinceFromAddress(address)?.[1] || null;
+      const province = provinceName(effectiveProvinceCode) || "";
       const splitAddress = splitVietnamAddress(address, province);
       const careActivity = order ? activityByOrder.get(order.id) || null : null;
       const customerActivities = customer ? activitiesByCustomer.get(customer.id) || [] : [];
@@ -192,6 +214,13 @@ export async function GET(request: NextRequest) {
         rows,
         metrics: { total: rows.length, due, cared, serviced, assigned },
         generatedAt: new Date().toISOString(),
+        sources: {
+          openScheduleMachines: new Set(openSchedules.map((item) => item.machineId)).size,
+          completedActivationMachines: new Set(completedActivations.map((item) => item.machineId)).size,
+          installedMachines: installedMachines.length,
+          candidateMachines: candidateIds.length,
+          scopedMachines: scopedMachines.length,
+        },
       },
     });
   } catch (error) {
