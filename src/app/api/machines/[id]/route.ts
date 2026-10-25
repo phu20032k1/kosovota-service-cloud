@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { hasRole } from "@/lib/auth";
+import { provinceScopeAllows } from "@/lib/province-access";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -31,6 +32,13 @@ export async function GET(request: NextRequest, { params }: Params) {
       },
     });
     if (!machine) return NextResponse.json({ success: false, message: "Không tìm thấy máy." }, { status: 404 });
+    if (auth.user.role === "CSKH" && !provinceScopeAllows(
+      auth.user.provinceScope,
+      machine.provinceCode,
+      machine.customer?.address,
+    )) {
+      return NextResponse.json({ success: false, message: "Máy nằm ngoài phạm vi được phân công." }, { status: 403 });
+    }
     return NextResponse.json({ success: true, data: machine });
   } catch (error) {
     console.error("GET machine failed", error);
