@@ -17,10 +17,16 @@ export async function getActiveUser(request: NextRequest) {
   const user = await prisma.user.findUnique({ where: { id: session.sub } });
   if (!user?.active || user.role !== session.role) return null;
 
-  // Dữ liệu cũ có thể lưu "Hà Nội", "HN" hoặc "01". Mọi API phía sau đều
-  // nhận một scope đã mở rộng đủ alias nên không còn tình trạng có quyền nhưng lọc ra rỗng.
+  // CSKH vận hành toàn quốc: không áp dụng provinceScope để chặn dữ liệu.
+  // Giá trị scope cũ vẫn được giữ trong DB để có thể tái sử dụng nếu sau này
+  // hệ thống quay lại mô hình phân CSKH theo tỉnh.
+  if (user.role === "CSKH") {
+    return { session, user: { ...user, provinceScope: null } };
+  }
+
+  // Các vai trò khác vẫn chuẩn hóa alias tỉnh nếu có scope lịch sử.
   const aliases = expandProvinceScope(user.provinceScope);
-  const effectiveScope = aliases.length ? aliases.join(",") : user.role === "CSKH" ? "__NO_SCOPE__" : user.provinceScope;
+  const effectiveScope = aliases.length ? aliases.join(",") : user.provinceScope;
   return { session, user: { ...user, provinceScope: effectiveScope } };
 }
 
