@@ -197,6 +197,31 @@ export default function CskhReportPage() {
     });
   }, [data, filter, query]);
 
+  async function updateLastCareWork(row: ReportRow, serviceType: string) {
+    if (!row.serviceOrderId) {
+      setNotice({ kind: "info", text: `${row.machineCode} chưa có lệnh chăm sóc hiện tại.` });
+      return;
+    }
+    setBusyId(row.id);
+    setNotice(null);
+    try {
+      const response = await fetch(`/api/cskh/report/${row.serviceOrderId}/last-care-work`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ serviceType }),
+      });
+      const result = await readApiResponse<unknown>(response);
+      if (!response.ok || !result.success) throw new Error(result.message || "Không cập nhật được công việc chăm sóc gần nhất.");
+      setNotice({ kind: "success", text: `Đã cập nhật công việc chăm sóc gần nhất cho ${row.machineCode}.` });
+      await load(true);
+    } catch (error) {
+      setNotice({ kind: "error", text: error instanceof Error ? error.message : "Không cập nhật được công việc chăm sóc gần nhất." });
+      await load(true);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   async function updateServiceType(row: ReportRow, serviceType: string) {
     if (!row.serviceOrderId) {
       setNotice({ kind: "info", text: `${row.machineCode} chưa có lệnh dịch vụ.` });
@@ -379,6 +404,7 @@ export default function CskhReportPage() {
                   {!rows.length ? <tr><td colSpan={22} className="p-12 text-center text-slate-500">Không có lịch đến hạn phù hợp với bộ lọc hiện tại.</td></tr> : rows.map((row, index) => {
                     const hasOrder = Boolean(row.serviceOrderId);
                     const completed = row.reportCount > 0 || row.status === "COMPLETED";
+                    const selectedLastWork = SERVICE_WORK_OPTIONS.includes(row.lastCareWork as (typeof SERVICE_WORK_OPTIONS)[number]) ? row.lastCareWork : "__custom";
                     const selectedWork = SERVICE_WORK_OPTIONS.includes(row.serviceType as (typeof SERVICE_WORK_OPTIONS)[number]) ? row.serviceType : "__custom";
                     const selectedCare = CARE_RESULT_OPTIONS.some((item) => item.label === row.currentCareResult) ? row.currentCareResult : "";
                     return (
@@ -398,7 +424,18 @@ export default function CskhReportPage() {
                         <Cell strong>{row.activationDealerCode || "—"}</Cell>
                         <Cell>{date(row.activationDate) || "—"}</Cell>
                         <Cell>{date(row.lastCareDate) || "—"}</Cell>
-                        <Cell>{row.lastCareWork ? <span className="inline-flex min-w-[165px] justify-center rounded-full px-3 py-1 font-bold" style={workStyle(row.lastCareWork)}>{row.lastCareWork}</span> : "—"}</Cell>
+                        <Cell>
+                          <select
+                            value={selectedLastWork}
+                            disabled={busyId === row.id || !hasOrder}
+                            onChange={(event) => { if (event.target.value !== "__custom") void updateLastCareWork(row, event.target.value); }}
+                            className="min-w-[185px] rounded-full border border-slate-200 px-3 py-1.5 text-xs font-bold disabled:opacity-70"
+                            style={workStyle(row.lastCareWork)}
+                          >
+                            <option value="__custom">{row.lastCareWork || "Chọn công việc gần nhất"}</option>
+                            {SERVICE_WORK_OPTIONS.map((item) => <option key={item} value={item}>{item}</option>)}
+                          </select>
+                        </Cell>
                         <Cell center>{row.monthsSinceActivation == null ? "—" : `${row.monthsSinceActivation} tháng`}</Cell>
                         <Cell>
                           <select
