@@ -5,6 +5,7 @@ import { writeAudit } from "@/lib/audit";
 import { normalizePhone, isValidVietnamPhone } from "@/lib/phone";
 import { databaseErrorMessage } from "@/lib/database-errors";
 import { geocodeAddress } from "@/lib/maps/geocode";
+import { effectiveProvinceCode, provinceScopeAllows } from "@/lib/province-access";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -25,9 +26,18 @@ async function geocodeCustomerAddress(address: string) {
   }
 }
 
+function customerInScope(
+  provinceScope: string | null,
+  address: string | null,
+  machines: Array<{ provinceCode: string | null }>,
+) {
+  if (provinceScopeAllows(provinceScope, null, address)) return true;
+  return machines.some((machine) => provinceScopeAllows(provinceScope, machine.provinceCode, address));
+}
+
 export async function GET(request: NextRequest, { params }: Params) {
   try {
-    const auth = await hasRole(request, ["ADMIN", "CSKH"]);
+    const auth = await hasRole(request, ["SUPER_ADMIN", "ADMIN", "CSKH"]);
     if (!auth) return NextResponse.json({ success: false, message: "Chưa được cấp quyền." }, { status: 401 });
     const { id } = await params;
     const customer = await prisma.customer.findUnique({
@@ -50,6 +60,9 @@ export async function GET(request: NextRequest, { params }: Params) {
       },
     });
     if (!customer) return NextResponse.json({ success: false, message: "Không tìm thấy khách hàng." }, { status: 404 });
+    if (auth.user.role === "CSKH" && !customerInScope(auth.user.provinceScope, customer.address, customer.machines)) {
+      return NextResponse.json({ success: false, message: "Khách hàng nằm ngoài phạm vi được phân công." }, { status: 403 });
+    }
     return NextResponse.json({ success: true, data: customer });
   } catch (error) {
     console.error("GET /api/crm/customers/[id] failed", error);
@@ -59,9 +72,18 @@ export async function GET(request: NextRequest, { params }: Params) {
 
 export async function PUT(request: NextRequest, { params }: Params) {
   try {
-    const auth = await hasRole(request, ["ADMIN", "CSKH"]);
+    const auth = await hasRole(request, ["SUPER_ADMIN", "ADMIN", "CSKH"]);
     if (!auth) return NextResponse.json({ success: false, message: "Chưa được cấp quyền." }, { status: 401 });
     const { id } = await params;
+    const existingCustomer = await prisma.customer.findUnique({
+      where: { id },
+      select: { address: true, machines: { select: { provinceCode: true } } },
+    });
+    if (!existingCustomer) return NextResponse.json({ success: false, message: "Không tìm thấy khách hàng." }, { status: 404 });
+    if (auth.user.role === "CSKH" && !customerInScope(auth.user.provinceScope, existingCustomer.address, existingCustomer.machines)) {
+      return NextResponse.json({ success: false, message: "Khách hàng nằm ngoài phạm vi được phân công." }, { status: 403 });
+    }
+
     const body = await request.json();
     const data: Record<string, unknown> = {};
 
@@ -79,7 +101,12 @@ export async function PUT(request: NextRequest, { params }: Params) {
     }
 
     const address = typeof body.address === "string" ? body.address.trim() : null;
-    if (typeof body.address === "string") data.address = address || null;
+    if (typeof body.address === "string") {
+      if (auth.user.role === "CSKH" && address && !provinceScopeAllows(auth.user.provinceScope, null, address)) {
+        return NextResponse.json({ success: false, message: "Địa chỉ mới nằm ngoài phạm vi tỉnh được phân công." }, { status: 403 });
+      }
+      data.address = address || null;
+    }
     if (typeof body.segment === "string") data.segment = body.segment;
     if (typeof body.tags === "string") data.tags = body.tags.trim() || null;
     if (Number.isInteger(body.satisfaction)) data.satisfaction = Math.min(5, Math.max(1, body.satisfaction));
@@ -87,18 +114,24 @@ export async function PUT(request: NextRequest, { params }: Params) {
     if ("nextContactAt" in body) data.nextContactAt = body.nextContactAt ? new Date(body.nextContactAt) : null;
 
     const location = address ? await geocodeCustomerAddress(address) : null;
+    const inferredProvince = address ? effectiveProvinceCode(location?.provinceCode, address) : null;
     const result = await prisma.$transaction(async (tx) => {
       const customer = await tx.customer.update({ where: { id }, data });
       let gpsUpdatedCount = 0;
-      if (location) {
-        const machines = await tx.machine.findMany({
-          where: { customerId: id },
-          select: { id: true, lat: true, lng: true },
-        });
-        for (const machine of machines) {
-          if (hasUsableCoordinates(machine.lat, machine.lng)) continue;
-          await tx.machine.update({ where: { id: machine.id }, data: { lat: location.lat, lng: location.lng } });
+      const machines = await tx.machine.findMany({
+        where: { customerId: id },
+        select: { id: true, lat: true, lng: true },
+      });
+      for (const machine of machines) {
+        const patch: { lat?: number; lng?: number; provinceCode?: string } = {};
+        if (location && !hasUsableCoordinates(machine.lat, machine.lng)) {
+          patch.lat = location.lat;
+          patch.lng = location.lng;
           gpsUpdatedCount += 1;
+        }
+        if (inferredProvince) patch.provinceCode = inferredProvince;
+        if (Object.keys(patch).length) {
+          await tx.machine.update({ where: { id: machine.id }, data: patch });
         }
       }
       return { customer, gpsUpdatedCount };
@@ -109,7 +142,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
       userId: auth.user.id,
       action: "UPDATE_CUSTOMER_CRM",
       target: result.customer.phone,
-      detail: { ...body, gpsUpdatedCount: result.gpsUpdatedCount, geocodeSucceeded: Boolean(location) },
+      detail: { ...body, gpsUpdatedCount: result.gpsUpdatedCount, geocodeSucceeded: Boolean(location), inferredProvince },
     });
     return NextResponse.json({
       success: true,
@@ -128,9 +161,18 @@ export async function PUT(request: NextRequest, { params }: Params) {
 
 export async function POST(request: NextRequest, { params }: Params) {
   try {
-    const auth = await hasRole(request, ["ADMIN", "CSKH"]);
+    const auth = await hasRole(request, ["SUPER_ADMIN", "ADMIN", "CSKH"]);
     if (!auth) return NextResponse.json({ success: false, message: "Chưa được cấp quyền." }, { status: 401 });
     const { id } = await params;
+    const customer = await prisma.customer.findUnique({
+      where: { id },
+      select: { address: true, machines: { select: { provinceCode: true } } },
+    });
+    if (!customer) return NextResponse.json({ success: false, message: "Không tìm thấy khách hàng." }, { status: 404 });
+    if (auth.user.role === "CSKH" && !customerInScope(auth.user.provinceScope, customer.address, customer.machines)) {
+      return NextResponse.json({ success: false, message: "Khách hàng nằm ngoài phạm vi được phân công." }, { status: 403 });
+    }
+
     const body = await request.json();
     const summary = String(body.summary || "").trim();
     if (!summary) return NextResponse.json({ success: false, message: "Cần nhập nội dung tương tác." }, { status: 400 });
