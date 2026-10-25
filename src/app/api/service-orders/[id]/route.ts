@@ -7,6 +7,7 @@ import { databaseErrorMessage } from "@/lib/database-errors";
 import { protectServiceOrderCustomerData } from "@/lib/service-order-privacy";
 import { createTicketCode } from "@/lib/enterprise-codes";
 import { CARE_DISABLED_ACTION } from "@/lib/maintenance-optout";
+import { cskhScopeAllows } from "@/lib/province-access";
 
 type Params = { params: Promise<{ id: string }> };
 const ALLOWED_STATUSES = ["NEW", "CALLED_NO_ANSWER", "CUSTOMER_ACCEPTED", "CUSTOMER_SELF_SERVICE", "CUSTOMER_INTERNAL", "CUSTOMER_REJECTED", "RESCHEDULED", "COMPLAINT", "ASSIGNED", "ACCEPTED", "IN_PROGRESS", "COMPLETED", "CANCELLED"];
@@ -15,10 +16,28 @@ const ACTIVE_SERVICE_STATUSES = ["NEW", "ASSIGNED", "ACCEPTED", "IN_PROGRESS", "
 async function getAuthorizedOrder(request: NextRequest, id: string) {
   const auth = await hasRole(request, ["ADMIN", "SUPER_ADMIN", "CSKH", "DEALER", "CTV", "KTV"]);
   if (!auth) return { auth: null, order: null };
-  const order = await prisma.serviceOrder.findUnique({ where: { id }, include: { machine: { include: { customer: true, activations: true, maintenanceSchedules: true } }, dealer: true, technician: true, reports: true, maintenanceSchedule: true, sourceTicket: { include: { messages: { orderBy: { createdAt: "asc" } } } } } });
+  const order = await prisma.serviceOrder.findUnique({
+    where: { id },
+    include: {
+      machine: { include: { customer: true, activations: true, maintenanceSchedules: true } },
+      dealer: true,
+      technician: true,
+      reports: true,
+      maintenanceSchedule: true,
+      sourceTicket: { include: { messages: { orderBy: { createdAt: "asc" } } } },
+    },
+  });
   if (!order) return { auth, order: null };
   if (["DEALER", "CTV"].includes(auth.user.role) && order.dealer?.dealerCode !== auth.user.dealerCode) return { auth: null, order: null };
   if (auth.user.role === "KTV" && order.technicianId !== auth.user.id) return { auth: null, order: null };
+  if (auth.user.role === "CSKH" && !cskhScopeAllows(
+    auth.user,
+    {
+      provinceValue: order.machine.provinceCode,
+      address: order.machine.customer?.address || order.address,
+      customerId: order.machine.customerId,
+    },
+  )) return { auth: null, order: null };
   return { auth, order };
 }
 
@@ -28,11 +47,7 @@ async function chooseCareAssignee(user: { id: string; role: string }, ownerId?: 
     const owner = await prisma.user.findFirst({ where: { id: ownerId, active: true, role: { in: ["ADMIN", "CSKH"] } }, select: { id: true } });
     if (owner) return owner.id;
   }
-  const staff = await prisma.user.findMany({
-    where: { active: true, role: "CSKH" },
-    select: { id: true, provinceScope: true },
-    orderBy: { createdAt: "asc" },
-  });
+  const staff = await prisma.user.findMany({ where: { active: true, role: "CSKH" }, select: { id: true, provinceScope: true }, orderBy: { createdAt: "asc" } });
   const matched = staff.find((member) => !member.provinceScope || !provinceCode || member.provinceScope.split(",").map((part) => part.trim()).includes(provinceCode));
   return matched?.id || staff[0]?.id || user.id;
 }
@@ -49,11 +64,7 @@ async function ensureCareWorkflowTicket(input: {
 }) {
   const marker = `[order:${input.orderId}]`;
   const existing = await prisma.supportTicket.findFirst({
-    where: {
-      machineId: input.machineId,
-      type: input.kind,
-      description: { contains: marker },
-    },
+    where: { machineId: input.machineId, type: input.kind, description: { contains: marker } },
     select: { id: true, ticketCode: true, assigneeId: true, status: true },
   });
   if (existing) {
@@ -65,9 +76,7 @@ async function ensureCareWorkflowTicket(input: {
 
   const ticketCode = await createTicketCode();
   const materialSale = input.kind === "MATERIAL_SALE";
-  const subject = materialSale
-    ? `Bán lõi/vật liệu tự thay - ${input.machineId}`
-    : `Nhắc nhân viên chăm sóc máy nội bộ - ${input.machineId}`;
+  const subject = materialSale ? `Bán lõi/vật liệu tự thay - ${input.machineId}` : `Nhắc nhân viên chăm sóc máy nội bộ - ${input.machineId}`;
   const description = materialSale
     ? `Tự động tạo từ lệnh ${input.orderCode}. Khách hàng chọn tự thay; CSKH cần tư vấn, chốt lõi/vật liệu phù hợp và theo dõi giao hàng. ${marker}`
     : `Tự động tạo từ lệnh ${input.orderCode}. Đây là khách hàng/máy nội bộ công ty; cần giao nhân viên phụ trách chăm sóc và xác nhận hoàn tất. ${marker}`;
@@ -112,8 +121,7 @@ export async function GET(request: NextRequest, { params }: Params) {
     const result = await getAuthorizedOrder(request, id);
     if (!result.auth) return NextResponse.json({ success: false, message: "Chưa được cấp quyền." }, { status: 401 });
     if (!result.order) return NextResponse.json({ success: false, message: "Không tìm thấy lệnh dịch vụ." }, { status: 404 });
-    const data = protectServiceOrderCustomerData(result.order, result.auth.user.role);
-    return NextResponse.json({ success: true, data });
+    return NextResponse.json({ success: true, data: protectServiceOrderCustomerData(result.order, result.auth.user.role) });
   } catch (error) {
     console.error("GET /api/service-orders/[id] failed", error);
     return NextResponse.json({ success: false, message: databaseErrorMessage(error, "Không tải được chi tiết lệnh dịch vụ.") }, { status: 500 });
@@ -142,11 +150,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
     const rejected = ["DEALER", "CTV"].includes(auth.user.role) && status === "NEW" && body.dealerId === null;
     const dueDate = status === "CALLED_NO_ANSWER"
       ? new Date(Date.now() + 3 * 24 * 60 * 60 * 1000)
-      : body.dueDate === null || body.dueDate === ""
-        ? null
-        : body.dueDate
-          ? new Date(body.dueDate)
-          : undefined;
+      : body.dueDate === null || body.dueDate === "" ? null : body.dueDate ? new Date(body.dueDate) : undefined;
     const serviceFee = body.serviceFee === null || body.serviceFee === "" ? null : Number.isFinite(Number(body.serviceFee)) ? Number(body.serviceFee) : undefined;
 
     const order = await prisma.serviceOrder.update({
@@ -167,33 +171,17 @@ export async function PUT(request: NextRequest, { params }: Params) {
     const workflow: { ticketCode?: string; ticketId?: string; disabledSchedules?: number; cancelledOrders?: number } = {};
 
     if (status === "CUSTOMER_REJECTED") {
-      const openSchedules = await prisma.maintenanceSchedule.findMany({
-        where: { machineId: current.machineId, status: { in: ["PENDING", "ORDER_CREATED"] } },
-        select: { id: true },
-      });
+      const openSchedules = await prisma.maintenanceSchedule.findMany({ where: { machineId: current.machineId, status: { in: ["PENDING", "ORDER_CREATED"] } }, select: { id: true } });
       const scheduleIds = openSchedules.map((item) => item.id);
       const [disabled, cancelled] = await prisma.$transaction([
         prisma.maintenanceSchedule.updateMany({ where: { id: { in: scheduleIds } }, data: { status: "DISABLED" } }),
-        prisma.serviceOrder.updateMany({
-          where: { id: { not: current.id }, maintenanceScheduleId: { in: scheduleIds }, status: { in: ACTIVE_SERVICE_STATUSES } },
-          data: { status: "CANCELLED" },
-        }),
-        prisma.adminLog.create({
-          data: { userId: auth.user.id, action: CARE_DISABLED_ACTION, target: current.machineId, detail: JSON.stringify({ scheduleIds, orderId: current.id }) },
-        }),
+        prisma.serviceOrder.updateMany({ where: { id: { not: current.id }, maintenanceScheduleId: { in: scheduleIds }, status: { in: ACTIVE_SERVICE_STATUSES } }, data: { status: "CANCELLED" } }),
+        prisma.adminLog.create({ data: { userId: auth.user.id, action: CARE_DISABLED_ACTION, target: current.machineId, detail: JSON.stringify({ scheduleIds, orderId: current.id }) } }),
       ]).then(([disabled, cancelled]) => [disabled, cancelled] as const);
       workflow.disabledSchedules = disabled.count;
       workflow.cancelledOrders = cancelled.count;
       if (order.machine.customer?.id) {
-        await prisma.customerActivity.create({
-          data: {
-            customerId: order.machine.customer.id,
-            type: "CARE_REJECTED",
-            summary: `Khách từ chối chăm sóc máy ${order.machineId}`,
-            detail: `Đã tắt ${disabled.count} lịch nhắc còn mở để hệ thống không tự nhắc lại.`,
-            userId: auth.user.id,
-          },
-        });
+        await prisma.customerActivity.create({ data: { customerId: order.machine.customer.id, type: "CARE_REJECTED", summary: `Khách từ chối chăm sóc máy ${order.machineId}`, detail: `Đã tắt ${disabled.count} lịch nhắc còn mở để hệ thống không tự nhắc lại.`, userId: auth.user.id } });
       }
     }
 
@@ -203,32 +191,14 @@ export async function PUT(request: NextRequest, { params }: Params) {
 
     if (status === "CUSTOMER_SELF_SERVICE") {
       if (current.maintenanceScheduleId) await prisma.maintenanceSchedule.update({ where: { id: current.maintenanceScheduleId }, data: { status: "SELF_SERVICE" } });
-      const ticket = await ensureCareWorkflowTicket({
-        orderId: current.id,
-        orderCode: current.orderCode,
-        machineId: current.machineId,
-        customerId: current.machine.customer?.id,
-        customerName: current.machine.customer?.name || current.customerName,
-        customerPhone: current.machine.customer?.phone || current.customerPhone,
-        assigneeId: careAssigneeId,
-        kind: "MATERIAL_SALE",
-      });
+      const ticket = await ensureCareWorkflowTicket({ orderId: current.id, orderCode: current.orderCode, machineId: current.machineId, customerId: current.machine.customer?.id, customerName: current.machine.customer?.name || current.customerName, customerPhone: current.machine.customer?.phone || current.customerPhone, assigneeId: careAssigneeId, kind: "MATERIAL_SALE" });
       workflow.ticketCode = ticket.ticketCode;
       workflow.ticketId = ticket.id;
     }
 
     if (status === "CUSTOMER_INTERNAL") {
       if (current.maintenanceScheduleId) await prisma.maintenanceSchedule.update({ where: { id: current.maintenanceScheduleId }, data: { status: "INTERNAL" } });
-      const ticket = await ensureCareWorkflowTicket({
-        orderId: current.id,
-        orderCode: current.orderCode,
-        machineId: current.machineId,
-        customerId: current.machine.customer?.id,
-        customerName: current.machine.customer?.name || current.customerName,
-        customerPhone: current.machine.customer?.phone || current.customerPhone,
-        assigneeId: careAssigneeId,
-        kind: "INTERNAL_CARE",
-      });
+      const ticket = await ensureCareWorkflowTicket({ orderId: current.id, orderCode: current.orderCode, machineId: current.machineId, customerId: current.machine.customer?.id, customerName: current.machine.customer?.name || current.customerName, customerPhone: current.machine.customer?.phone || current.customerPhone, assigneeId: careAssigneeId, kind: "INTERNAL_CARE" });
       workflow.ticketCode = ticket.ticketCode;
       workflow.ticketId = ticket.id;
     }
@@ -257,24 +227,17 @@ export async function DELETE(request: NextRequest, { params }: Params) {
     const { id } = await params;
     const order = await prisma.serviceOrder.findUnique({
       where: { id },
-      include: { machine: true, sourceTicket: true, reports: true, stockMovements: { select: { id: true } } },
+      include: { machine: { include: { customer: true } }, sourceTicket: true, reports: true, stockMovements: { select: { id: true } } },
     });
     if (!order) return NextResponse.json({ success: false, message: "Không tìm thấy lệnh dịch vụ." }, { status: 404 });
-    if (auth.user.role === "CSKH" && auth.user.provinceScope) {
-      const scopes = auth.user.provinceScope.split(",").map((value: string) => value.trim()).filter(Boolean);
-      if (scopes.length && (!order.machine.provinceCode || !scopes.includes(order.machine.provinceCode))) return NextResponse.json({ success: false, message: "Lệnh nằm ngoài phạm vi CSKH được phân công." }, { status: 403 });
-    }
+    if (auth.user.role === "CSKH" && !cskhScopeAllows(
+      auth.user,
+      { provinceValue: order.machine.provinceCode, address: order.machine.customer?.address || order.address, customerId: order.machine.customerId },
+    )) return NextResponse.json({ success: false, message: "Lệnh nằm ngoài phạm vi CSKH được phân công." }, { status: 403 });
+
     await prisma.$transaction(async (tx) => {
       const { machine, sourceTicket, reports, stockMovements, ...record } = order;
-      await archiveToTrash(tx, {
-        entityType: "SERVICE_ORDER",
-        entityId: order.id,
-        label: order.orderCode + " · " + order.customerName,
-        snapshot: { record, reports, stockMovementIds: stockMovements.map((item) => item.id), sourceTicketId: sourceTicket?.id || null },
-        deletedById: auth.user.id,
-        deletedByName: auth.user.name,
-        source: "/api/service-orders/[id]",
-      });
+      await archiveToTrash(tx, { entityType: "SERVICE_ORDER", entityId: order.id, label: order.orderCode + " · " + order.customerName, snapshot: { record, reports, stockMovementIds: stockMovements.map((item) => item.id), sourceTicketId: sourceTicket?.id || null }, deletedById: auth.user.id, deletedByName: auth.user.name, source: "/api/service-orders/[id]" });
       if (order.sourceTicket) await tx.supportTicket.update({ where: { id: order.sourceTicket.id }, data: { serviceOrderId: null, status: order.sourceTicket.status === "RESOLVED" ? "RESOLVED" : "NEW" } });
       await tx.serviceReport.deleteMany({ where: { orderId: id } });
       await tx.stockMovement.updateMany({ where: { serviceOrderId: id }, data: { serviceOrderId: null } });
