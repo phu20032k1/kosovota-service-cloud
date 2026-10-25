@@ -3,7 +3,8 @@ import { prisma } from "@/lib/prisma";
 import { getOptedOutMachineIds } from "@/lib/maintenance-optout";
 import { hasRole } from "@/lib/auth";
 import { geocodeAddress } from "@/lib/maps/geocode";
-import { expandProvinceScope, provinceFromAddress, provinceLetterCodeOrNull } from "@/lib/province";
+import { provinceFromAddress, provinceLetterCodeOrNull } from "@/lib/province";
+import { provinceScopeAllows } from "@/lib/province-access";
 
 function text(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
@@ -104,11 +105,7 @@ export async function GET(request: NextRequest) {
   const auth = await hasRole(request, ["SUPER_ADMIN", "ADMIN", "CSKH"]);
   if (!auth) return NextResponse.json({ success: false, message: "Chưa được cấp quyền." }, { status: 401 });
   try {
-    const scopes = auth.user.role === "CSKH" ? expandProvinceScope(auth.user.provinceScope) : [];
     const machines = await prisma.machine.findMany({
-      where: auth.user.role === "CSKH" && scopes.length
-        ? { OR: [{ provinceCode: { in: scopes } }, { provinceCode: null }] }
-        : undefined,
       include: {
         customer: true,
         activations: { orderBy: { step: "asc" } },
@@ -119,11 +116,12 @@ export async function GET(request: NextRequest) {
       orderBy: { createdAt: "desc" },
     });
 
-    const scopedMachines = auth.user.role === "CSKH" && scopes.length
-      ? machines.filter((machine) => {
-          const effectiveProvince = machine.provinceCode || provinceFromAddress(machine.customer?.address)?.[1] || null;
-          return Boolean(effectiveProvince && scopes.includes(effectiveProvince));
-        })
+    const scopedMachines = auth.user.role === "CSKH"
+      ? machines.filter((machine) => provinceScopeAllows(
+          auth.user.provinceScope,
+          machine.provinceCode,
+          machine.customer?.address,
+        ))
       : machines;
 
     const gpsBackfilledCount = await backfillMachineGpsFromCustomerAddress(scopedMachines);
@@ -144,7 +142,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const auth = await hasRole(request, ["ADMIN"]);
+  const auth = await hasRole(request, ["SUPER_ADMIN", "ADMIN"]);
   if (!auth) return NextResponse.json({ success: false, message: "Chỉ Admin được tạo máy." }, { status: 403 });
   try {
     const body = await request.json();
@@ -176,7 +174,7 @@ export async function POST(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
-  const auth = await hasRole(request, ["ADMIN"]);
+  const auth = await hasRole(request, ["SUPER_ADMIN", "ADMIN"]);
   if (!auth) return NextResponse.json({ success: false, message: "Chỉ Admin được xóa máy." }, { status: 403 });
 
   try {
