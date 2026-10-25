@@ -2,65 +2,28 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { hasRole } from "@/lib/auth";
 import { databaseErrorMessage } from "@/lib/database-errors";
+import { cskhScopeAllows } from "@/lib/province-access";
 
 const CLOSED_CURRENT = ["COMPLETED", "DISABLED", "SELF_SERVICE", "INTERNAL"];
-const CARED_STATUSES = new Set([
-  "CALLED_NO_ANSWER",
-  "CUSTOMER_ACCEPTED",
-  "CUSTOMER_SELF_SERVICE",
-  "CUSTOMER_INTERNAL",
-  "CUSTOMER_REJECTED",
-  "RESCHEDULED",
-  "COMPLAINT",
-  "ASSIGNED",
-  "ACCEPTED",
-  "IN_PROGRESS",
-  "COMPLETED",
-]);
+const CARED_STATUSES = new Set(["CALLED_NO_ANSWER", "CUSTOMER_ACCEPTED", "CUSTOMER_SELF_SERVICE", "CUSTOMER_INTERNAL", "CUSTOMER_REJECTED", "RESCHEDULED", "COMPLAINT", "ASSIGNED", "ACCEPTED", "IN_PROGRESS", "COMPLETED"]);
 const CARE_ACTIVITY_MARKER = /\[service-order:([^\]]+)\]/;
 
 function vnDayKey(value: Date) {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Ho_Chi_Minh",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(value);
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Ho_Chi_Minh", year: "numeric", month: "2-digit", day: "2-digit" }).format(value);
 }
-
 function vnHour(value: Date) {
-  return Number(new Intl.DateTimeFormat("en-GB", {
-    timeZone: "Asia/Ho_Chi_Minh",
-    hour: "2-digit",
-    hourCycle: "h23",
-  }).format(value));
+  return Number(new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Ho_Chi_Minh", hour: "2-digit", hourCycle: "h23" }).format(value));
 }
-
 function addDays(key: string, delta: number) {
   const date = new Date(`${key}T12:00:00.000Z`);
   date.setUTCDate(date.getUTCDate() + delta);
   return date.toISOString().slice(0, 10);
 }
-
-function startOfVnDay(key: string) {
-  return new Date(`${key}T00:00:00+07:00`);
-}
-
-function endOfVnDay(key: string) {
-  return new Date(`${key}T23:59:59.999+07:00`);
-}
-
-function orderIdFromActivity(detail?: string | null) {
-  return detail?.match(CARE_ACTIVITY_MARKER)?.[1] || null;
-}
-
-function uniqueSize(values: string[]) {
-  return new Set(values.filter(Boolean)).size;
-}
-
-function isMissedCall(summary?: string | null) {
-  return /khó liên lạc|khong lien lac|không liên lạc|không nghe|khong nghe|no answer/i.test(summary || "");
-}
+function startOfVnDay(key: string) { return new Date(`${key}T00:00:00+07:00`); }
+function endOfVnDay(key: string) { return new Date(`${key}T23:59:59.999+07:00`); }
+function orderIdFromActivity(detail?: string | null) { return detail?.match(CARE_ACTIVITY_MARKER)?.[1] || null; }
+function uniqueSize(values: string[]) { return new Set(values.filter(Boolean)).size; }
+function isMissedCall(summary?: string | null) { return /khó liên lạc|khong lien lac|không liên lạc|không nghe|khong nghe|no answer/i.test(summary || ""); }
 
 export async function GET(request: NextRequest) {
   const auth = await hasRole(request, ["SUPER_ADMIN", "ADMIN", "CSKH"]);
@@ -74,138 +37,107 @@ export async function GET(request: NextRequest) {
     const periodStart = startOfVnDay(startKey);
     const periodEnd = endOfVnDay(todayKey);
 
-    const [
-      trackedMachines,
-      dueSchedules,
-      periodSchedules,
-      periodActivities,
-      periodReports,
-      cskhUsers,
-      customersTotal,
-      periodCustomers,
-      periodTickets,
-      periodMessages,
-      completedOrders,
-    ] = await Promise.all([
+    let scopedMachineIds: string[] | null = null;
+    let scopedCustomerIds: string[] | null = null;
+    if (auth.user.role === "CSKH") {
+      const [machineCandidates, customerCandidates] = await Promise.all([
+        prisma.machine.findMany({ select: { id: true, customerId: true, provinceCode: true, customer: { select: { address: true } } }, take: 20000 }),
+        prisma.customer.findMany({ select: { id: true, address: true, machines: { select: { provinceCode: true } } }, take: 20000 }),
+      ]);
+      scopedMachineIds = machineCandidates
+        .filter((machine) => cskhScopeAllows(auth.user, { provinceValue: machine.provinceCode, address: machine.customer?.address, customerId: machine.customerId }))
+        .map((machine) => machine.id);
+      scopedCustomerIds = customerCandidates
+        .filter((customer) => {
+          if (!customer.machines.length) return cskhScopeAllows(auth.user, { provinceValue: null, address: customer.address, customerId: customer.id });
+          return customer.machines.some((machine) => cskhScopeAllows(auth.user, { provinceValue: machine.provinceCode, address: customer.address, customerId: customer.id }));
+        })
+        .map((customer) => customer.id);
+    }
+
+    const machineFilter = scopedMachineIds ? { in: scopedMachineIds } : undefined;
+    const customerFilter = scopedCustomerIds ? { in: scopedCustomerIds } : undefined;
+
+    const [trackedMachines, dueSchedules, periodSchedules, periodActivities, periodReports, cskhUsers, customersTotal, periodCustomers, periodTickets, completedOrders] = await Promise.all([
       prisma.machine.findMany({
         where: {
-          OR: [
-            { installDate: { not: null } },
-            { activations: { some: { step: 2 } } },
-          ],
+          ...(machineFilter ? { id: machineFilter } : {}),
+          OR: [{ installDate: { not: null } }, { activations: { some: { step: 2 } } }],
         },
         select: { id: true },
         take: 10000,
       }),
       prisma.maintenanceSchedule.findMany({
-        where: {
-          dueDate: { lte: periodEnd },
-          status: { notIn: CLOSED_CURRENT },
-        },
-        select: {
-          id: true,
-          machineId: true,
-          title: true,
-          dueDate: true,
-          status: true,
-          serviceOrder: {
-            select: {
-              id: true,
-              status: true,
-              dealerId: true,
-              updatedAt: true,
-              reports: { select: { id: true, createdAt: true }, take: 1 },
-            },
-          },
-        },
+        where: { ...(machineFilter ? { machineId: machineFilter } : {}), dueDate: { lte: periodEnd }, status: { notIn: CLOSED_CURRENT } },
+        select: { id: true, machineId: true, title: true, dueDate: true, status: true, serviceOrder: { select: { id: true, status: true, dealerId: true, updatedAt: true, reports: { select: { id: true, createdAt: true }, take: 1 } } } },
         orderBy: { dueDate: "asc" },
         take: 10000,
       }),
       prisma.maintenanceSchedule.findMany({
-        where: {
-          dueDate: { gte: periodStart, lte: periodEnd },
-          status: { not: "DISABLED" },
-        },
+        where: { ...(machineFilter ? { machineId: machineFilter } : {}), dueDate: { gte: periodStart, lte: periodEnd }, status: { not: "DISABLED" } },
         select: { id: true, machineId: true, dueDate: true, title: true, status: true },
         orderBy: { dueDate: "asc" },
         take: 10000,
       }),
       prisma.customerActivity.findMany({
-        where: {
-          type: "CARE_RESULT",
-          occurredAt: { gte: periodStart, lte: periodEnd },
-        },
+        where: { ...(customerFilter ? { customerId: customerFilter } : {}), type: "CARE_RESULT", occurredAt: { gte: periodStart, lte: periodEnd } },
         select: { id: true, customerId: true, summary: true, detail: true, userId: true, occurredAt: true },
         orderBy: { occurredAt: "asc" },
         take: 20000,
       }),
       prisma.serviceReport.findMany({
-        where: { createdAt: { gte: periodStart, lte: periodEnd } },
+        where: { ...(machineFilter ? { machineId: machineFilter } : {}), createdAt: { gte: periodStart, lte: periodEnd } },
         select: { id: true, machineId: true, orderId: true, serviceType: true, createdAt: true },
         orderBy: { createdAt: "asc" },
         take: 20000,
       }),
       prisma.user.findMany({
-        where: { role: "CSKH", active: true },
+        where: { role: "CSKH", active: true, ...(auth.user.role === "CSKH" ? { id: auth.user.id } : {}) },
         select: { id: true, name: true, phone: true },
         orderBy: { name: "asc" },
       }),
-      prisma.customer.count(),
+      prisma.customer.count({ where: customerFilter ? { id: customerFilter } : undefined }),
       prisma.customer.findMany({
-        where: { createdAt: { gte: periodStart, lte: periodEnd } },
+        where: { ...(customerFilter ? { id: customerFilter } : {}), createdAt: { gte: periodStart, lte: periodEnd } },
         select: { id: true, createdAt: true },
         orderBy: { createdAt: "asc" },
         take: 20000,
       }),
       prisma.supportTicket.findMany({
-        where: { createdAt: { gte: periodStart, lte: periodEnd } },
+        where: {
+          createdAt: { gte: periodStart, lte: periodEnd },
+          ...(auth.user.role === "CSKH" ? { OR: [{ customerId: customerFilter }, { machineId: machineFilter }] } : {}),
+        },
         select: { id: true, status: true, createdAt: true, resolvedAt: true },
         orderBy: { createdAt: "asc" },
         take: 20000,
       }),
-      prisma.ticketMessage.findMany({
-        where: { createdAt: { gte: periodStart, lte: periodEnd } },
-        select: { id: true, ticketId: true, authorId: true, createdAt: true },
-        orderBy: { createdAt: "asc" },
-        take: 30000,
-      }),
       prisma.serviceOrder.findMany({
-        where: {
-          status: "COMPLETED",
-          updatedAt: { gte: periodStart, lte: periodEnd },
-        },
+        where: { ...(machineFilter ? { machineId: machineFilter } : {}), status: "COMPLETED", updatedAt: { gte: periodStart, lte: periodEnd } },
         select: { id: true, machineId: true, serviceFee: true, updatedAt: true },
         orderBy: { updatedAt: "asc" },
         take: 20000,
       }),
     ]);
 
+    const ticketIds = periodTickets.map((ticket) => ticket.id);
+    const periodMessages = ticketIds.length
+      ? await prisma.ticketMessage.findMany({ where: { ticketId: { in: ticketIds }, createdAt: { gte: periodStart, lte: periodEnd } }, select: { id: true, ticketId: true, authorId: true, createdAt: true }, orderBy: { createdAt: "asc" }, take: 30000 })
+      : [];
+
     const linkedOrderIds = [...new Set(periodActivities.map((item) => orderIdFromActivity(item.detail)).filter((id): id is string => Boolean(id)))];
     const linkedOrders = linkedOrderIds.length
       ? await prisma.serviceOrder.findMany({
-          where: { id: { in: linkedOrderIds } },
-          select: {
-            id: true,
-            machineId: true,
-            status: true,
-            dealerId: true,
-            reports: { select: { id: true }, take: 1 },
-          },
+          where: { id: { in: linkedOrderIds }, ...(machineFilter ? { machineId: machineFilter } : {}) },
+          select: { id: true, machineId: true, status: true, dealerId: true, reports: { select: { id: true }, take: 1 } },
         })
       : [];
     const linkedOrderMap = new Map(linkedOrders.map((order) => [order.id, order]));
 
     const dueMachineIds = dueSchedules.map((item) => item.machineId);
-    const caredMachineIds = dueSchedules
-      .filter((item) => item.serviceOrder && CARED_STATUSES.has(item.serviceOrder.status))
-      .map((item) => item.machineId);
-    const assignedMachineIds = dueSchedules
-      .filter((item) => Boolean(item.serviceOrder?.dealerId))
-      .map((item) => item.machineId);
-    const servicedMachineIds = dueSchedules
-      .filter((item) => item.serviceOrder?.status === "COMPLETED" || Boolean(item.serviceOrder?.reports.length))
-      .map((item) => item.machineId);
-
+    const caredMachineIds = dueSchedules.filter((item) => item.serviceOrder && CARED_STATUSES.has(item.serviceOrder.status)).map((item) => item.machineId);
+    const assignedMachineIds = dueSchedules.filter((item) => Boolean(item.serviceOrder?.dealerId)).map((item) => item.machineId);
+    const servicedMachineIds = dueSchedules.filter((item) => item.serviceOrder?.status === "COMPLETED" || Boolean(item.serviceOrder?.reports.length)).map((item) => item.machineId);
     const revenue = completedOrders.reduce((sum, item) => sum + (item.serviceFee || 0), 0);
     const missedCalls = periodActivities.filter((item) => isMissedCall(item.summary)).length;
     const resolvedTickets = periodTickets.filter((item) => item.resolvedAt || ["RESOLVED", "CLOSED", "COMPLETED"].includes(item.status)).length;
@@ -238,10 +170,7 @@ export async function GET(request: NextRequest) {
       const dayTickets = periodTickets.filter((item) => vnDayKey(item.createdAt) === key);
       const dayMessages = periodMessages.filter((item) => vnDayKey(item.createdAt) === key);
       const dayOrders = completedOrders.filter((item) => vnDayKey(item.updatedAt) === key);
-      const caredMachines = dayActivities
-        .map((item) => orderIdFromActivity(item.detail))
-        .map((id) => (id ? linkedOrderMap.get(id)?.machineId || "" : ""))
-        .filter(Boolean);
+      const caredMachines = dayActivities.map((item) => orderIdFromActivity(item.detail)).map((id) => (id ? linkedOrderMap.get(id)?.machineId || "" : "")).filter(Boolean);
       return {
         date: key,
         dueMachines: uniqueSize(daySchedules.map((item) => item.machineId)),
@@ -260,29 +189,21 @@ export async function GET(request: NextRequest) {
       };
     });
 
-    const hourly = Array.from({ length: 24 }, (_, hour) => ({
-      hour,
-      calls: periodActivities.filter((item) => vnHour(item.occurredAt) === hour).length,
-      conversations: periodMessages.filter((item) => vnHour(item.createdAt) === hour).length,
-    }));
+    const hourly = Array.from({ length: 24 }, (_, hour) => ({ hour, calls: periodActivities.filter((item) => vnHour(item.occurredAt) === hour).length, conversations: periodMessages.filter((item) => vnHour(item.createdAt) === hour).length }));
 
     const outcomeMap = new Map<string, number>();
     for (const activity of periodActivities) {
       const label = activity.summary?.trim() || "Chưa phân loại";
       outcomeMap.set(label, (outcomeMap.get(label) || 0) + 1);
     }
-    const careOutcomes = [...outcomeMap.entries()]
-      .map(([label, count]) => ({ label, count }))
-      .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, "vi"));
+    const careOutcomes = [...outcomeMap.entries()].map(([label, count]) => ({ label, count })).sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, "vi"));
 
     const serviceTypeMap = new Map<string, number>();
     for (const report of periodReports) {
       const label = report.serviceType?.trim() || "Dịch vụ khác";
       serviceTypeMap.set(label, (serviceTypeMap.get(label) || 0) + 1);
     }
-    const serviceTypes = [...serviceTypeMap.entries()]
-      .map(([label, count]) => ({ label, count }))
-      .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, "vi"));
+    const serviceTypes = [...serviceTypeMap.entries()].map(([label, count]) => ({ label, count })).sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, "vi"));
 
     const agentRows = cskhUsers.map((user) => {
       const activities = periodActivities.filter((item) => item.userId === user.id);
@@ -296,18 +217,7 @@ export async function GET(request: NextRequest) {
       const lastCare = activities.length ? activities[activities.length - 1].occurredAt : null;
       const lastMessage = messages.length ? messages[messages.length - 1].createdAt : null;
       const lastActivity = [lastCare, lastMessage].filter((item): item is Date => Boolean(item)).sort((a, b) => b.getTime() - a.getTime())[0] || null;
-      return {
-        id: user.id,
-        name: user.name,
-        phone: user.phone,
-        calls: activities.length,
-        conversations: messages.length,
-        machines: uniqueSize(machineIds),
-        accepted,
-        assigned,
-        serviced,
-        lastActivity: lastActivity ? lastActivity.toISOString() : null,
-      };
+      return { id: user.id, name: user.name, phone: user.phone, calls: activities.length, conversations: messages.length, machines: uniqueSize(machineIds), accepted, assigned, serviced, lastActivity: lastActivity ? lastActivity.toISOString() : null };
     }).sort((a, b) => b.calls - a.calls || b.conversations - a.conversations || b.serviced - a.serviced || a.name.localeCompare(b.name, "vi"));
 
     return NextResponse.json({
@@ -323,12 +233,7 @@ export async function GET(request: NextRequest) {
         careOutcomes,
         serviceTypes,
         agents: agentRows,
-        capabilities: {
-          hasTelephonyCallLog: false,
-          callDefinition: "CARE_RESULT",
-          revenueDefinition: "ServiceOrder.serviceFee khi COMPLETED",
-          conversationDefinition: "TicketMessage theo SupportTicket",
-        },
+        capabilities: { hasTelephonyCallLog: false, callDefinition: "CARE_RESULT", revenueDefinition: "ServiceOrder.serviceFee khi COMPLETED", conversationDefinition: "TicketMessage theo SupportTicket" },
       },
     });
   } catch (error) {
