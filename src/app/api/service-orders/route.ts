@@ -6,6 +6,7 @@ import { createOrderCode } from "@/lib/order-code";
 import { queueServiceOrderCreatedNotifications } from "@/lib/notifications/events";
 import { databaseErrorMessage } from "@/lib/database-errors";
 import { protectServiceOrderCustomerData } from "@/lib/service-order-privacy";
+import { effectiveProvinceCode, provinceScopeAllows } from "@/lib/province-access";
 
 const ORDER_INCLUDE = {
   machine: { include: { customer: true } },
@@ -18,12 +19,11 @@ const ORDER_INCLUDE = {
 
 export async function GET(request: NextRequest) {
   try {
-    const auth = await hasRole(request, ["ADMIN", "CSKH", "DEALER", "CTV", "KTV"]);
+    const auth = await hasRole(request, ["SUPER_ADMIN", "ADMIN", "CSKH", "DEALER", "CTV", "KTV"]);
     if (!auth) return NextResponse.json({ success: false, message: "Chưa được cấp quyền." }, { status: 401 });
 
     const status = request.nextUrl.searchParams.get("status") || undefined;
     const machineId = request.nextUrl.searchParams.get("machineId") || undefined;
-    const provinceScope = auth.user.provinceScope?.split(",").map((v: string) => v.trim()).filter(Boolean) || [];
 
     const orders = await prisma.serviceOrder.findMany({
       where: {
@@ -31,15 +31,20 @@ export async function GET(request: NextRequest) {
         ...(machineId ? { machineId } : {}),
         ...(["DEALER", "CTV"].includes(auth.user.role) ? { dealer: { dealerCode: auth.user.dealerCode || "__NONE__" } } : {}),
         ...(auth.user.role === "KTV" ? { technicianId: auth.user.id } : {}),
-        ...(auth.user.role === "CSKH" && provinceScope.length
-          ? { machine: { provinceCode: { in: provinceScope } } }
-          : {}),
       },
       include: ORDER_INCLUDE,
       orderBy: [{ dueDate: "asc" }, { createdAt: "desc" }],
     });
 
-    const data = orders.map((order) => protectServiceOrderCustomerData(order, auth.user.role));
+    const scopedOrders = auth.user.role === "CSKH"
+      ? orders.filter((order) => provinceScopeAllows(
+          auth.user.provinceScope,
+          order.machine.provinceCode,
+          order.machine.customer?.address || order.address,
+        ))
+      : orders;
+
+    const data = scopedOrders.map((order) => protectServiceOrderCustomerData(order, auth.user.role));
     return NextResponse.json({ success: true, data });
   } catch (error) {
     console.error("GET /api/service-orders failed", error);
@@ -48,7 +53,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const auth = await hasRole(request, ["ADMIN", "CSKH"]);
+  const auth = await hasRole(request, ["SUPER_ADMIN", "ADMIN", "CSKH"]);
   if (!auth) return NextResponse.json({ success: false, message: "Chưa được cấp quyền." }, { status: 401 });
 
   try {
@@ -61,6 +66,13 @@ export async function POST(request: NextRequest) {
 
     const machine = await prisma.machine.findUnique({ where: { id: machineId }, include: { customer: true } });
     if (!machine) return NextResponse.json({ success: false, message: "Không tìm thấy máy." }, { status: 404 });
+    if (auth.user.role === "CSKH" && !provinceScopeAllows(
+      auth.user.provinceScope,
+      machine.provinceCode,
+      machine.customer?.address,
+    )) {
+      return NextResponse.json({ success: false, message: "Máy nằm ngoài phạm vi được phân công." }, { status: 403 });
+    }
 
     const customerName = (typeof body.customerName === "string" && body.customerName.trim()) || machine.customer?.name;
     const customerPhone = normalizePhone(body.customerPhone || machine.customer?.phone);
@@ -68,7 +80,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, message: "Máy chưa có đủ thông tin khách hàng." }, { status: 400 });
     }
 
-    const orderCode = await createOrderCode(machine.provinceCode || "01");
+    const orderCode = await createOrderCode(effectiveProvinceCode(machine.provinceCode, machine.customer?.address) || "01");
     const order = await prisma.serviceOrder.create({
       data: {
         orderCode,
