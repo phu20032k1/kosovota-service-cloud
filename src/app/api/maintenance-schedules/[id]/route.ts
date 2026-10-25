@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { hasRole } from "@/lib/auth";
 import { generateDueMaintenanceOrders } from "@/lib/maintenance-automation";
 import { endOfVietnamCalendarDay } from "@/lib/maintenance-time";
+import { provinceScopeAllows } from "@/lib/province-access";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -35,18 +36,29 @@ function parseCalendarDueDate(value: unknown) {
 }
 
 export async function PATCH(request: NextRequest, { params }: Params) {
-  const auth = await hasRole(request, ["ADMIN", "CSKH"]);
+  const auth = await hasRole(request, ["SUPER_ADMIN", "ADMIN", "CSKH"]);
   if (!auth) return NextResponse.json({ success: false, message: "Chưa được cấp quyền." }, { status: 401 });
   const { id } = await params;
   const body = await request.json();
   const allowed = ["PENDING", "ORDER_CREATED", "COMPLETED", "DISABLED", "SELF_SERVICE"];
   const current = await prisma.maintenanceSchedule.findUnique({
     where: { id },
-    include: { machine: { select: { provinceCode: true } }, serviceOrder: { select: { id: true } } },
+    include: {
+      machine: {
+        select: {
+          provinceCode: true,
+          customer: { select: { address: true } },
+        },
+      },
+      serviceOrder: { select: { id: true } },
+    },
   });
   if (!current) return NextResponse.json({ success: false, message: "Không tìm thấy lịch bảo trì." }, { status: 404 });
-  const scopes = auth.user.provinceScope?.split(",").map((value: string) => value.trim()).filter(Boolean) || [];
-  if (auth.user.role === "CSKH" && scopes.length && (!current.machine.provinceCode || !scopes.includes(current.machine.provinceCode))) {
+  if (auth.user.role === "CSKH" && !provinceScopeAllows(
+    auth.user.provinceScope,
+    current.machine.provinceCode,
+    current.machine.customer?.address,
+  )) {
     return NextResponse.json({ success: false, message: "Lịch nằm ngoài phạm vi được phân công." }, { status: 403 });
   }
 
@@ -79,7 +91,11 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     const through = endOfVietnamCalendarDay(new Date());
     if (schedule.dueDate <= through) {
       try {
-        automaticOrderGeneration = await generateDueMaintenanceOrders(through, 1_000);
+        automaticOrderGeneration = await generateDueMaintenanceOrders(
+          through,
+          1_000,
+          auth.user.role === "CSKH" ? auth.user.provinceScope : null,
+        );
       } catch (error) {
         automaticOrderGenerationError = error instanceof Error ? error.message : "Không tự sinh được lệnh đến hạn.";
         console.error("automatic maintenance order generation failed", error);
@@ -98,7 +114,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
 }
 
 export async function DELETE(request: NextRequest, { params }: Params) {
-  const auth = await hasRole(request, ["ADMIN"]);
+  const auth = await hasRole(request, ["SUPER_ADMIN", "ADMIN"]);
   if (!auth) return NextResponse.json({ success: false, message: "Chỉ Admin được xóa lịch." }, { status: 403 });
   const { id } = await params;
   const schedule = await prisma.maintenanceSchedule.findUnique({ where: { id } });
