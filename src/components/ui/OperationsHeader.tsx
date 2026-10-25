@@ -42,7 +42,6 @@ const CSKH_NAV: NavItem[] = [
   { href: "/customer-map", label: "Bản đồ máy", icon: "droplet" },
   { href: "/dealer-map", label: "Bản đồ đại lý", icon: "store" },
   { href: "/maintenance-plans", label: "Lịch thay lõi", icon: "calendar" },
-  { href: "/scan", label: "Quét QR", icon: "qr" },
 ];
 
 function badgeLabel(count: number) { return count > 99 ? "99+" : String(count); }
