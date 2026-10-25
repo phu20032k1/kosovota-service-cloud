@@ -7,10 +7,11 @@ import { writeAudit } from "@/lib/audit";
 import { normalizePhone } from "@/lib/phone";
 import { queueServiceOrderCreatedNotifications } from "@/lib/notifications/events";
 import { databaseErrorMessage } from "@/lib/database-errors";
+import { cskhScopeAllows } from "@/lib/province-access";
 
 const include = {
   customer: true,
-  machine: { select: { id: true, model: true, name: true, status: true, provinceCode: true } },
+  machine: { include: { customer: true } },
   dealer: { select: { id: true, dealerCode: true, name: true } },
   assignee: { select: { id: true, name: true, role: true } },
   serviceOrder: {
@@ -38,6 +39,16 @@ function serviceTypeFromTicket(type: string, subject: string) {
   return `${prefix[normalized] || "Dịch vụ"}: ${subject}`.slice(0, 240);
 }
 
+function ticketInScope(user: { provinceScope?: string | null; wardScope?: string | null; customerScope?: string | null }, ticket: {
+  customerId?: string | null;
+  customer?: { id: string; address?: string | null } | null;
+  machine?: { provinceCode?: string | null; customerId?: string | null; customer?: { address?: string | null } | null } | null;
+}) {
+  const customerId = ticket.customerId || ticket.customer?.id || ticket.machine?.customerId || null;
+  const address = ticket.machine?.customer?.address || ticket.customer?.address || null;
+  return cskhScopeAllows(user, { provinceValue: ticket.machine?.provinceCode, address, customerId });
+}
+
 export async function GET(request: NextRequest) {
   try {
     const auth = await hasRole(request, ["ADMIN", "CSKH", "DEALER", "CTV"]);
@@ -50,30 +61,43 @@ export async function GET(request: NextRequest) {
         ...(status ? { status } : {}),
         ...(priority ? { priority } : {}),
         ...(dealerOperator ? { dealer: { dealerCode: auth.user.dealerCode || "__NONE__" } } : {}),
-        ...(auth.user.role === "CSKH" && auth.user.provinceScope ? {
-          OR: [
-            { assigneeId: auth.user.id },
-            { machine: { provinceCode: { in: auth.user.provinceScope.split(",").map((v) => v.trim()).filter(Boolean) } } },
-          ],
-        } : {}),
       },
       include,
       orderBy: [{ priority: "desc" }, { createdAt: "desc" }],
       take: 500,
     });
-    const [customers, machines, dealers, staff] = dealerOperator ? [[], [], [], []] : await Promise.all([
-      prisma.customer.findMany({ orderBy: { name: "asc" }, take: 1000 }),
-      prisma.machine.findMany({ include: { customer: true }, orderBy: { updatedAt: "desc" }, take: 2000 }),
-      prisma.dealer.findMany({ where: { status: "APPROVED" }, orderBy: { name: "asc" } }),
-      prisma.user.findMany({ where: { active: true, role: { in: ["ADMIN", "CSKH"] } }, select: { id: true, name: true, role: true } }),
-    ]);
-    return NextResponse.json({ success: true, data: { tickets, customers, machines, dealers, staff } });
+
+    const visibleTickets = auth.user.role === "CSKH"
+      ? tickets.filter((ticket) => ticketInScope(auth.user, ticket))
+      : tickets;
+
+    let customers: Awaited<ReturnType<typeof prisma.customer.findMany>> = [];
+    let machines: Awaited<ReturnType<typeof prisma.machine.findMany>> = [];
+    let dealers: Awaited<ReturnType<typeof prisma.dealer.findMany>> = [];
+    let staff: Array<{ id: string; name: string; role: string }> = [];
+
+    if (!dealerOperator) {
+      const [allCustomers, allMachines, allDealers, allStaff] = await Promise.all([
+        prisma.customer.findMany({ orderBy: { name: "asc" }, take: 1000 }),
+        prisma.machine.findMany({ include: { customer: true }, orderBy: { updatedAt: "desc" }, take: 2000 }),
+        prisma.dealer.findMany({ where: { status: "APPROVED" }, orderBy: { name: "asc" } }),
+        prisma.user.findMany({ where: { active: true, role: { in: ["ADMIN", "CSKH"] } }, select: { id: true, name: true, role: true } }),
+      ]);
+
+      customers = auth.user.role === "CSKH"
+        ? allCustomers.filter((customer) => cskhScopeAllows(auth.user, { address: customer.address, customerId: customer.id }))
+        : allCustomers;
+      machines = auth.user.role === "CSKH"
+        ? allMachines.filter((machine) => cskhScopeAllows(auth.user, { provinceValue: machine.provinceCode, address: machine.customer?.address, customerId: machine.customerId }))
+        : allMachines;
+      dealers = allDealers;
+      staff = auth.user.role === "CSKH" ? allStaff.filter((member) => member.id === auth.user.id) : allStaff;
+    }
+
+    return NextResponse.json({ success: true, data: { tickets: visibleTickets, customers, machines, dealers, staff } });
   } catch (error) {
     console.error("GET /api/support-tickets failed", error);
-    return NextResponse.json(
-      { success: false, message: databaseErrorMessage(error, "Không tải được danh sách Ticket.") },
-      { status: 500 },
-    );
+    return NextResponse.json({ success: false, message: databaseErrorMessage(error, "Không tải được danh sách Ticket.") }, { status: 500 });
   }
 }
 
@@ -103,6 +127,19 @@ export async function POST(request: NextRequest) {
     const inferredMachine = requestedMachine
       || (requestedCustomer?.machines.length === 1 ? requestedCustomer.machines[0] : null)
       || (phoneCustomer?.machines.length === 1 ? phoneCustomer.machines[0] : null);
+
+    if (auth.user.role === "CSKH") {
+      if (requestedMachine && !cskhScopeAllows(auth.user, { provinceValue: requestedMachine.provinceCode, address: requestedMachine.customer?.address, customerId: requestedMachine.customerId })) {
+        return NextResponse.json({ success: false, message: "Máy nằm ngoài phạm vi CSKH được phân công." }, { status: 403 });
+      }
+      if (requestedCustomer && !cskhScopeAllows(auth.user, { address: requestedCustomer.address, customerId: requestedCustomer.id })) {
+        return NextResponse.json({ success: false, message: "Khách hàng nằm ngoài phạm vi CSKH được phân công." }, { status: 403 });
+      }
+      if (customer && !cskhScopeAllows(auth.user, { provinceValue: inferredMachine?.provinceCode, address: customer.address, customerId: customer.id })) {
+        return NextResponse.json({ success: false, message: "Khách hàng/máy nằm ngoài phạm vi CSKH được phân công." }, { status: 403 });
+      }
+    }
+
     const dealer = dealerOperator
       ? await prisma.dealer.findUnique({ where: { dealerCode: auth.user.dealerCode || "__NONE__" } })
       : null;
@@ -141,7 +178,7 @@ export async function POST(request: NextRequest) {
           customerId: customer?.id || null,
           machineId: inferredMachine?.id || null,
           dealerId: selectedDealerId,
-          assigneeId: dealerOperator ? null : body.assigneeId || null,
+          assigneeId: dealerOperator ? null : auth.user.role === "CSKH" ? auth.user.id : body.assigneeId || null,
           serviceOrderId: serviceOrder?.id || null,
           contactName,
           contactPhone,
@@ -164,21 +201,9 @@ export async function POST(request: NextRequest) {
     });
 
     if (created.serviceOrder && customer) {
-      await queueServiceOrderCreatedNotifications({
-        orderCode: created.serviceOrder.orderCode,
-        machineId: created.serviceOrder.machineId,
-        serviceType: created.serviceOrder.serviceType,
-        dueDate: created.serviceOrder.dueDate,
-        customer,
-      });
+      await queueServiceOrderCreatedNotifications({ orderCode: created.serviceOrder.orderCode, machineId: created.serviceOrder.machineId, serviceType: created.serviceOrder.serviceType, dueDate: created.serviceOrder.dueDate, customer });
     }
-    await writeAudit({
-      request,
-      userId: auth.user.id,
-      action: "CREATE_SUPPORT_TICKET",
-      target: ticketCode,
-      detail: { subject, priority: created.priority, serviceOrder: created.serviceOrder?.orderCode || null },
-    });
+    await writeAudit({ request, userId: auth.user.id, action: "CREATE_SUPPORT_TICKET", target: ticketCode, detail: { subject, priority: created.priority, serviceOrder: created.serviceOrder?.orderCode || null } });
     return NextResponse.json({
       success: true,
       message: created.serviceOrder
