@@ -3,9 +3,10 @@ import { prisma } from "@/lib/prisma";
 import { hasRole } from "@/lib/auth";
 import { createOrderCode } from "@/lib/order-code";
 import { queueServiceOrderCreatedNotifications } from "@/lib/notifications/events";
+import { effectiveProvinceCode, provinceScopeAllows } from "@/lib/province-access";
 
 export async function POST(request: NextRequest) {
-  const auth = await hasRole(request, ["ADMIN", "CSKH"]);
+  const auth = await hasRole(request, ["SUPER_ADMIN", "ADMIN", "CSKH"]);
   if (!auth) return NextResponse.json({ success: false, message: "Chưa được cấp quyền." }, { status: 401 });
   try {
     const body = await request.json();
@@ -14,11 +15,28 @@ export async function POST(request: NextRequest) {
       include: { machine: { include: { customer: true } }, serviceOrder: true },
     });
     if (!schedule) return NextResponse.json({ success: false, message: "Không tìm thấy lịch bảo trì." }, { status: 404 });
+    if (auth.user.role === "CSKH" && !provinceScopeAllows(
+      auth.user.provinceScope,
+      schedule.machine.provinceCode,
+      schedule.machine.customer?.address,
+    )) {
+      return NextResponse.json({ success: false, message: "Lịch nằm ngoài phạm vi được phân công." }, { status: 403 });
+    }
     if (schedule.serviceOrder) return NextResponse.json({ success: true, message: "Lịch này đã có lệnh.", data: schedule.serviceOrder });
     if (!schedule.machine.customer?.phone) return NextResponse.json({ success: false, message: "Máy chưa có khách hàng." }, { status: 409 });
 
-    const code = await createOrderCode(schedule.machine.provinceCode || "01");
+    const code = await createOrderCode(effectiveProvinceCode(
+      schedule.machine.provinceCode,
+      schedule.machine.customer?.address,
+    ) || "01");
     const order = await prisma.$transaction(async (tx) => {
+      const current = await tx.maintenanceSchedule.findUnique({
+        where: { id: schedule.id },
+        include: { serviceOrder: true },
+      });
+      if (!current) throw new Error("Lịch không còn tồn tại.");
+      if (current.serviceOrder) return current.serviceOrder;
+
       const created = await tx.serviceOrder.create({
         data: {
           orderCode: code,
