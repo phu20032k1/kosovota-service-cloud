@@ -5,18 +5,7 @@ import { createOrderCode } from "@/lib/order-code";
 import { normalizePhone } from "@/lib/phone";
 import { queueDealerServiceOrderEmail } from "@/lib/notifications/events";
 import { processNotificationQueue } from "@/lib/notifications/process";
-import { findProvince } from "@/lib/province";
-
-function provinceCode(value?: string | null) {
-  return findProvince(value)?.[1] || value?.trim().toUpperCase() || "";
-}
-
-function canAccessProvince(role: string, scopeValue: string | null, machineProvince?: string | null) {
-  if (role !== "CSKH") return true;
-  const scopes = scopeValue?.split(",").map((value) => provinceCode(value)).filter(Boolean) || [];
-  const machineCode = provinceCode(machineProvince);
-  return !scopes.length || Boolean(machineCode && scopes.includes(machineCode));
-}
+import { effectiveProvinceCode, provinceScopeAllows } from "@/lib/province-access";
 
 function buildNotification(order: {
   id: string;
@@ -57,7 +46,7 @@ function buildNotification(order: {
 }
 
 export async function POST(request: NextRequest) {
-  const auth = await hasRole(request, ["ADMIN", "CSKH"]);
+  const auth = await hasRole(request, ["SUPER_ADMIN", "ADMIN", "CSKH"]);
   if (!auth) return NextResponse.json({ success: false, message: "Chưa được cấp quyền." }, { status: 401 });
 
   try {
@@ -79,7 +68,11 @@ export async function POST(request: NextRequest) {
     const sourceOrder = orderId ? await prisma.serviceOrder.findUnique({ where: { id: orderId }, include }) : null;
     const machine = sourceOrder?.machine || (machineId ? await prisma.machine.findUnique({ where: { id: machineId }, include: { customer: true } }) : null);
     if (!machine) return NextResponse.json({ success: false, message: "Không tìm thấy máy cần điều phối." }, { status: 404 });
-    if (!canAccessProvince(auth.user.role, auth.user.provinceScope, machine.provinceCode)) {
+    if (auth.user.role === "CSKH" && !provinceScopeAllows(
+      auth.user.provinceScope,
+      machine.provinceCode,
+      machine.customer?.address || sourceOrder?.address,
+    )) {
       return NextResponse.json({ success: false, message: "Máy nằm ngoài phạm vi được phân công." }, { status: 403 });
     }
 
@@ -99,7 +92,7 @@ export async function POST(request: NextRequest) {
       if (duplicate) {
         return NextResponse.json({ success: false, message: `Máy vừa có lệnh ${duplicate.orderCode} cùng dịch vụ. Hãy kiểm tra trước khi tạo lại.` }, { status: 409 });
       }
-      newOrderCode = await createOrderCode(machine.provinceCode || "01");
+      newOrderCode = await createOrderCode(effectiveProvinceCode(machine.provinceCode, machine.customer?.address) || "01");
     }
 
     const order = await prisma.$transaction(async (tx) => {
