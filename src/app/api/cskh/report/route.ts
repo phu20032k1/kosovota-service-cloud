@@ -37,12 +37,13 @@ export async function GET(request: NextRequest) {
   try {
     const scope = auth.user.role === "CSKH" ? expandProvinceScope(auth.user.provinceScope) : [];
 
-    // Lấy machineId từ đúng các nguồn nghiệp vụ đang vận hành thay vì phụ thuộc một relation filter phức tạp.
-    // Nhờ vậy: máy có lịch mở trên màn hình Lịch thay lõi chắc chắn cũng là ứng viên của CSKH Report.
+    // Báo cáo phải nhìn thấy đúng toàn bộ công việc/lịch đang mở, không chỉ 1 lịch đầu tiên của mỗi máy.
+    // KPI vẫn đếm theo máy duy nhất, còn bảng 22 cột hiển thị từng kỳ chăm sóc/thay lõi để không làm mất việc đến hạn.
     const [openSchedules, completedActivations, installedMachines] = await Promise.all([
       prisma.maintenanceSchedule.findMany({
         where: { status: { notIn: Array.from(CLOSED_SCHEDULES) } },
-        select: { machineId: true },
+        select: { id: true, machineId: true, title: true, dueDate: true, status: true },
+        orderBy: { dueDate: "asc" },
         take: 5000,
       }),
       prisma.activation.findMany({
@@ -118,83 +119,88 @@ export async function GET(request: NextRequest) {
       activitiesByCustomer.set(activity.customerId, customerRows);
     }
 
-    const rows = scopedMachines.map((machine) => {
+    const rows = scopedMachines.flatMap((machine) => {
       const customer = machine.customer;
       const activation = machine.activations[0] || null;
-      const nextSchedule = machine.maintenanceSchedules.find((schedule) => !CLOSED_SCHEDULES.has(schedule.status)) || null;
-      const scheduleOrder = nextSchedule
-        ? machine.serviceOrders.find((order) => order.maintenanceScheduleId === nextSchedule.id)
-        : null;
-      const order = scheduleOrder
-        || machine.serviceOrders.find((item) => !FINISHED.has(item.status))
-        || machine.serviceOrders[0]
-        || null;
+      const activeSchedules = machine.maintenanceSchedules.filter((schedule) => !CLOSED_SCHEDULES.has(schedule.status));
+      // Máy đã kích hoạt nhưng chưa có lịch vẫn phải xuất hiện để phát hiện dữ liệu thiếu.
+      const scheduleRows = activeSchedules.length ? activeSchedules : [null];
 
-      const address = customer?.address || order?.address || "";
-      const effectiveProvinceCode = machine.provinceCode || provinceFromAddress(address)?.[1] || null;
-      const province = provinceName(effectiveProvinceCode) || "";
-      const splitAddress = splitVietnamAddress(address, province);
-      const careActivity = order ? activityByOrder.get(order.id) || null : null;
-      const customerActivities = customer ? activitiesByCustomer.get(customer.id) || [] : [];
-      const previousCare = customerActivities.find((activity) => !order || orderIdFromActivity(activity.detail) !== order.id) || null;
-      const latestReport = order?.reports[0] || machine.serviceReports[0] || null;
-      const activationDate = machine.installDate || activation?.createdAt || null;
-      const currentCareResult = order ? (careActivity?.summary || careStatusLabel(order.status)) : "";
-      const previousCareResult = previousCare?.summary || "";
-      const lastCareDate = previousCare?.occurredAt || customer?.lastContactAt || null;
-      const lastCareWork = machine.serviceReports.find((report) => report.id !== latestReport?.id)?.serviceType
-        || (previousCare ? previousCare.summary : "")
-        || "";
-      const cskhName = (careActivity?.userId ? userName.get(careActivity.userId) : null)
-        || order?.sourceTicket?.assignee?.name
-        || "";
-      const dueDate = order?.dueDate || nextSchedule?.dueDate || activationDate;
-      const serviceType = order?.serviceType || nextSchedule?.title || "";
-      const status = order?.status || "SCHEDULED";
-      const reportCount = order?.reports.length || 0;
+      return scheduleRows.map((schedule) => {
+        const scheduleOrder = schedule
+          ? machine.serviceOrders.find((order) => order.maintenanceScheduleId === schedule.id)
+          : null;
+        // Với một lịch cụ thể chỉ dùng lệnh gắn với chính lịch đó. Fallback sang lệnh khác chỉ áp dụng cho máy không có lịch mở.
+        const order = schedule
+          ? scheduleOrder || null
+          : machine.serviceOrders.find((item) => !FINISHED.has(item.status)) || machine.serviceOrders[0] || null;
 
-      return {
-        id: order?.id || `machine:${machine.id}`,
-        serviceOrderId: order?.id || null,
-        orderCode: order?.orderCode || "",
-        date: iso(dueDate),
-        machineId: machine.id,
-        machineCode: machine.serial || machine.id,
-        customerId: customer?.id || "",
-        customerName: customer?.name || order?.customerName || "",
-        customerPhone: customer?.phone || order?.customerPhone || "",
-        lastCustomerStatus: previousCareResult,
-        ownerName: customer?.owner?.name || "",
-        province,
-        ward: splitAddress.ward,
-        street: splitAddress.street || address,
-        cskhName,
-        activationDealerCode: activation?.dealerCode || "",
-        activationDate: iso(activationDate),
-        lastCareDate: iso(lastCareDate),
-        lastCareWork,
-        monthsSinceActivation: monthsBetween(activationDate),
-        nextCareTitle: nextSchedule?.title || serviceType,
-        nextCareDate: iso(nextSchedule?.dueDate || order?.dueDate),
-        currentCareResult,
-        dealerId: order?.dealer?.id || null,
-        dealerCode: order?.dealer?.dealerCode || "",
-        dealerName: order?.dealer?.name || "",
-        serviceResult: order
-          ? serviceResultLabel({
-              status: order.status,
-              reportServiceType: latestReport?.serviceType,
-              products: latestReport?.products,
-              dealerCode: order.dealer?.dealerCode,
-            })
-          : nextSchedule
-            ? "Chưa đến bước thực hiện dịch vụ"
-            : "Chưa có lịch chăm sóc / thay lõi",
-        serviceType,
-        status,
-        reportCount,
-        updatedAt: (order?.updatedAt || machine.updatedAt).toISOString(),
-      };
+        const address = customer?.address || order?.address || "";
+        const effectiveProvinceCode = machine.provinceCode || provinceFromAddress(address)?.[1] || null;
+        const province = provinceName(effectiveProvinceCode) || "";
+        const splitAddress = splitVietnamAddress(address, province);
+        const careActivity = order ? activityByOrder.get(order.id) || null : null;
+        const customerActivities = customer ? activitiesByCustomer.get(customer.id) || [] : [];
+        const previousCare = customerActivities.find((activity) => !order || orderIdFromActivity(activity.detail) !== order.id) || null;
+        const latestReport = order?.reports[0] || null;
+        const activationDate = machine.installDate || activation?.createdAt || null;
+        const currentCareResult = order ? (careActivity?.summary || careStatusLabel(order.status)) : "";
+        const previousCareResult = previousCare?.summary || "";
+        const lastCareDate = previousCare?.occurredAt || customer?.lastContactAt || null;
+        const lastCareWork = machine.serviceReports.find((report) => report.id !== latestReport?.id)?.serviceType
+          || (previousCare ? previousCare.summary : "")
+          || "";
+        const cskhName = (careActivity?.userId ? userName.get(careActivity.userId) : null)
+          || order?.sourceTicket?.assignee?.name
+          || "";
+        const dueDate = schedule?.dueDate || order?.dueDate || activationDate;
+        const serviceType = order?.serviceType || schedule?.title || "";
+        const status = order?.status || schedule?.status || "SCHEDULED";
+        const reportCount = order?.reports.length || 0;
+
+        return {
+          id: order?.id || (schedule ? `schedule:${schedule.id}` : `machine:${machine.id}`),
+          serviceOrderId: order?.id || null,
+          orderCode: order?.orderCode || "",
+          date: iso(dueDate),
+          machineId: machine.id,
+          machineCode: machine.serial || machine.id,
+          customerId: customer?.id || "",
+          customerName: customer?.name || order?.customerName || "",
+          customerPhone: customer?.phone || order?.customerPhone || "",
+          lastCustomerStatus: previousCareResult,
+          ownerName: customer?.owner?.name || "",
+          province,
+          ward: splitAddress.ward,
+          street: splitAddress.street || address,
+          cskhName,
+          activationDealerCode: activation?.dealerCode || "",
+          activationDate: iso(activationDate),
+          lastCareDate: iso(lastCareDate),
+          lastCareWork,
+          monthsSinceActivation: monthsBetween(activationDate),
+          nextCareTitle: schedule?.title || serviceType,
+          nextCareDate: iso(schedule?.dueDate || order?.dueDate),
+          currentCareResult,
+          dealerId: order?.dealer?.id || null,
+          dealerCode: order?.dealer?.dealerCode || "",
+          dealerName: order?.dealer?.name || "",
+          serviceResult: order
+            ? serviceResultLabel({
+                status: order.status,
+                reportServiceType: latestReport?.serviceType,
+                products: latestReport?.products,
+                dealerCode: order.dealer?.dealerCode,
+              })
+            : schedule
+              ? "Chưa đến bước thực hiện dịch vụ"
+              : "Chưa có lịch chăm sóc / thay lõi",
+          serviceType,
+          status,
+          reportCount,
+          updatedAt: (order?.updatedAt || machine.updatedAt).toISOString(),
+        };
+      });
     }).sort((a, b) => {
       const aTime = a.date ? new Date(a.date).getTime() : Number.MAX_SAFE_INTEGER;
       const bTime = b.date ? new Date(b.date).getTime() : Number.MAX_SAFE_INTEGER;
@@ -203,6 +209,7 @@ export async function GET(request: NextRequest) {
 
     const todayEnd = new Date();
     todayEnd.setHours(23, 59, 59, 999);
+    const total = new Set(rows.map((row) => row.machineId)).size;
     const due = new Set(rows.filter((row) => row.date && new Date(row.date) <= todayEnd && !FINISHED.has(row.status)).map((row) => row.machineId)).size;
     const cared = new Set(rows.filter((row) => Boolean(row.currentCareResult) || CARED_STATUSES.has(row.status)).map((row) => row.machineId)).size;
     const serviced = new Set(rows.filter((row) => row.reportCount > 0 || row.status === "COMPLETED").map((row) => row.machineId)).size;
@@ -212,14 +219,16 @@ export async function GET(request: NextRequest) {
       success: true,
       data: {
         rows,
-        metrics: { total: rows.length, due, cared, serviced, assigned },
+        metrics: { total, due, cared, serviced, assigned },
         generatedAt: new Date().toISOString(),
         sources: {
+          openSchedules: openSchedules.length,
           openScheduleMachines: new Set(openSchedules.map((item) => item.machineId)).size,
           completedActivationMachines: new Set(completedActivations.map((item) => item.machineId)).size,
           installedMachines: installedMachines.length,
           candidateMachines: candidateIds.length,
           scopedMachines: scopedMachines.length,
+          reportRows: rows.length,
         },
       },
     });
