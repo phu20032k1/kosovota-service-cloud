@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { OperationsHeader } from "@/components/ui/OperationsHeader";
 import { Icon } from "@/components/ui/Icon";
 import { LoadingState } from "@/components/ui/LoadingState";
@@ -56,19 +56,36 @@ type Dealer = {
   services?: string | null;
   distanceKm?: number;
   rank?: number;
-  capabilityMatched?: boolean;
 };
 
 type Filter = "all" | "due" | "uncared" | "unassigned" | "serviced";
 
 const HEADERS = [
   "STT", "Ngày", "Mã máy", "Mã KH", "Khách hàng", "Điện thoại", "Trạng thái KH", "Chủ sở hữu",
-  "Tỉnh/TP", "Xã/phường", "Địa chỉ", "NV CSKH", "Đại lý kích hoạt", "Ngày kích hoạt", "CS gần nhất",
-  "Công việc gần nhất", "Tháng sử dụng", "Kỳ chăm sóc tiếp theo", "Kết quả chăm sóc", "Tìm đại lý",
-  "Đại lý nhận DV", "Kết quả dịch vụ",
+  "Tỉnh/TP", "Xã/phường", "Địa chỉ", "NV CSKH", "Đại lý kích hoạt", "Ngày kích hoạt", "Ngày chăm sóc gần nhất",
+  "Công việc chăm sóc gần nhất", "Thời gian từ lúc kích hoạt (tháng)", "Kỳ chăm sóc tiếp theo", "Kết quả chăm sóc lần này",
+  "Nút tìm kiếm đại lý", "Đại lý nhận DV", "Kết quả dịch vụ",
 ] as const;
 
-const WIDTHS = [64, 105, 130, 145, 190, 135, 190, 155, 145, 145, 230, 170, 145, 125, 130, 190, 125, 230, 210, 135, 175, 220];
+const WIDTHS = [64, 105, 130, 145, 190, 135, 190, 155, 145, 145, 230, 170, 145, 125, 155, 220, 180, 240, 230, 150, 175, 220];
+
+const WORK_STYLE: Record<string, CSSProperties> = {
+  "Lắp đặt mới": { backgroundColor: "#d9ead3", color: "#38761d" },
+  "Thay lõi số 1": { backgroundColor: "#cfe8f3", color: "#0b5394" },
+  "Thay lõi 123": { backgroundColor: "#3d3d3d", color: "#ffffff" },
+  "Thay toàn bộ lõi và màng RO": { backgroundColor: "#0b57b7", color: "#ffffff" },
+  "Thay lõi 123 và T33": { backgroundColor: "#8a3f00", color: "#ffffff" },
+  "Sửa chữa": { backgroundColor: "#c00000", color: "#ffffff" },
+  "Thay vật liệu lọc thô": { backgroundColor: "#6a329f", color: "#ffffff" },
+};
+
+const CARE_STYLE: Record<string, CSSProperties> = {
+  "KH tiếp nhận CS + dịch vụ": { backgroundColor: "#d9ead3", color: "#38761d" },
+  "KH tiếp nhận CS - tự thay": { backgroundColor: "#cfe8f3", color: "#0b5394" },
+  "KH từ chối chăm sóc": { backgroundColor: "#c00000", color: "#ffffff" },
+  "KH không liên lạc được": { backgroundColor: "#1f1f1f", color: "#ffffff" },
+  "KH khó liên lạc - Dịch vụ": { backgroundColor: "#6a329f", color: "#ffffff" },
+};
 
 function date(value?: string | null) {
   if (!value) return "";
@@ -97,6 +114,14 @@ function dealerSearchAllowed(row: ReportRow) {
     && (["KH tiếp nhận CS + dịch vụ", "KH khó liên lạc - Dịch vụ"].includes(row.currentCareResult) || Boolean(row.dealerId));
 }
 
+function workStyle(value?: string | null): CSSProperties {
+  return value ? WORK_STYLE[value] || { backgroundColor: "#e5e7eb", color: "#334155" } : { backgroundColor: "#f1f5f9", color: "#94a3b8" };
+}
+
+function careStyle(value?: string | null): CSSProperties {
+  return value ? CARE_STYLE[value] || { backgroundColor: "#e5e7eb", color: "#334155" } : { backgroundColor: "#f1f5f9", color: "#64748b" };
+}
+
 export default function CskhReportPage() {
   const [data, setData] = useState<ReportData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -114,9 +139,7 @@ export default function CskhReportPage() {
     try {
       const response = await fetch("/api/cskh/report", { cache: "no-store" });
       const result = await readApiResponse<ReportData>(response);
-      if (!response.ok || !result.success || !result.data) {
-        throw new Error(result.message || "Không tải được dữ liệu CSKH từ hệ thống.");
-      }
+      if (!response.ok || !result.success || !result.data) throw new Error(result.message || "Không tải được dữ liệu CSKH từ hệ thống.");
       setData(result.data);
     } catch (error) {
       setNotice({ kind: "error", text: error instanceof Error ? error.message : "Không tải được dữ liệu CSKH." });
@@ -125,15 +148,12 @@ export default function CskhReportPage() {
     }
   }, []);
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  useEffect(() => { void load(); }, [load]);
 
   useEffect(() => {
     if (preparedDueOrders.current) return;
     preparedDueOrders.current = true;
     let cancelled = false;
-
     const prepare = async () => {
       try {
         await fetch("/api/maintenance-schedules/sync-missing", {
@@ -141,25 +161,18 @@ export default function CskhReportPage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ limit: 1000 }),
         });
-        await fetch(`/api/maintenance-schedules/generate-orders?through=${encodeURIComponent(new Date().toISOString())}`, {
-          method: "POST",
-        });
+        await fetch(`/api/maintenance-schedules/generate-orders?through=${encodeURIComponent(new Date().toISOString())}`, { method: "POST" });
       } catch {
-        // Báo cáo vẫn đọc trực tiếp máy đã kích hoạt nếu tác vụ tự động không chạy được.
+        // Báo cáo vẫn hiển thị trực tiếp lịch đến hạn nếu tác vụ tự động tạm thời không chạy được.
       }
       if (!cancelled) await load(true);
     };
-
     void prepare();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [load]);
 
   useEffect(() => {
-    const refresh = () => {
-      if (document.visibilityState === "visible") void load(true);
-    };
+    const refresh = () => { if (document.visibilityState === "visible") void load(true); };
     const timer = window.setInterval(refresh, 30_000);
     window.addEventListener("focus", refresh);
     document.addEventListener("visibilitychange", refresh);
@@ -174,10 +187,7 @@ export default function CskhReportPage() {
     const keyword = query.trim().toLowerCase();
     const today = new Date().toISOString().slice(0, 10);
     return (data?.rows || []).filter((row) => {
-      const haystack = [
-        row.machineCode, row.machineId, row.customerId, row.customerName, row.customerPhone,
-        row.province, row.ward, row.street, row.dealerCode, row.dealerName, row.orderCode,
-      ].join(" ").toLowerCase();
+      const haystack = [row.machineCode, row.machineId, row.customerId, row.customerName, row.customerPhone, row.province, row.ward, row.street, row.dealerCode, row.dealerName, row.orderCode].join(" ").toLowerCase();
       if (keyword && !haystack.includes(keyword)) return false;
       if (filter === "due") return isDue(row, today);
       if (filter === "uncared") return isDue(row, today) && !row.currentCareResult;
@@ -189,24 +199,23 @@ export default function CskhReportPage() {
 
   async function updateServiceType(row: ReportRow, serviceType: string) {
     if (!row.serviceOrderId) {
-      setNotice({ kind: "info", text: `${row.machineCode} chưa có lệnh dịch vụ. Khi đến kỳ, hệ thống sẽ tự sinh lệnh để CSKH thao tác.` });
+      setNotice({ kind: "info", text: `${row.machineCode} chưa có lệnh dịch vụ.` });
       return;
     }
-    const orderId = row.serviceOrderId;
     setBusyId(row.id);
     setNotice(null);
     try {
-      const response = await fetch(`/api/service-orders/${orderId}`, {
+      const response = await fetch(`/api/service-orders/${row.serviceOrderId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ serviceType }),
       });
       const result = await readApiResponse<unknown>(response);
-      if (!response.ok || !result.success) throw new Error(result.message || "Không cập nhật được công việc.");
-      setNotice({ kind: "success", text: `Đã cập nhật công việc cho ${row.machineCode}.` });
+      if (!response.ok || !result.success) throw new Error(result.message || "Không cập nhật được kỳ chăm sóc.");
+      setNotice({ kind: "success", text: `Đã cập nhật kỳ chăm sóc cho ${row.machineCode}.` });
       await load(true);
     } catch (error) {
-      setNotice({ kind: "error", text: error instanceof Error ? error.message : "Không cập nhật được công việc." });
+      setNotice({ kind: "error", text: error instanceof Error ? error.message : "Không cập nhật được kỳ chăm sóc." });
     } finally {
       setBusyId(null);
     }
@@ -219,11 +228,10 @@ export default function CskhReportPage() {
     }
     const option = CARE_RESULT_OPTIONS.find((item) => item.label === label);
     if (!option) return;
-    const orderId = row.serviceOrderId;
     setBusyId(row.id);
     setNotice(null);
     try {
-      const response = await fetch(`/api/service-orders/${orderId}`, {
+      const response = await fetch(`/api/service-orders/${row.serviceOrderId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: option.status }),
@@ -231,7 +239,7 @@ export default function CskhReportPage() {
       const result = await readApiResponse<unknown>(response);
       if (!response.ok || !result.success) throw new Error(result.message || "Không cập nhật được kết quả chăm sóc.");
 
-      const historyResponse = await fetch(`/api/cskh/report/${orderId}/care-result`, {
+      const historyResponse = await fetch(`/api/cskh/report/${row.serviceOrderId}/care-result`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ label }),
@@ -250,7 +258,7 @@ export default function CskhReportPage() {
 
   async function findDealers(row: ReportRow) {
     if (!row.serviceOrderId) {
-      setNotice({ kind: "info", text: `${row.machineCode} chưa có lệnh dịch vụ. Chưa cần tìm đại lý ở thời điểm này.` });
+      setNotice({ kind: "info", text: `${row.machineCode} chưa có lệnh dịch vụ.` });
       return;
     }
     if (!dealerSearchAllowed(row)) {
@@ -304,7 +312,7 @@ export default function CskhReportPage() {
       index + 1, date(row.date), row.machineCode, row.customerId, row.customerName, row.customerPhone,
       row.lastCustomerStatus, row.ownerName, row.province, row.ward, row.street, row.cskhName,
       row.activationDealerCode, date(row.activationDate), date(row.lastCareDate), row.lastCareWork,
-      row.monthsSinceActivation ?? "", [row.serviceType, date(row.nextCareDate)].filter(Boolean).join(" · "),
+      row.monthsSinceActivation ?? "", [row.serviceType || row.nextCareTitle, date(row.nextCareDate)].filter(Boolean).join(" · "),
       row.currentCareResult, row.serviceOrderId ? "Tìm đại lý" : "Chưa có lệnh", row.dealerCode, row.serviceResult,
     ]);
     const csv = `\uFEFF${[HEADERS, ...body].map((line) => line.map(csvCell).join(",")).join("\r\n")}`;
@@ -322,13 +330,8 @@ export default function CskhReportPage() {
     <main className="min-h-screen bg-slate-50">
       <OperationsHeader
         title="Báo cáo chăm sóc khách hàng"
-        subtitle="Dữ liệu máy đã kích hoạt, lịch chăm sóc và dịch vụ cập nhật trực tiếp từ hệ thống"
-        actions={
-          <div className="flex gap-2">
-            <button type="button" onClick={() => void load()} className="btn-secondary"><Icon name="refresh" size={16}/>Tải lại</button>
-            <button type="button" onClick={exportCsv} className="btn-primary px-4 py-2 font-black text-white"><Icon name="file" size={16}/>Xuất CSV</button>
-          </div>
-        }
+        subtitle="Bảng tác nghiệp CSKH theo lịch đến hạn và mẫu báo cáo chuẩn"
+        actions={<div className="flex gap-2"><button type="button" onClick={() => void load()} className="btn-secondary"><Icon name="refresh" size={16}/>Tải lại</button><button type="button" onClick={exportCsv} className="btn-primary px-4 py-2 font-black text-white"><Icon name="file" size={16}/>Xuất CSV</button></div>}
       />
 
       <div className="mx-auto max-w-[1900px] space-y-4 p-3 sm:p-5">
@@ -360,26 +363,24 @@ export default function CskhReportPage() {
           </div>
         </section>
 
-        {loading && !data ? (
-          <LoadingState label="Đang tải dữ liệu CSKH..."/>
-        ) : (
+        {loading && !data ? <LoadingState label="Đang tải dữ liệu CSKH..."/> : (
           <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
             <div className="border-b border-slate-200 px-4 py-3">
               <h2 className="font-extrabold text-slate-900">Danh sách chăm sóc khách hàng</h2>
-              <p className="mt-0.5 text-xs text-slate-500">Máy đã kích hoạt xuất hiện ngay. Các thao tác CSKH được mở khi máy có lệnh đến kỳ.</p>
+              <p className="mt-0.5 text-xs text-slate-500">Chỉ hiển thị lịch chăm sóc/thay lõi đã đến hạn hoặc quá hạn. Công việc và kết quả dùng đúng bộ lựa chọn của bảng báo cáo mẫu.</p>
             </div>
             <div className="max-h-[70vh] overflow-auto overscroll-contain">
-              <table className="w-full min-w-[3500px] border-separate border-spacing-0 text-[12px] text-slate-700">
+              <table className="w-full min-w-[3750px] border-separate border-spacing-0 text-[12px] text-slate-700">
                 <colgroup>{HEADERS.map((_, index) => <col key={index} style={{ width: WIDTHS[index] }}/>)}</colgroup>
                 <thead className="sticky top-0 z-20">
-                  <tr>{HEADERS.map((header, index) => <th key={header} className={`border-b border-r border-slate-200 bg-slate-900 px-3 py-3 text-left text-[11px] font-black uppercase tracking-wide text-white ${index === 0 ? "sticky left-0 z-30" : ""}`}>{header}</th>)}</tr>
+                  <tr>{HEADERS.map((header, index) => <th key={header} className={`border-b border-r border-slate-300 bg-slate-900 px-3 py-3 text-left text-[11px] font-black uppercase tracking-wide text-white ${index === 0 ? "sticky left-0 z-30" : ""}`}>{header}</th>)}</tr>
                 </thead>
                 <tbody>
-                  {!rows.length ? (
-                    <tr><td colSpan={22} className="p-12 text-center"><div className="mx-auto max-w-md"><p className="font-extrabold text-slate-700">Chưa có máy đã kích hoạt phù hợp</p><p className="mt-1 text-sm text-slate-500">Kiểm tra máy đã hoàn tất kích hoạt bước 2, có ngày lắp đặt, khách hàng và tỉnh/địa chỉ thuộc phạm vi CSKH.</p></div></td></tr>
-                  ) : rows.map((row, index) => {
+                  {!rows.length ? <tr><td colSpan={22} className="p-12 text-center text-slate-500">Không có lịch đến hạn phù hợp với bộ lọc hiện tại.</td></tr> : rows.map((row, index) => {
                     const hasOrder = Boolean(row.serviceOrderId);
                     const completed = row.reportCount > 0 || row.status === "COMPLETED";
+                    const selectedWork = SERVICE_WORK_OPTIONS.includes(row.serviceType as (typeof SERVICE_WORK_OPTIONS)[number]) ? row.serviceType : "__custom";
+                    const selectedCare = CARE_RESULT_OPTIONS.some((item) => item.label === row.currentCareResult) ? row.currentCareResult : "";
                     return (
                       <tr key={row.id} className="group odd:bg-white even:bg-slate-50/60 hover:bg-emerald-50">
                         <Cell sticky center strong>{index + 1}</Cell>
@@ -397,26 +398,28 @@ export default function CskhReportPage() {
                         <Cell strong>{row.activationDealerCode || "—"}</Cell>
                         <Cell>{date(row.activationDate) || "—"}</Cell>
                         <Cell>{date(row.lastCareDate) || "—"}</Cell>
-                        <Cell>{row.lastCareWork || "—"}</Cell>
+                        <Cell>{row.lastCareWork ? <span className="inline-flex min-w-[165px] justify-center rounded-full px-3 py-1 font-bold" style={workStyle(row.lastCareWork)}>{row.lastCareWork}</span> : "—"}</Cell>
                         <Cell center>{row.monthsSinceActivation == null ? "—" : `${row.monthsSinceActivation} tháng`}</Cell>
                         <Cell>
                           <select
-                            value={SERVICE_WORK_OPTIONS.includes(row.serviceType as (typeof SERVICE_WORK_OPTIONS)[number]) ? row.serviceType : "__custom"}
+                            value={selectedWork}
                             disabled={busyId === row.id || !hasOrder}
                             onChange={(event) => { if (event.target.value !== "__custom") void updateServiceType(row, event.target.value); }}
-                            className="min-w-[200px] rounded-lg border border-slate-200 bg-white px-2 py-2 text-xs font-semibold disabled:bg-slate-100 disabled:text-slate-500"
+                            className="min-w-[205px] rounded-full border border-slate-200 px-3 py-1.5 text-xs font-bold disabled:opacity-70"
+                            style={workStyle(row.serviceType || row.nextCareTitle)}
                           >
-                            <option value="__custom">{row.serviceType || row.nextCareTitle || "Chưa có công việc"}</option>
+                            <option value="__custom">{row.serviceType || row.nextCareTitle || "Chọn kỳ chăm sóc"}</option>
                             {SERVICE_WORK_OPTIONS.map((item) => <option key={item} value={item}>{item}</option>)}
                           </select>
-                          <p className="mt-1 text-[11px] text-slate-400">{date(row.nextCareDate) || "Chưa có ngày"}{!hasOrder ? " · chưa sinh lệnh" : ""}</p>
+                          <p className="mt-1 text-[11px] text-slate-400">Ngày đến kỳ: {date(row.nextCareDate) || "—"}</p>
                         </Cell>
                         <Cell>
                           <select
-                            value={CARE_RESULT_OPTIONS.some((item) => item.label === row.currentCareResult) ? row.currentCareResult : ""}
+                            value={selectedCare}
                             disabled={busyId === row.id || !hasOrder}
                             onChange={(event) => event.target.value && void updateCareResult(row, event.target.value)}
-                            className="min-w-[190px] rounded-lg border border-slate-200 bg-white px-2 py-2 text-xs font-semibold disabled:bg-slate-100 disabled:text-slate-500"
+                            className="min-w-[205px] rounded-full border border-slate-200 px-3 py-1.5 text-xs font-bold disabled:opacity-70"
+                            style={careStyle(row.currentCareResult)}
                           >
                             <option value="">{hasOrder ? "Chọn kết quả..." : "Chưa đến bước CSKH"}</option>
                             {CARE_RESULT_OPTIONS.map((item) => <option key={item.status} value={item.label}>{item.label}</option>)}
@@ -427,15 +430,13 @@ export default function CskhReportPage() {
                             type="button"
                             disabled={busyId === row.id || !dealerSearchAllowed(row)}
                             onClick={() => void findDealers(row)}
-                            className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-extrabold text-white shadow-sm hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+                            className="rounded-full bg-emerald-600 px-4 py-2 text-xs font-extrabold text-white shadow-sm hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300"
                           >
                             {!hasOrder ? "Chưa tới kỳ" : row.dealerCode ? "Đổi đại lý" : "Tìm đại lý"}
                           </button>
                         </Cell>
                         <Cell><strong className="text-slate-900">{row.dealerCode || "—"}</strong>{row.dealerName && <p className="mt-1 text-[11px] text-slate-500">{row.dealerName}</p>}</Cell>
-                        <Cell>
-                          <span className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-bold ${completed ? "bg-emerald-50 text-emerald-700" : hasOrder ? "bg-amber-50 text-amber-700" : "bg-slate-100 text-slate-500"}`}>{row.serviceResult || "Chưa có kết quả"}</span>
-                        </Cell>
+                        <Cell><span className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-bold ${completed ? "bg-emerald-50 text-emerald-700" : hasOrder ? "bg-amber-50 text-amber-700" : "bg-slate-100 text-slate-500"}`}>{row.serviceResult || "Chưa có kết quả"}</span></Cell>
                       </tr>
                     );
                   })}
