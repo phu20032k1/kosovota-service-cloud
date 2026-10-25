@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getOptedOutMachineIds } from "@/lib/maintenance-optout";
 import { hasRole } from "@/lib/auth";
 import { geocodeAddress } from "@/lib/maps/geocode";
-import { provinceFromAddress, provinceLetterCodeOrNull } from "@/lib/province";
+import { expandProvinceScope, provinceFromAddress, provinceLetterCodeOrNull } from "@/lib/province";
 
 function text(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
@@ -101,12 +101,14 @@ async function backfillMachineGpsFromCustomerAddress<T extends {
 }
 
 export async function GET(request: NextRequest) {
-  const auth = await hasRole(request, ["ADMIN", "CSKH"]);
+  const auth = await hasRole(request, ["SUPER_ADMIN", "ADMIN", "CSKH"]);
   if (!auth) return NextResponse.json({ success: false, message: "Chưa được cấp quyền." }, { status: 401 });
   try {
-    const scopes = auth.user.provinceScope?.split(",").map((v: string) => v.trim()).filter(Boolean) || [];
+    const scopes = auth.user.role === "CSKH" ? expandProvinceScope(auth.user.provinceScope) : [];
     const machines = await prisma.machine.findMany({
-      where: auth.user.role === "CSKH" && scopes.length ? { provinceCode: { in: scopes } } : undefined,
+      where: auth.user.role === "CSKH" && scopes.length
+        ? { OR: [{ provinceCode: { in: scopes } }, { provinceCode: null }] }
+        : undefined,
       include: {
         customer: true,
         activations: { orderBy: { step: "asc" } },
@@ -117,12 +119,19 @@ export async function GET(request: NextRequest) {
       orderBy: { createdAt: "desc" },
     });
 
-    const gpsBackfilledCount = await backfillMachineGpsFromCustomerAddress(machines);
-    const careDisabled = await getOptedOutMachineIds(machines.map((machine) => machine.id));
+    const scopedMachines = auth.user.role === "CSKH" && scopes.length
+      ? machines.filter((machine) => {
+          const effectiveProvince = machine.provinceCode || provinceFromAddress(machine.customer?.address)?.[1] || null;
+          return Boolean(effectiveProvince && scopes.includes(effectiveProvince));
+        })
+      : machines;
+
+    const gpsBackfilledCount = await backfillMachineGpsFromCustomerAddress(scopedMachines);
+    const careDisabled = await getOptedOutMachineIds(scopedMachines.map((machine) => machine.id));
 
     return NextResponse.json({
       success: true,
-      data: machines.map((machine) => ({ ...machine, careDisabled: careDisabled.has(machine.id) })),
+      data: scopedMachines.map((machine) => ({ ...machine, careDisabled: careDisabled.has(machine.id) })),
       gpsBackfilledCount,
       message: gpsBackfilledCount
         ? `Đã tự ghim GPS cho ${gpsBackfilledCount} máy từ địa chỉ khách hàng.`
