@@ -5,6 +5,7 @@ import { hasRole } from "@/lib/auth";
 import { writeAudit } from "@/lib/audit";
 import { createOrderCode } from "@/lib/order-code";
 import { databaseErrorMessage } from "@/lib/database-errors";
+import { cskhScopeAllows } from "@/lib/province-access";
 
 const DEALER_OPERATOR_ROLES = new Set(["DEALER", "CTV"]);
 const FINISHED_TICKET_STATUSES = new Set(["RESOLVED", "CLOSED", "CANCELLED"]);
@@ -24,6 +25,17 @@ function serviceTypeFromTicket(type: string, subject: string) {
   return `${prefix[type] || "Dịch vụ"}: ${subject}`.slice(0, 240);
 }
 
+function cskhCanAccess(user: { provinceScope?: string | null; wardScope?: string | null; customerScope?: string | null }, ticket: {
+  customerId?: string | null;
+  machine?: { provinceCode?: string | null; customerId?: string | null; customer?: { address?: string | null } | null } | null;
+}) {
+  return cskhScopeAllows(user, {
+    provinceValue: ticket.machine?.provinceCode,
+    address: ticket.machine?.customer?.address,
+    customerId: ticket.customerId || ticket.machine?.customerId || null,
+  });
+}
+
 export async function PUT(request: NextRequest, { params }: Params) {
   try {
     const auth = await hasRole(request, ["ADMIN", "CSKH", "DEALER", "CTV"]);
@@ -34,6 +46,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
     if (!current) return NextResponse.json({ success: false, message: "Không tìm thấy yêu cầu." }, { status: 404 });
     const dealerOperator = DEALER_OPERATOR_ROLES.has(auth.user.role);
     if (dealerOperator && current.dealer?.dealerCode !== auth.user.dealerCode) return NextResponse.json({ success: false, message: "Yêu cầu không thuộc đại lý/CTV." }, { status: 403 });
+    if (auth.user.role === "CSKH" && !cskhCanAccess(auth.user, current)) return NextResponse.json({ success: false, message: "Yêu cầu nằm ngoài phạm vi CSKH được phân công." }, { status: 403 });
 
     if (FINISHED_TICKET_STATUSES.has(current.status) && auth.user.role !== "ADMIN") {
       return NextResponse.json({ success: false, message: "Yêu cầu đã kết thúc nên không còn thao tác xử lý." }, { status: 409 });
@@ -52,7 +65,8 @@ export async function PUT(request: NextRequest, { params }: Params) {
     const updateData: Record<string, unknown> = {
       ...(status ? { status, resolvedAt: ["RESOLVED", "CLOSED"].includes(status) ? new Date() : null } : {}),
       ...(!dealerOperator && typeof body.priority === "string" ? { priority: body.priority } : {}),
-      ...(!dealerOperator && "assigneeId" in body ? { assigneeId: body.assigneeId || null } : {}),
+      ...(!dealerOperator && auth.user.role !== "CSKH" && "assigneeId" in body ? { assigneeId: body.assigneeId || null } : {}),
+      ...(!dealerOperator && auth.user.role === "CSKH" ? { assigneeId: auth.user.id } : {}),
       ...(requestedDealerId !== undefined ? { dealerId: requestedDealerId } : {}),
       ...(body.dueAt ? { dueAt: new Date(body.dueAt) } : {}),
       ...(Number.isInteger(body.satisfaction) ? { satisfaction: Math.min(5, Math.max(1, body.satisfaction)) } : {}),
@@ -74,7 +88,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
       if (ticket.customerId && (status || ensureServiceOrder || (typeof body.message === "string" && body.message.trim()))) await tx.customerActivity.create({ data: { customerId: ticket.customerId, type: ensureServiceOrder ? "DISPATCH_CREATED" : status ? "TICKET_STATUS" : "TICKET_MESSAGE", summary: ensureServiceOrder ? `${ticket.ticketCode} đã chuyển sang Điều phối` : status ? `${ticket.ticketCode} chuyển trạng thái ${status}` : `Trao đổi tại ${ticket.ticketCode}`, detail: typeof body.message === "string" ? body.message.trim() || null : null, userId: auth.user.id } });
       return tx.supportTicket.findUnique({ where: { id }, include: { customer: true, machine: true, dealer: true, assignee: true, serviceOrder: { include: { dealer: true, technician: true, reports: true } }, messages: { orderBy: { createdAt: "asc" } } } });
     });
-    await writeAudit({ request, userId: auth.user.id, action: "UPDATE_SUPPORT_TICKET", target: current.ticketCode, detail: { status, assigneeId: body.assigneeId, dealerId: body.dealerId, ensuredDispatch: ensureServiceOrder } });
+    await writeAudit({ request, userId: auth.user.id, action: "UPDATE_SUPPORT_TICKET", target: current.ticketCode, detail: { status, assigneeId: auth.user.role === "CSKH" ? auth.user.id : body.assigneeId, dealerId: body.dealerId, ensuredDispatch: ensureServiceOrder } });
     return NextResponse.json({ success: true, message: ensureServiceOrder ? "Đã tạo và liên kết lệnh Điều phối." : "Đã cập nhật yêu cầu và đồng bộ lệnh Điều phối.", data: updated });
   } catch (error) {
     console.error("PUT /api/support-tickets/[id] failed", error);
@@ -90,18 +104,15 @@ export async function DELETE(request: NextRequest, { params }: Params) {
     const ticket = await prisma.supportTicket.findUnique({
       where: { id },
       include: {
-        machine: true,
+        machine: { include: { customer: true } },
         messages: true,
         serviceOrder: { include: { reports: true, stockMovements: { select: { id: true } } } },
       },
     });
     if (!ticket) return NextResponse.json({ success: false, message: "Không tìm thấy yêu cầu." }, { status: 404 });
 
-    if (auth.user.role === "CSKH" && auth.user.provinceScope) {
-      const scopes = auth.user.provinceScope.split(",").map((value: string) => value.trim()).filter(Boolean);
-      if (scopes.length && (!ticket.machine?.provinceCode || !scopes.includes(ticket.machine.provinceCode))) {
-        return NextResponse.json({ success: false, message: "Yêu cầu nằm ngoài phạm vi CSKH được phân công." }, { status: 403 });
-      }
+    if (auth.user.role === "CSKH" && !cskhCanAccess(auth.user, ticket)) {
+      return NextResponse.json({ success: false, message: "Yêu cầu nằm ngoài phạm vi CSKH được phân công." }, { status: 403 });
     }
 
     await prisma.$transaction(async (tx) => {
