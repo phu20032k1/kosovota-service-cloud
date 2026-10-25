@@ -4,7 +4,7 @@ import { hasRole } from "@/lib/auth";
 import { cachePart, getRedis, redisGet, redisSet } from "@/lib/redis";
 import { getDealerCacheFingerprint } from "@/lib/dealer-cache";
 import { geocodeAddress } from "@/lib/maps/geocode";
-import { effectiveProvinceCode, provinceScopeAllows } from "@/lib/province-access";
+import { cskhScopeAllows, effectiveProvinceCode } from "@/lib/province-access";
 
 function distanceKm(lat1: number, lng1: number, lat2: number, lng2: number) {
   const radius = 6371;
@@ -21,9 +21,7 @@ function hasUsableCoordinates(lat: number | null | undefined, lng: number | null
 }
 
 const STOP_WORDS = new Set(["kiem", "tra", "may", "dich", "vu", "va", "cho", "can", "lam"]);
-function normalize(value: string) {
-  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d").toLowerCase();
-}
+function normalize(value: string) { return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d").toLowerCase(); }
 function serviceScore(serviceType: string, services?: string | null) {
   if (!serviceType) return 0;
   const haystack = normalize(services || "");
@@ -31,12 +29,7 @@ function serviceScore(serviceType: string, services?: string | null) {
   return tokens.reduce((score, token) => score + (haystack.includes(token) ? 1 : 0), 0);
 }
 
-function isTechnicalDealer(dealer: {
-  dealerCode: string;
-  registrationType?: string | null;
-  technicianCount?: number | null;
-  services?: string | null;
-}) {
+function isTechnicalDealer(dealer: { dealerCode: string; registrationType?: string | null; technicianCount?: number | null; services?: string | null }) {
   const registration = normalize(dealer.registrationType || "");
   const services = normalize(dealer.services || "");
   if (/commercial|thuong mai|sales|ban hang/.test(registration)) return false;
@@ -51,6 +44,16 @@ function cacheKey(fingerprint: string, machineId: string, machineUpdatedAt: Date
   return `kosovota:dealer-shortlist:v2:${fingerprint}:${machineId}:${machineUpdatedAt.getTime()}:${cachePart(serviceType)}:${limit}`;
 }
 
+const machineSelect = {
+  id: true,
+  lat: true,
+  lng: true,
+  provinceCode: true,
+  customerId: true,
+  updatedAt: true,
+  customer: { select: { address: true } },
+} as const;
+
 export async function POST(request: NextRequest) {
   const auth = await hasRole(request, ["SUPER_ADMIN", "ADMIN", "CSKH"]);
   if (!auth) return NextResponse.json({ success: false, message: "Chưa được cấp quyền." }, { status: 401 });
@@ -59,110 +62,44 @@ export async function POST(request: NextRequest) {
   const machineId = typeof body.machineId === "string" ? body.machineId.trim() : "";
   const limit = Math.min(30, Math.max(5, Number(body.limit) || 10));
   const serviceType = typeof body.serviceType === "string" ? body.serviceType.trim() : "";
+  if (!machineId) return NextResponse.json({ success: false, message: "Thiếu ID máy." }, { status: 400 });
 
-  if (!machineId) {
-    return NextResponse.json({ success: false, message: "Thiếu ID máy." }, { status: 400 });
-  }
+  let machine = await prisma.machine.findUnique({ where: { id: machineId }, select: machineSelect });
+  if (!machine) return NextResponse.json({ success: false, message: "Không tìm thấy máy cần điều phối." }, { status: 404 });
 
-  let machine = await prisma.machine.findUnique({
-    where: { id: machineId },
-    select: {
-      id: true,
-      lat: true,
-      lng: true,
-      provinceCode: true,
-      updatedAt: true,
-      customer: { select: { address: true } },
-    },
-  });
-  if (!machine) {
-    return NextResponse.json({ success: false, message: "Không tìm thấy máy cần điều phối." }, { status: 404 });
-  }
-
-  if (auth.user.role === "CSKH" && !provinceScopeAllows(
-    auth.user.provinceScope,
-    machine.provinceCode,
-    machine.customer?.address,
-  )) {
-    return NextResponse.json({ success: false, message: "Máy nằm ngoài phạm vi được phân công." }, { status: 403 });
-  }
+  if (auth.user.role === "CSKH" && !cskhScopeAllows(
+    auth.user,
+    { provinceValue: machine.provinceCode, address: machine.customer?.address, customerId: machine.customerId },
+  )) return NextResponse.json({ success: false, message: "Máy nằm ngoài phạm vi được phân công." }, { status: 403 });
 
   let machineLocationBackfilled = false;
   if (!hasUsableCoordinates(machine.lat, machine.lng)) {
     const address = machine.customer?.address?.trim();
-    if (!address) {
-      return NextResponse.json({
-        success: false,
-        message: "Máy chưa có GPS và khách hàng chưa có địa chỉ để tự ghim vị trí. Hãy cập nhật địa chỉ khách hàng trước khi tìm đại lý.",
-      }, { status: 422 });
-    }
-
+    if (!address) return NextResponse.json({ success: false, message: "Máy chưa có GPS và khách hàng chưa có địa chỉ để tự ghim vị trí. Hãy cập nhật địa chỉ khách hàng trước khi tìm đại lý." }, { status: 422 });
     try {
       const location = await geocodeAddress(address);
-      if (!location || !hasUsableCoordinates(location.lat, location.lng)) {
-        return NextResponse.json({
-          success: false,
-          message: `Không tự ghim được vị trí máy từ địa chỉ khách hàng: ${address}. Hãy kiểm tra lại địa chỉ.`,
-        }, { status: 422 });
-      }
-
+      if (!location || !hasUsableCoordinates(location.lat, location.lng)) return NextResponse.json({ success: false, message: `Không tự ghim được vị trí máy từ địa chỉ khách hàng: ${address}. Hãy kiểm tra lại địa chỉ.` }, { status: 422 });
       const inferredProvince = effectiveProvinceCode(location.provinceCode, address);
       machine = await prisma.machine.update({
         where: { id: machine.id },
-        data: {
-          lat: location.lat,
-          lng: location.lng,
-          ...(inferredProvince ? { provinceCode: inferredProvince } : {}),
-        },
-        select: {
-          id: true,
-          lat: true,
-          lng: true,
-          provinceCode: true,
-          updatedAt: true,
-          customer: { select: { address: true } },
-        },
+        data: { lat: location.lat, lng: location.lng, ...(inferredProvince ? { provinceCode: inferredProvince } : {}) },
+        select: machineSelect,
       });
       machineLocationBackfilled = true;
     } catch (error) {
       console.warn(`Không tự ghim được GPS cho máy ${machine.id}:`, error);
-      return NextResponse.json({
-        success: false,
-        message: "Không tự lấy được GPS từ địa chỉ khách hàng. Hãy kiểm tra địa chỉ hoặc cấu hình MapTiler/Google Maps rồi thử lại.",
-      }, { status: 422 });
+      return NextResponse.json({ success: false, message: "Không tự lấy được GPS từ địa chỉ khách hàng. Hãy kiểm tra địa chỉ hoặc cấu hình MapTiler/Google Maps rồi thử lại." }, { status: 422 });
     }
   }
 
   const fingerprint = await getDealerCacheFingerprint();
   const key = cacheKey(fingerprint, machineId, machine.updatedAt, serviceType, limit);
   const cached = await redisGet<unknown[]>(key);
-  if (Array.isArray(cached)) {
-    return NextResponse.json({
-      success: true,
-      data: cached,
-      cache: "HIT",
-      cacheFingerprint: fingerprint,
-      machineLocation: { lat: machine.lat, lng: machine.lng, backfilled: machineLocationBackfilled },
-    });
-  }
+  if (Array.isArray(cached)) return NextResponse.json({ success: true, data: cached, cache: "HIT", cacheFingerprint: fingerprint, machineLocation: { lat: machine.lat, lng: machine.lng, backfilled: machineLocationBackfilled } });
 
   const dealers = await prisma.dealer.findMany({
     where: { status: "APPROVED", lat: { not: null }, lng: { not: null } },
-    select: {
-      id: true,
-      dealerCode: true,
-      name: true,
-      phone: true,
-      province: true,
-      address: true,
-      lat: true,
-      lng: true,
-      services: true,
-      technicianCount: true,
-      rating: true,
-      registrationType: true,
-      status: true,
-    },
+    select: { id: true, dealerCode: true, name: true, phone: true, province: true, address: true, lat: true, lng: true, services: true, technicianCount: true, rating: true, registrationType: true, status: true },
   });
 
   const shortlist = dealers
@@ -170,12 +107,7 @@ export async function POST(request: NextRequest) {
     .filter(isTechnicalDealer)
     .map((dealer) => {
       const matchScore = serviceScore(serviceType, dealer.services);
-      return {
-        ...dealer,
-        serviceMatchScore: matchScore,
-        capabilityMatched: serviceType ? matchScore > 0 : true,
-        distanceKm: Number(distanceKm(machine.lat!, machine.lng!, dealer.lat!, dealer.lng!).toFixed(2)),
-      };
+      return { ...dealer, serviceMatchScore: matchScore, capabilityMatched: serviceType ? matchScore > 0 : true, distanceKm: Number(distanceKm(machine.lat!, machine.lng!, dealer.lat!, dealer.lng!).toFixed(2)) };
     })
     .sort((a, b) => a.distanceKm - b.distanceKm || b.serviceMatchScore - a.serviceMatchScore)
     .slice(0, limit)
@@ -188,8 +120,6 @@ export async function POST(request: NextRequest) {
     cache: getRedis() ? (cachedSuccessfully ? "MISS" : "ERROR") : "DISABLED",
     cacheFingerprint: fingerprint,
     machineLocation: { lat: machine.lat, lng: machine.lng, backfilled: machineLocationBackfilled },
-    message: machineLocationBackfilled
-      ? "Đã tự ghim vị trí máy từ địa chỉ khách hàng và tìm đại lý gần nhất."
-      : undefined,
+    message: machineLocationBackfilled ? "Đã tự ghim vị trí máy từ địa chỉ khách hàng và tìm đại lý gần nhất." : undefined,
   });
 }

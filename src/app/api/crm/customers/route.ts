@@ -6,6 +6,7 @@ import { hasRole } from "@/lib/auth";
 import { writeAudit } from "@/lib/audit";
 import { databaseErrorMessage } from "@/lib/database-errors";
 import { expandProvinceScope, provinceNamesForScope } from "@/lib/province";
+import { cskhScopeAllows } from "@/lib/province-access";
 
 export async function GET(request: NextRequest) {
   try {
@@ -26,24 +27,11 @@ export async function GET(request: NextRequest) {
           { phone: { contains: q } },
           { email: { contains: q, mode: "insensitive" } },
           { address: { contains: q, mode: "insensitive" } },
-          {
-            machines: {
-              some: {
-                OR: [
-                  { id: { contains: q, mode: "insensitive" } },
-                  { serial: { contains: q, mode: "insensitive" } },
-                  { model: { contains: q, mode: "insensitive" } },
-                  { name: { contains: q, mode: "insensitive" } },
-                ],
-              },
-            },
-          },
+          { machines: { some: { OR: [{ id: { contains: q, mode: "insensitive" } }, { serial: { contains: q, mode: "insensitive" } }, { model: { contains: q, mode: "insensitive" } }, { name: { contains: q, mode: "insensitive" } }] } } },
         ],
       });
     }
-
     if (segment) and.push({ segment });
-
     if (auth.user.role === "CSKH" && provinceScope.length) {
       and.push({
         OR: [
@@ -57,37 +45,30 @@ export async function GET(request: NextRequest) {
       where: and.length ? { AND: and } : undefined,
       include: {
         owner: { select: { id: true, name: true } },
-        machines: {
-          select: {
-            id: true,
-            model: true,
-            name: true,
-            serial: true,
-            status: true,
-            provinceCode: true,
-            manufactureDate: true,
-            installDate: true,
-            warrantyMonths: true,
-          },
-        },
+        machines: { select: { id: true, model: true, name: true, serial: true, status: true, provinceCode: true, manufactureDate: true, installDate: true, warrantyMonths: true } },
         _count: { select: { activities: true, tickets: true } },
       },
       orderBy: [{ nextContactAt: "asc" }, { updatedAt: "desc" }],
       take: q ? 500 : 1000,
     });
 
-    const staff = await prisma.user.findMany({
-      where: { active: true, role: { in: ["ADMIN", "CSKH"] } },
-      select: { id: true, name: true },
-    });
+    const scopedCustomers = auth.user.role === "CSKH"
+      ? customers.filter((customer) => {
+          if (!customer.machines.length) {
+            return cskhScopeAllows(auth.user, { provinceValue: null, address: customer.address, customerId: customer.id });
+          }
+          return customer.machines.some((machine) => cskhScopeAllows(
+            auth.user,
+            { provinceValue: machine.provinceCode, address: customer.address, customerId: customer.id },
+          ));
+        })
+      : customers;
 
-    return NextResponse.json({ success: true, data: { customers, staff }, searchApplied: Boolean(q) });
+    const staff = await prisma.user.findMany({ where: { active: true, role: { in: ["ADMIN", "CSKH"] } }, select: { id: true, name: true } });
+    return NextResponse.json({ success: true, data: { customers: scopedCustomers, staff }, searchApplied: Boolean(q) });
   } catch (error) {
     console.error("GET /api/crm/customers failed", error);
-    return NextResponse.json(
-      { success: false, message: databaseErrorMessage(error, "Không tải được danh sách khách hàng.") },
-      { status: 500 },
-    );
+    return NextResponse.json({ success: false, message: databaseErrorMessage(error, "Không tải được danh sách khách hàng.") }, { status: 500 });
   }
 }
 
@@ -97,28 +78,13 @@ export async function DELETE(request: NextRequest) {
     if (!auth) return NextResponse.json({ success: false, message: "Chỉ Admin được xóa khách hàng." }, { status: 403 });
 
     const body = await request.json().catch(() => ({}));
-    const rawIds: unknown[] = Array.isArray(body.customerIds)
-      ? body.customerIds
-      : typeof body.customerId === "string"
-        ? [body.customerId]
-        : [];
+    const rawIds: unknown[] = Array.isArray(body.customerIds) ? body.customerIds : typeof body.customerId === "string" ? [body.customerId] : [];
     const customerIds = Array.from(new Set(rawIds.map((value) => String(value ?? "").trim()).filter(Boolean))).slice(0, 1000);
-
-    if (!customerIds.length) {
-      return NextResponse.json({ success: false, message: "Chưa chọn khách hàng cần xóa." }, { status: 400 });
-    }
+    if (!customerIds.length) return NextResponse.json({ success: false, message: "Chưa chọn khách hàng cần xóa." }, { status: 400 });
 
     await ensureTrashStorage(prisma);
-
     const result = await prisma.$transaction(async (tx) => {
-      const existing = await tx.customer.findMany({
-        where: { id: { in: customerIds } },
-        include: {
-          activities: true,
-          machines: { select: { id: true } },
-          tickets: { select: { id: true } },
-        },
-      });
+      const existing = await tx.customer.findMany({ where: { id: { in: customerIds } }, include: { activities: true, machines: { select: { id: true } }, tickets: { select: { id: true } } } });
       const existingIds = existing.map((customer) => customer.id);
       if (!existingIds.length) return { deleted: 0, customers: existing };
 
@@ -128,22 +94,13 @@ export async function DELETE(request: NextRequest) {
           entityType: "CUSTOMER",
           entityId: customer.id,
           label: customer.name + " · " + customer.phone,
-          snapshot: JSON.parse(JSON.stringify({
-            record,
-            activities,
-            machineIds: machines.map((item) => item.id),
-            ticketIds: tickets.map((item) => item.id),
-          })) as Prisma.InputJsonValue,
+          snapshot: JSON.parse(JSON.stringify({ record, activities, machineIds: machines.map((item) => item.id), ticketIds: tickets.map((item) => item.id) })) as Prisma.InputJsonValue,
           deletedById: auth.user.id,
           deletedByName: auth.user.name,
           source: "/api/crm/customers",
         };
       });
-
-      for (let offset = 0; offset < trashRows.length; offset += 100) {
-        await tx.trashItem.createMany({ data: trashRows.slice(offset, offset + 100) });
-      }
-
+      for (let offset = 0; offset < trashRows.length; offset += 100) await tx.trashItem.createMany({ data: trashRows.slice(offset, offset + 100) });
       await tx.machine.updateMany({ where: { customerId: { in: existingIds } }, data: { customerId: null } });
       await tx.supportTicket.updateMany({ where: { customerId: { in: existingIds } }, data: { customerId: null } });
       await tx.customerActivity.deleteMany({ where: { customerId: { in: existingIds } } });
@@ -152,24 +109,10 @@ export async function DELETE(request: NextRequest) {
       return { deleted: deleted.count, customers: auditCustomers };
     }, { timeout: 20_000 });
 
-    await writeAudit({
-      request,
-      userId: auth.user.id,
-      action: result.deleted > 1 ? "DELETE_CUSTOMERS_BULK" : "DELETE_CUSTOMER",
-      target: result.customers.map((customer) => customer.phone).join(","),
-      detail: { customerIds, deleted: result.deleted, customers: result.customers },
-    });
-
-    return NextResponse.json({
-      success: true,
-      message: result.deleted === 1 ? "Đã chuyển khách hàng vào Thùng rác." : `Đã chuyển ${result.deleted} khách hàng vào Thùng rác.`,
-      data: { deleted: result.deleted },
-    });
+    await writeAudit({ request, userId: auth.user.id, action: result.deleted > 1 ? "DELETE_CUSTOMERS_BULK" : "DELETE_CUSTOMER", target: result.customers.map((customer) => customer.phone).join(","), detail: { customerIds, deleted: result.deleted, customers: result.customers } });
+    return NextResponse.json({ success: true, message: result.deleted === 1 ? "Đã chuyển khách hàng vào Thùng rác." : `Đã chuyển ${result.deleted} khách hàng vào Thùng rác.`, data: { deleted: result.deleted } });
   } catch (error) {
     console.error("DELETE /api/crm/customers failed", error);
-    return NextResponse.json(
-      { success: false, message: databaseErrorMessage(error, "Không xóa được khách hàng.") },
-      { status: 500 },
-    );
+    return NextResponse.json({ success: false, message: databaseErrorMessage(error, "Không xóa được khách hàng.") }, { status: 500 });
   }
 }

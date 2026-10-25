@@ -18,7 +18,28 @@ function text(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function safeUser(user: { id: string; phone: string; name: string; role: string; dealerCode: string | null; provinceScope: string | null; active: boolean; createdAt: Date; updatedAt: Date }) {
+function freeScope(value: unknown) {
+  const seen = new Set<string>();
+  return text(value)
+    .split(/[,;|\n]+/)
+    .map((item) => item.trim())
+    .filter((item) => {
+      if (!item) return false;
+      const key = item.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .join(",") || null;
+}
+
+function validateCskhScopes(provinceScope: string | null, wardScope: string | null, customerScope: string | null) {
+  if (!provinceScope && !wardScope && !customerScope) return "CSKH cần được phân ít nhất theo tỉnh/thành, xã/phường hoặc mã khách hàng.";
+  if (wardScope && !provinceScope) return "Khi phân theo xã/phường, cần chọn thêm tỉnh/thành để tránh trùng tên địa bàn.";
+  return null;
+}
+
+function safeUser(user: { id: string; phone: string; name: string; role: string; dealerCode: string | null; provinceScope: string | null; wardScope: string | null; customerScope: string | null; active: boolean; createdAt: Date; updatedAt: Date }) {
   const provinceNames = provinceNamesForScope(user.provinceScope);
   return {
     id: user.id,
@@ -27,6 +48,8 @@ function safeUser(user: { id: string; phone: string; name: string; role: string;
     role: user.role,
     dealerCode: user.dealerCode,
     provinceScope: user.provinceScope ? (provinceNames.length ? provinceNames.join(", ") : user.provinceScope) : null,
+    wardScope: user.wardScope,
+    customerScope: user.customerScope,
     active: user.active,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
@@ -77,17 +100,16 @@ export async function POST(request: NextRequest) {
   const phone = normalizePhone(text(body.phone));
   const name = text(body.name);
   const provinceScope = canonicalProvinceScope(text(body.provinceScope));
+  const wardScope = freeScope(body.wardScope);
+  const customerScope = freeScope(body.customerScope);
   const dealerCode = text(body.dealerCode).toUpperCase() || null;
   const dealerProvince = canonicalProvinceValue(text(body.dealerProvince));
 
-  if (!CREATABLE_ROLES.has(role)) {
-    return NextResponse.json({ success: false, message: "Vai trò không hợp lệ." }, { status: 400 });
-  }
-  if (!name || !isValidVietnamPhone(phone)) {
-    return NextResponse.json({ success: false, message: "Vui lòng nhập họ tên và số điện thoại Việt Nam hợp lệ." }, { status: 400 });
-  }
-  if (role === "CSKH" && !provinceScope) {
-    return NextResponse.json({ success: false, message: "CSKH cần được chọn ít nhất một tỉnh/thành phụ trách." }, { status: 400 });
+  if (!CREATABLE_ROLES.has(role)) return NextResponse.json({ success: false, message: "Vai trò không hợp lệ." }, { status: 400 });
+  if (!name || !isValidVietnamPhone(phone)) return NextResponse.json({ success: false, message: "Vui lòng nhập họ tên và số điện thoại Việt Nam hợp lệ." }, { status: 400 });
+  if (role === "CSKH") {
+    const scopeError = validateCskhScopes(provinceScope, wardScope, customerScope);
+    if (scopeError) return NextResponse.json({ success: false, message: scopeError }, { status: 400 });
   }
 
   try {
@@ -97,29 +119,16 @@ export async function POST(request: NextRequest) {
     }
     if (dealerCode) {
       const linkedDealerUser = await prisma.user.findFirst({ where: { role: "DEALER", dealerCode } });
-      if (role === "DEALER" && linkedDealerUser) {
-        return NextResponse.json({ success: false, message: "Mã đại lý này đã có tài khoản Đại lý." }, { status: 409 });
-      }
+      if (role === "DEALER" && linkedDealerUser) return NextResponse.json({ success: false, message: "Mã đại lý này đã có tài khoản Đại lý." }, { status: 409 });
     }
 
     const initialPassword = text(body.password) || `Ksv@${randomBytes(4).toString("hex")}`;
-    if (initialPassword.length < 10) {
-      return NextResponse.json({ success: false, message: "Mật khẩu cần ít nhất 10 ký tự." }, { status: 400 });
-    }
+    if (initialPassword.length < 10) return NextResponse.json({ success: false, message: "Mật khẩu cần ít nhất 10 ký tự." }, { status: 400 });
 
     const resolvedDealerCode = role === "CTV" && !dealerCode ? standaloneCtvCode(phone) : dealerCode;
     const user = await prisma.$transaction(async (tx) => {
       if (role === "DEALER" && dealerCode && !dealer) {
-        await tx.dealer.create({
-          data: {
-            dealerCode,
-            name,
-            phone,
-            province: dealerProvince,
-            representativeName: name,
-            status: "APPROVED",
-          },
-        });
+        await tx.dealer.create({ data: { dealerCode, name, phone, province: dealerProvince, representativeName: name, status: "APPROVED" } });
       }
       if (role === "CTV" && !dealerCode) {
         await tx.dealer.upsert({
@@ -135,30 +144,21 @@ export async function POST(request: NextRequest) {
           role,
           dealerCode: ["DEALER", "CTV", "KTV"].includes(role) ? resolvedDealerCode : null,
           provinceScope: role === "CSKH" ? provinceScope : null,
+          wardScope: role === "CSKH" ? wardScope : null,
+          customerScope: role === "CSKH" ? customerScope : null,
           password: hashPassword(initialPassword),
           active: true,
         },
       });
-      await tx.notification.create({
-        data: {
-          phone,
-          channel: "SMS",
-          kind: `${role}_ACCOUNT`,
-          content: `KOSOVOTA: Tài khoản ${role} đã được tạo. SĐT: ${phone}. Mật khẩu ban đầu: ${initialPassword}.`,
-        },
-      });
+      await tx.notification.create({ data: { phone, channel: "SMS", kind: `${role}_ACCOUNT`, content: `KOSOVOTA: Tài khoản ${role} đã được tạo. SĐT: ${phone}. Mật khẩu ban đầu: ${initialPassword}.` } });
       await tx.adminLog.create({ data: { userId: auth.user.id, action: "SUPER_CREATE_USER", target: created.id, detail: `${role}:${phone}:${resolvedDealerCode || ""}` } });
       return created;
     });
 
     return NextResponse.json({ success: true, data: safeUser(user), initialPassword }, { status: 201 });
   } catch (error) {
-    if (error instanceof Error && error.message === "ROLE_NEEDS_DEALER") {
-      return NextResponse.json({ success: false, message: "Đại lý/KTV bắt buộc phải có mã đại lý." }, { status: 400 });
-    }
-    if (error instanceof Error && error.message === "DEALER_NOT_FOUND") {
-      return NextResponse.json({ success: false, message: "Không tìm thấy đại lý đã duyệt cho KTV." }, { status: 404 });
-    }
+    if (error instanceof Error && error.message === "ROLE_NEEDS_DEALER") return NextResponse.json({ success: false, message: "Đại lý/KTV bắt buộc phải có mã đại lý." }, { status: 400 });
+    if (error instanceof Error && error.message === "DEALER_NOT_FOUND") return NextResponse.json({ success: false, message: "Không tìm thấy đại lý đã duyệt cho KTV." }, { status: 404 });
     console.error("POST /api/super-admin/users failed", error);
     return NextResponse.json({ success: false, message: "Không tạo được tài khoản. Số điện thoại hoặc mã đại lý có thể đã tồn tại." }, { status: 409 });
   }
@@ -173,9 +173,7 @@ export async function PATCH(request: NextRequest) {
   if (!id) return NextResponse.json({ success: false, message: "Thiếu ID tài khoản." }, { status: 400 });
 
   const current = await prisma.user.findUnique({ where: { id } });
-  if (!current || current.role === "SUPER_ADMIN") {
-    return NextResponse.json({ success: false, message: "Không tìm thấy tài khoản cấp dưới hoặc không được sửa SUPER_ADMIN tại đây." }, { status: 404 });
-  }
+  if (!current || current.role === "SUPER_ADMIN") return NextResponse.json({ success: false, message: "Không tìm thấy tài khoản cấp dưới hoặc không được sửa SUPER_ADMIN tại đây." }, { status: 404 });
 
   const data: Record<string, unknown> = {};
   const nextRole = "role" in body ? text(body.role).toUpperCase() : current.role;
@@ -193,26 +191,24 @@ export async function PATCH(request: NextRequest) {
     data.phone = phone;
   }
   if (nextRole === "CSKH") {
-    const rawProvinceScope = "provinceScope" in body ? text(body.provinceScope) : current.provinceScope || "";
-    const provinceScope = canonicalProvinceScope(rawProvinceScope);
-    if (!provinceScope) return NextResponse.json({ success: false, message: "Tài khoản CSKH cần phạm vi tỉnh." }, { status: 400 });
+    const provinceScope = canonicalProvinceScope("provinceScope" in body ? text(body.provinceScope) : current.provinceScope || "");
+    const wardScope = "wardScope" in body ? freeScope(body.wardScope) : current.wardScope;
+    const customerScope = "customerScope" in body ? freeScope(body.customerScope) : current.customerScope;
+    const scopeError = validateCskhScopes(provinceScope, wardScope, customerScope);
+    if (scopeError) return NextResponse.json({ success: false, message: scopeError }, { status: 400 });
     data.provinceScope = provinceScope;
+    data.wardScope = wardScope;
+    data.customerScope = customerScope;
     data.dealerCode = null;
   }
   if (["DEALER", "CTV", "KTV"].includes(nextRole) && ("role" in body || "dealerCode" in body)) {
     const requestedDealerCode = text(body.dealerCode).toUpperCase();
-    if (["DEALER", "KTV"].includes(nextRole) && !requestedDealerCode) {
-      return NextResponse.json({ success: false, message: "Đại lý/KTV bắt buộc phải liên kết đại lý đã duyệt." }, { status: 400 });
-    }
+    if (["DEALER", "KTV"].includes(nextRole) && !requestedDealerCode) return NextResponse.json({ success: false, message: "Đại lý/KTV bắt buộc phải liên kết đại lý đã duyệt." }, { status: 400 });
     const nextPhone = typeof data.phone === "string" ? data.phone : current.phone;
     const nextName = typeof data.name === "string" ? data.name : current.name;
     const dealerCode = nextRole === "CTV" && !requestedDealerCode ? standaloneCtvCode(nextPhone) : requestedDealerCode;
     let dealer = await prisma.dealer.findUnique({ where: { dealerCode } });
-    if (nextRole === "CTV" && !requestedDealerCode && !dealer) {
-      dealer = await prisma.dealer.create({
-        data: { dealerCode, name: `CTV độc lập - ${nextName}`, phone: nextPhone, representativeName: nextName, registrationType: "collaborator", technicianCount: 1, status: "APPROVED" },
-      });
-    }
+    if (nextRole === "CTV" && !requestedDealerCode && !dealer) dealer = await prisma.dealer.create({ data: { dealerCode, name: `CTV độc lập - ${nextName}`, phone: nextPhone, representativeName: nextName, registrationType: "collaborator", technicianCount: 1, status: "APPROVED" } });
     if (!dealer || dealer.status !== "APPROVED") return NextResponse.json({ success: false, message: "Mã đại lý không tồn tại hoặc chưa duyệt." }, { status: 400 });
     if (nextRole === "DEALER") {
       const linked = await prisma.user.findFirst({ where: { role: "DEALER", dealerCode, id: { not: id } }, select: { id: true } });
@@ -220,6 +216,8 @@ export async function PATCH(request: NextRequest) {
     }
     data.dealerCode = dealerCode;
     data.provinceScope = null;
+    data.wardScope = null;
+    data.customerScope = null;
   }
 
   let initialPassword: string | null = null;
@@ -234,12 +232,7 @@ export async function PATCH(request: NextRequest) {
   try {
     const updated = await prisma.$transaction(async (tx) => {
       const saved = await tx.user.update({ where: { id }, data });
-      if (saved.role === "DEALER" && typeof body.active === "boolean" && saved.dealerCode) {
-        await tx.dealer.updateMany({
-          where: { dealerCode: saved.dealerCode },
-          data: { status: body.active ? "APPROVED" : "SUSPENDED" },
-        });
-      }
+      if (saved.role === "DEALER" && typeof body.active === "boolean" && saved.dealerCode) await tx.dealer.updateMany({ where: { dealerCode: saved.dealerCode }, data: { status: body.active ? "APPROVED" : "SUSPENDED" } });
       return saved;
     });
     await prisma.adminLog.create({ data: { userId: auth.user.id, action: "SUPER_UPDATE_USER", target: id, detail: JSON.stringify(Object.keys(data)) } });

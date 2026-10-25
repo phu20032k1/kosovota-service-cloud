@@ -29,6 +29,7 @@ export const PROTECTED_ROUTE_RULES: Array<{ prefix: string; roles: InternalRole[
   { prefix: "/technician-portal", roles: ["KTV"] },
   { prefix: "/activate", roles: ["ADMIN", "DEALER", "CTV", "KTV"] },
   { prefix: "/service-report", roles: ["DEALER", "CTV", "KTV"] },
+  { prefix: "/machine-location", roles: ["SUPER_ADMIN", "ADMIN", "CSKH", "DEALER", "CTV", "KTV"] },
   { prefix: "/customer-map", roles: ["ADMIN", "CSKH"] },
   { prefix: "/dealer-map", roles: ["ADMIN", "CSKH"] },
   { prefix: "/operations-map", roles: ["ADMIN", "CSKH"] },

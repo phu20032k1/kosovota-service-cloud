@@ -3,31 +3,37 @@ import { prisma } from "@/lib/prisma";
 import { hasRole } from "@/lib/auth";
 import { SERVICE_WORK_OPTIONS } from "@/lib/cskh-report";
 import { databaseErrorMessage } from "@/lib/database-errors";
+import { cskhScopeAllows } from "@/lib/province-access";
 
 type Params = { params: Promise<{ id: string }> };
 
 export async function POST(request: NextRequest, { params }: Params) {
   const auth = await hasRole(request, ["SUPER_ADMIN", "ADMIN", "CSKH"]);
-  if (!auth) {
-    return NextResponse.json({ success: false, message: "Chưa được cấp quyền." }, { status: 401 });
-  }
+  if (!auth) return NextResponse.json({ success: false, message: "Chưa được cấp quyền." }, { status: 401 });
 
   try {
     const { id } = await params;
     const body = await request.json();
     const serviceType = typeof body.serviceType === "string" ? body.serviceType.trim() : "";
-
     if (!SERVICE_WORK_OPTIONS.includes(serviceType as (typeof SERVICE_WORK_OPTIONS)[number])) {
       return NextResponse.json({ success: false, message: "Công việc chăm sóc không hợp lệ." }, { status: 400 });
     }
 
     const current = await prisma.serviceOrder.findUnique({
       where: { id },
-      select: { id: true, machineId: true, dueDate: true, createdAt: true },
+      include: { machine: { include: { customer: true } } },
     });
+    if (!current) return NextResponse.json({ success: false, message: "Không tìm thấy lệnh chăm sóc hiện tại." }, { status: 404 });
 
-    if (!current) {
-      return NextResponse.json({ success: false, message: "Không tìm thấy lệnh chăm sóc hiện tại." }, { status: 404 });
+    if (auth.user.role === "CSKH" && !cskhScopeAllows(
+      auth.user,
+      {
+        provinceValue: current.machine.provinceCode,
+        address: current.machine.customer?.address || current.address,
+        customerId: current.machine.customerId,
+      },
+    )) {
+      return NextResponse.json({ success: false, message: "Lệnh nằm ngoài phạm vi CSKH được phân công." }, { status: 403 });
     }
 
     const previous = await prisma.serviceOrder.findFirst({
@@ -43,9 +49,7 @@ export async function POST(request: NextRequest, { params }: Params) {
       select: { id: true, serviceType: true },
     });
 
-    if (!previous) {
-      return NextResponse.json({ success: false, message: "Máy này chưa có công việc chăm sóc trước đó để cập nhật." }, { status: 404 });
-    }
+    if (!previous) return NextResponse.json({ success: false, message: "Máy này chưa có công việc chăm sóc trước đó để cập nhật." }, { status: 404 });
 
     const updated = await prisma.serviceOrder.update({
       where: { id: previous.id },

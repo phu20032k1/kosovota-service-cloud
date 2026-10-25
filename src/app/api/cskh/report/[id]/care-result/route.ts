@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { hasRole } from "@/lib/auth";
 import { careLabelStatus } from "@/lib/cskh-report";
-import { provinceScopeAllows } from "@/lib/province-access";
+import { cskhScopeAllows } from "@/lib/province-access";
 
 const MARKER_PREFIX = "[service-order:";
 type Params = { params: Promise<{ id: string }> };
@@ -24,10 +24,13 @@ export async function POST(request: NextRequest, { params }: Params) {
     });
     if (!order) return NextResponse.json({ success: false, message: "Không tìm thấy lệnh chăm sóc." }, { status: 404 });
 
-    if (auth.user.role === "CSKH" && !provinceScopeAllows(
-      auth.user.provinceScope,
-      order.machine.provinceCode,
-      order.machine.customer?.address || order.address,
+    if (auth.user.role === "CSKH" && !cskhScopeAllows(
+      auth.user,
+      {
+        provinceValue: order.machine.provinceCode,
+        address: order.machine.customer?.address || order.address,
+        customerId: order.machine.customerId,
+      },
     )) {
       return NextResponse.json({ success: false, message: "Lệnh nằm ngoài phạm vi CSKH được phân công." }, { status: 403 });
     }
@@ -38,9 +41,7 @@ export async function POST(request: NextRequest, { params }: Params) {
       where: { customerId: order.machine.customer.id, type: "CARE_RESULT", detail: { contains: marker } },
       orderBy: { occurredAt: "desc" },
     });
-    if (previous?.summary === label) {
-      return NextResponse.json({ success: true, message: "Kết quả chăm sóc đã được ghi nhận.", data: previous });
-    }
+    if (previous?.summary === label) return NextResponse.json({ success: true, message: "Kết quả chăm sóc đã được ghi nhận.", data: previous });
 
     const now = new Date();
     const activity = await prisma.$transaction(async (tx) => {

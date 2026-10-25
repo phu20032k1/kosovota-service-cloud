@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { hasRole } from "@/lib/auth";
-import { provinceScopeAllows } from "@/lib/province-access";
+import { cskhScopeAllows } from "@/lib/province-access";
 
 export async function GET(request: NextRequest) {
   const auth = await hasRole(request, ["SUPER_ADMIN", "ADMIN", "CSKH"]);
@@ -9,9 +9,7 @@ export async function GET(request: NextRequest) {
   try {
     const machineId = request.nextUrl.searchParams.get("machineId")?.trim();
     const statusParam = request.nextUrl.searchParams.get("status")?.trim();
-    const statuses = statusParam
-      ? statusParam.split(",").map((value) => value.trim()).filter(Boolean)
-      : [];
+    const statuses = statusParam ? statusParam.split(",").map((value) => value.trim()).filter(Boolean) : [];
     const schedules = await prisma.maintenanceSchedule.findMany({
       where: {
         ...(machineId ? { machineId } : {}),
@@ -22,10 +20,13 @@ export async function GET(request: NextRequest) {
     });
 
     const scopedSchedules = auth.user.role === "CSKH"
-      ? schedules.filter((schedule) => provinceScopeAllows(
-          auth.user.provinceScope,
-          schedule.machine.provinceCode,
-          schedule.machine.customer?.address,
+      ? schedules.filter((schedule) => cskhScopeAllows(
+          auth.user,
+          {
+            provinceValue: schedule.machine.provinceCode,
+            address: schedule.machine.customer?.address,
+            customerId: schedule.machine.customerId,
+          },
         ))
       : schedules;
 

@@ -1,5 +1,6 @@
 export const CARE_RESULT_OPTIONS = [
   { label: "KH tiếp nhận CS + dịch vụ", status: "CUSTOMER_ACCEPTED" },
+  { label: "KH Nội bộ công ty", status: "CUSTOMER_INTERNAL" },
   { label: "KH tiếp nhận CS - tự thay", status: "CUSTOMER_SELF_SERVICE" },
   { label: "KH từ chối chăm sóc", status: "CUSTOMER_REJECTED" },
   { label: "KH không liên lạc được", status: "CALLED_NO_ANSWER" },
@@ -16,10 +17,7 @@ export const SERVICE_WORK_OPTIONS = [
   "Thay vật liệu lọc thô",
 ] as const;
 
-const CARE_STATUS_TO_LABEL = new Map<string, string>([
-  ...CARE_RESULT_OPTIONS.map((item) => [item.status, item.label] as const),
-  ["CUSTOMER_INTERNAL", "KH Nội bộ công ty"],
-]);
+const CARE_STATUS_TO_LABEL = new Map<string, string>(CARE_RESULT_OPTIONS.map((item) => [item.status, item.label] as const));
 const CARE_LABEL_TO_STATUS = new Map<string, string>(CARE_RESULT_OPTIONS.map((item) => [item.label, item.status]));
 
 export function careStatusLabel(status?: string | null) {
@@ -57,9 +55,7 @@ export function splitVietnamAddress(address?: string | null, provinceName?: stri
 
 export function serviceResultLabel(input: { status?: string | null; reportServiceType?: string | null; products?: string | null; dealerCode?: string | null }) {
   if (input.status === "COMPLETED") return "Đã hoàn thành";
-  if (input.reportServiceType) {
-    return [input.reportServiceType, input.products].filter(Boolean).join(" · ");
-  }
+  if (input.reportServiceType) return [input.reportServiceType, input.products].filter(Boolean).join(" · ");
   if (["IN_PROGRESS", "ACCEPTED"].includes(input.status || "")) return "Đại lý đang thực hiện";
   if (input.status === "ASSIGNED") return input.dealerCode ? `Đã giao ${input.dealerCode}` : "Đã giao đại lý";
   if (input.status === "CANCELLED") return "Đã hủy";

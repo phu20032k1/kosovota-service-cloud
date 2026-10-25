@@ -20,7 +20,7 @@ type Machine = {
 type Dealer = {
   id: string; dealerCode: string; name: string; phone: string; address?: string | null;
   province?: string | null; lat?: number | null; lng?: number | null; services?: string | null;
-  technicianCount?: number | null; rating?: number | null; status: string;
+  technicianCount?: number | null; rating?: number | null; registrationType?: string | null; status: string;
 };
 type Order = {
   id: string; orderCode: string; machineId: string; customerName: string; customerPhone: string;
@@ -34,9 +34,47 @@ type Order = {
 };
 type ShortlistDealer = Dealer & { distanceKm: number };
 type Selection = { kind: "machine" | "dealer" | "order"; id: string } | null;
+type DealerKind = "commercial" | "service" | "freelancer";
 
 const ACTIVE_ORDER_STATUSES = ["NEW", "ASSIGNED", "ACCEPTED", "IN_PROGRESS", "CALLED_NO_ANSWER", "CUSTOMER_ACCEPTED", "RESCHEDULED", "COMPLAINT"];
+const CAPABILITY_COLORS = ["#dc2626", "#7c3aed", "#ea580c", "#0891b2", "#db2777", "#4f46e5", "#0f766e", "#b45309"];
+const DEALER_META: Record<DealerKind, { color: string; glyph: MapMarker["glyph"]; label: string }> = {
+  commercial: { color: "#eab308", glyph: "store", label: "Đại lý thương mại" },
+  service: { color: "#16a34a", glyph: "wrench", label: "Đại lý dịch vụ" },
+  freelancer: { color: "#dc2626", glyph: "user", label: "CTV / thợ" },
+};
 const dateTime = (value?: string | null) => value ? new Intl.DateTimeFormat("vi-VN", { dateStyle: "short", timeStyle: "short" }).format(new Date(value)) : "—";
+
+function normalize(value?: string | null) {
+  return (value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d").replace(/Đ/g, "D").toLowerCase();
+}
+
+function dealerKind(dealer: Dealer): DealerKind {
+  const registration = normalize(dealer.registrationType);
+  if (/collaborator|cong tac|freelancer|\bctv\b|tho tu do/.test(registration)) return "freelancer";
+  if (/commercial|thuong mai/.test(registration)) return "commercial";
+  if (/service|dich vu|uy quyen/.test(registration)) return "service";
+  if (/ctv/.test(normalize(dealer.dealerCode))) return "freelancer";
+  return (dealer.technicianCount || 0) > 0 ? "service" : "commercial";
+}
+
+function dealerServices(dealer: Dealer) {
+  return (dealer.services || "").split(",").map((value) => value.trim()).filter(Boolean);
+}
+
+function colorFromText(value: string) {
+  const normalized = normalize(value);
+  let hash = 0;
+  for (let index = 0; index < normalized.length; index += 1) hash = ((hash << 5) - hash + normalized.charCodeAt(index)) | 0;
+  return CAPABILITY_COLORS[Math.abs(hash) % CAPABILITY_COLORS.length];
+}
+
+function dealerMarkerColor(dealer: Dealer) {
+  const kind = dealerKind(dealer);
+  if (kind !== "freelancer") return DEALER_META[kind].color;
+  const primaryCapability = dealerServices(dealer).slice().sort((a, b) => a.localeCompare(b, "vi"))[0];
+  return primaryCapability ? colorFromText(primaryCapability) : DEALER_META.freelancer.color;
+}
 
 export default function OperationsMapPage() {
   const [machines, setMachines] = useState<Machine[]>([]);
@@ -64,28 +102,21 @@ export default function OperationsMapPage() {
         fetch("/api/service-orders", { cache: "no-store" }),
       ]);
       const [machineResult, dealerResult, orderResult] = await Promise.all([
-        readApiResponse<Machine[]>(machineResponse),
-        readApiResponse<Dealer[]>(dealerResponse),
-        readApiResponse<Order[]>(orderResponse),
+        readApiResponse<Machine[]>(machineResponse), readApiResponse<Dealer[]>(dealerResponse), readApiResponse<Order[]>(orderResponse),
       ]);
       if (!machineResponse.ok || !machineResult.success) throw new Error(machineResult.message || "Không tải được máy.");
       if (!dealerResponse.ok || !dealerResult.success) throw new Error(dealerResult.message || "Không tải được đại lý.");
       if (!orderResponse.ok || !orderResult.success) throw new Error(orderResult.message || "Không tải được lệnh điều phối.");
-
       const nextMachines = machineResult.data || [];
       const nextOrders = orderResult.data || [];
       setMachines(nextMachines);
-      setDealers((dealerResult.data || []).filter((dealer: Dealer) => dealer.status === "APPROVED"));
+      setDealers((dealerResult.data || []).filter((dealer) => dealer.status === "APPROVED"));
       setOrders(nextOrders);
-
       const params = new URLSearchParams(window.location.search);
       const requestedOrder = params.get("order");
       const requestedMachine = params.get("machine");
-      if (requestedOrder && nextOrders.some((order: Order) => order.id === requestedOrder)) {
-        setSelection({ kind: "order", id: requestedOrder });
-      } else if (requestedMachine && nextMachines.some((machine: Machine) => machine.id === requestedMachine)) {
-        setSelection({ kind: "machine", id: requestedMachine });
-      }
+      if (requestedOrder && nextOrders.some((order) => order.id === requestedOrder)) setSelection({ kind: "order", id: requestedOrder });
+      else if (requestedMachine && nextMachines.some((machine) => machine.id === requestedMachine)) setSelection({ kind: "machine", id: requestedMachine });
     } catch (error) {
       setNotice({ kind: "error", text: error instanceof Error ? error.message : "Không tải được dữ liệu điều phối." });
     } finally {
@@ -95,42 +126,27 @@ export default function OperationsMapPage() {
 
   useEffect(() => {
     void load();
-    const refresh = () => {
-      if (document.visibilityState === "visible") void load(true);
-    };
+    const refresh = () => { if (document.visibilityState === "visible") void load(true); };
     const timer = window.setInterval(refresh, 30_000);
     window.addEventListener("focus", refresh);
     document.addEventListener("visibilitychange", refresh);
-    return () => {
-      window.clearInterval(timer);
-      window.removeEventListener("focus", refresh);
-      document.removeEventListener("visibilitychange", refresh);
-    };
+    return () => { window.clearInterval(timer); window.removeEventListener("focus", refresh); document.removeEventListener("visibilitychange", refresh); };
   }, [load]);
 
   const normalizedSearch = search.trim().toLowerCase();
-  const visibleMachines = useMemo(() => machines
-    .filter((machine) => machine.lat != null && machine.lng != null)
-    .filter((machine) => !normalizedSearch || `${machine.id} ${machine.model} ${machine.name || ""} ${machine.customer?.name || ""} ${machine.customer?.phone || ""} ${machine.customer?.address || ""}`.toLowerCase().includes(normalizedSearch)), [machines, normalizedSearch]);
-  const visibleDealers = useMemo(() => dealers
-    .filter((dealer) => dealer.lat != null && dealer.lng != null)
-    .filter((dealer) => !normalizedSearch || `${dealer.dealerCode} ${dealer.name} ${dealer.phone} ${dealer.services || ""} ${dealer.address || ""}`.toLowerCase().includes(normalizedSearch)), [dealers, normalizedSearch]);
-  const filteredOrders = useMemo(() => orders
-    .filter((order) => orderFilter === "ALL" || (orderFilter === "ACTIVE" ? ACTIVE_ORDER_STATUSES.includes(order.status) : order.status === orderFilter))
-    .filter((order) => !normalizedSearch || `${order.orderCode} ${order.serviceType} ${order.customerName} ${order.customerPhone} ${order.machineId} ${order.sourceTicket?.ticketCode || ""}`.toLowerCase().includes(normalizedSearch)), [orders, orderFilter, normalizedSearch]);
+  const visibleMachines = useMemo(() => machines.filter((machine) => machine.lat != null && machine.lng != null).filter((machine) => !normalizedSearch || `${machine.id} ${machine.model} ${machine.name || ""} ${machine.customer?.name || ""} ${machine.customer?.phone || ""} ${machine.customer?.address || ""}`.toLowerCase().includes(normalizedSearch)), [machines, normalizedSearch]);
+  const visibleDealers = useMemo(() => dealers.filter((dealer) => dealer.lat != null && dealer.lng != null).filter((dealer) => !normalizedSearch || `${dealer.dealerCode} ${dealer.name} ${dealer.phone} ${dealer.services || ""} ${dealer.address || ""}`.toLowerCase().includes(normalizedSearch)), [dealers, normalizedSearch]);
+  const filteredOrders = useMemo(() => orders.filter((order) => orderFilter === "ALL" || (orderFilter === "ACTIVE" ? ACTIVE_ORDER_STATUSES.includes(order.status) : order.status === orderFilter)).filter((order) => !normalizedSearch || `${order.orderCode} ${order.serviceType} ${order.customerName} ${order.customerPhone} ${order.machineId} ${order.sourceTicket?.ticketCode || ""}`.toLowerCase().includes(normalizedSearch)), [orders, orderFilter, normalizedSearch]);
 
   const markers: MapMarker[] = [
     ...(showMachines ? visibleMachines.map((machine) => ({ id: `machine:${machine.id}`, lat: machine.lat!, lng: machine.lng!, title: machine.id, subtitle: machine.customer?.name || machine.model, color: machineColor(machine), glyph: "droplet" as const })) : []),
-    ...(showDealers ? visibleDealers.map((dealer) => ({ id: `dealer:${dealer.id}`, lat: dealer.lat!, lng: dealer.lng!, title: dealer.name, subtitle: `${dealer.dealerCode} · ${dealer.phone}`, color: "#2563eb", glyph: "store" as const })) : []),
+    ...(showDealers ? visibleDealers.map((dealer) => ({ id: `dealer:${dealer.id}`, lat: dealer.lat!, lng: dealer.lng!, title: dealer.name, subtitle: `${dealer.dealerCode} · ${dealer.phone}`, color: dealerMarkerColor(dealer), glyph: DEALER_META[dealerKind(dealer)].glyph })) : []),
   ];
 
   const selectedOrder = selection?.kind === "order" ? orders.find((item) => item.id === selection.id) || null : null;
-  const selectedMachine = selection?.kind === "machine"
-    ? machines.find((item) => item.id === selection.id) || null
-    : selectedOrder?.machine || null;
+  const selectedMachine = selection?.kind === "machine" ? machines.find((item) => item.id === selection.id) || null : selectedOrder?.machine || null;
   const selectedDealer = selection?.kind === "dealer" ? dealers.find((item) => item.id === selection.id) || null : null;
   const activeMarkerId = selectedMachine ? `machine:${selectedMachine.id}` : selectedDealer ? `dealer:${selectedDealer.id}` : null;
-
   const metrics = useMemo(() => ({
     active: orders.filter((order) => ACTIVE_ORDER_STATUSES.includes(order.status)).length,
     waiting: orders.filter((order) => order.status === "NEW" || !order.dealer).length,
@@ -144,100 +160,58 @@ export default function OperationsMapPage() {
     setSelection({ kind: kind === "machine" ? "machine" : "dealer", id: rest.join(":") });
     setShortlist([]);
   }
-
-  function selectOrder(order: Order) {
-    setSelection({ kind: "order", id: order.id });
-    setServiceType(order.serviceType);
-    setShortlist([]);
-  }
+  function selectOrder(order: Order) { setSelection({ kind: "order", id: order.id }); setServiceType(order.serviceType); setShortlist([]); }
 
   async function findDealers() {
     if (!selectedMachine) return;
-    setBusy(true);
-    setNotice(null);
-    setShortlist([]);
+    setBusy(true); setNotice(null); setShortlist([]);
     try {
-      const response = await fetch("/api/dealers/shortlist", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ machineId: selectedMachine.id, serviceType: selectedOrder?.serviceType || serviceType, limit: 30 }),
-      });
+      const response = await fetch("/api/dealers/shortlist", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ machineId: selectedMachine.id, serviceType: selectedOrder?.serviceType || serviceType, limit: 30 }) });
       const result = await readApiResponse<ShortlistDealer[]>(response);
       if (!response.ok || !result.success) throw new Error(result.message || "Không tìm được đại lý.");
-      const items = (result.data || []).filter((dealer: ShortlistDealer) => dealer.distanceKm <= radius);
+      const items = (result.data || []).filter((dealer) => dealer.distanceKm <= radius);
       setShortlist(items);
       setNotice({ kind: "info", text: items.length ? `Tìm thấy ${items.length} đại lý/CTV phù hợp trong bán kính ${radius} km.` : `Chưa có đại lý phù hợp trong bán kính ${radius} km.` });
-    } catch (error) {
-      setNotice({ kind: "error", text: error instanceof Error ? error.message : "Không tìm được đại lý." });
-    } finally {
-      setBusy(false);
-    }
+    } catch (error) { setNotice({ kind: "error", text: error instanceof Error ? error.message : "Không tìm được đại lý." }); }
+    finally { setBusy(false); }
   }
 
   async function assign(dealer: ShortlistDealer) {
     if (!selectedMachine) return;
-    setBusy(true);
-    setNotice(null);
+    setBusy(true); setNotice(null);
     try {
-      const response = await fetch("/api/service-orders/assign-dealer", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          orderId: selectedOrder?.id,
-          machineId: selectedMachine.id,
-          serviceType: selectedOrder?.serviceType || serviceType,
-          dealerId: dealer.id,
-        }),
-      });
+      const response = await fetch("/api/service-orders/assign-dealer", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ orderId: selectedOrder?.id, machineId: selectedMachine.id, serviceType: selectedOrder?.serviceType || serviceType, dealerId: dealer.id }) });
       const result = await readApiResponse<Order>(response);
       if (!response.ok || !result.success || !result.data) throw new Error(result.message || "Không giao được lệnh.");
       setNotice({ kind: "success", text: `Đã ${selectedOrder ? "giao" : "tạo và giao"} lệnh ${result.data.orderCode} cho ${dealer.name}.` });
-      setShortlist([]);
-      await load();
-      setSelection({ kind: "order", id: result.data.id });
-    } catch (error) {
-      setNotice({ kind: "error", text: error instanceof Error ? error.message : "Không giao được lệnh." });
-    } finally {
-      setBusy(false);
-    }
+      setShortlist([]); await load(); setSelection({ kind: "order", id: result.data.id });
+    } catch (error) { setNotice({ kind: "error", text: error instanceof Error ? error.message : "Không giao được lệnh." }); }
+    finally { setBusy(false); }
   }
 
   return <main className="min-h-screen bg-slate-50/70">
     <OperationsHeader title="Điều phối lệnh dịch vụ" subtitle="Phiếu hỗ trợ tạo lệnh tự động, theo dõi hàng chờ và giao đại lý/CTV gần máy" actions={<button type="button" onClick={() => void load()} className="icon-button" title="Tải lại"><Icon name="refresh" size={18}/></button>}/>
     <section className="mx-auto max-w-[1580px] space-y-4 p-3 sm:p-5">
       {notice && <Notice kind={notice.kind}>{notice.text}</Notice>}
-
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-        <Metric label="Lệnh đang mở" value={metrics.active} icon="activity"/>
-        <Metric label="Chờ điều phối" value={metrics.waiting} icon="clock"/>
-        <Metric label="Đã giao đại lý" value={metrics.assigned} icon="store"/>
-        <Metric label="Đang thực hiện" value={metrics.inProgress} icon="wrench"/>
-        <Metric label="Đã hoàn thành" value={metrics.completed} icon="check"/>
-      </div>
-
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5"><Metric label="Lệnh đang mở" value={metrics.active} icon="activity"/><Metric label="Chờ điều phối" value={metrics.waiting} icon="clock"/><Metric label="Đã giao đại lý" value={metrics.assigned} icon="store"/><Metric label="Đang thực hiện" value={metrics.inProgress} icon="wrench"/><Metric label="Đã hoàn thành" value={metrics.completed} icon="check"/></div>
       <div className="surface-card flex flex-wrap items-center gap-2 px-4 py-3 text-sm text-slate-600">
         <span className="mini-chip mini-chip--green"><Icon name="map" size={14}/>Bản đồ chỉ hiển thị trong phạm vi Việt Nam</span>
         <span className="mini-chip"><Icon name="droplet" size={14}/>Máy khách hàng</span>
-        <span className="mini-chip"><Icon name="store" size={14}/>Đại lý / CTV</span>
-        <span className="mini-chip"><Icon name="alert" size={14}/>Phiếu hỗ trợ liên kết</span>
+        <span className="mini-chip"><span className="h-2.5 w-2.5 rounded-full" style={{ background: DEALER_META.commercial.color }}/>Vàng: đại lý thương mại</span>
+        <span className="mini-chip"><span className="h-2.5 w-2.5 rounded-full" style={{ background: DEALER_META.service.color }}/>Xanh: đại lý dịch vụ</span>
+        <span className="mini-chip"><span className="h-2.5 w-2.5 rounded-full" style={{ background: DEALER_META.freelancer.color }}/>CTV/thợ: màu theo năng lực</span>
       </div>
-
       <div className="surface-card grid gap-3 p-3 lg:grid-cols-[minmax(240px,1fr)_auto_auto_auto]">
         <label className="relative min-w-0"><Icon name="search" size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400"/><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Tìm lệnh, phiếu hỗ trợ, máy, khách hàng hoặc đại lý" className="pl-11"/></label>
         <button type="button" onClick={() => setShowMachines((value) => !value)} className={`btn-secondary ${showMachines ? "border-emerald-400 bg-emerald-50 text-emerald-800" : "opacity-60"}`}><Icon name="droplet" size={17}/> Máy ({visibleMachines.length})</button>
         <button type="button" onClick={() => setShowDealers((value) => !value)} className={`btn-secondary ${showDealers ? "border-blue-400 bg-blue-50 text-blue-800" : "opacity-60"}`}><Icon name="store" size={17}/> Đại lý ({visibleDealers.length})</button>
         <button type="button" onClick={() => { setSearch(""); setSelection(null); setShortlist([]); }} className="btn-secondary"><Icon name="x" size={17}/> Làm mới</button>
       </div>
-
       {loading ? <LoadingState label="Đang tải hàng chờ và bản đồ điều phối..."/> : <div className="dispatch-layout">
         <section className="surface-card min-w-0 overflow-hidden">
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 p-4">
-            <div><p className="section-kicker">Hàng chờ lệnh</p><h2 className="mt-1 text-lg font-black">{filteredOrders.length} lệnh phù hợp</h2></div>
-            <select value={orderFilter} onChange={(event) => setOrderFilter(event.target.value)} className="max-w-52"><option value="ACTIVE">Đang mở</option><option value="ALL">Tất cả</option><option value="NEW">Chờ điều phối</option><option value="ASSIGNED">Đã giao</option><option value="IN_PROGRESS">Đang thực hiện</option><option value="COMPLETED">Hoàn thành</option><option value="CANCELLED">Đã hủy</option></select>
-          </div>
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 p-4"><div><p className="section-kicker">Hàng chờ lệnh</p><h2 className="mt-1 text-lg font-black">{filteredOrders.length} lệnh phù hợp</h2></div><select value={orderFilter} onChange={(event) => setOrderFilter(event.target.value)} className="max-w-52"><option value="ACTIVE">Đang mở</option><option value="ALL">Tất cả</option><option value="NEW">Chờ điều phối</option><option value="ASSIGNED">Đã giao</option><option value="IN_PROGRESS">Đang thực hiện</option><option value="COMPLETED">Hoàn thành</option><option value="CANCELLED">Đã hủy</option></select></div>
           <div className="dispatch-order-list">{filteredOrders.map((order) => <button key={order.id} type="button" onClick={() => selectOrder(order)} className={`dispatch-order-item ${selectedOrder?.id === order.id ? "is-active" : ""}`}><div className="flex min-w-0 items-start justify-between gap-2"><div className="min-w-0"><p className="truncate font-black text-slate-950">{order.orderCode}</p><p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-600">{order.serviceType}</p></div><StatusBadge value={order.status}/></div><div className="mt-3 grid gap-1 text-xs text-slate-500"><span className="truncate"><strong>Khách:</strong> {order.customerName} · {order.customerPhone}</span><span className="truncate"><strong>Máy:</strong> {order.machineId}</span><span className="truncate"><strong>Phụ trách:</strong> {order.dealer?.name || "Chưa giao"}</span>{order.sourceTicket && <span className="truncate font-bold text-violet-700">Phiếu {order.sourceTicket.ticketCode}</span>}</div></button>)}{!filteredOrders.length && <div className="empty-detail-state m-4"><Icon name="check" size={28}/><strong>Không có lệnh phù hợp</strong><p>Đổi bộ lọc hoặc tạo phiếu có máy để hệ thống tự đưa lệnh sang đây.</p></div>}</div>
         </section>
-
         <section className="min-w-0 space-y-4">
           <div className="surface-card overflow-hidden"><InteractiveMap markers={markers} activeId={activeMarkerId} onSelect={selectMarker} height={520}/></div>
           <div className="surface-card min-w-0 p-4 sm:p-5">{selectedOrder ? <OrderDispatchPanel order={selectedOrder} serviceType={serviceType} setServiceType={setServiceType} radius={radius} setRadius={setRadius} busy={busy} shortlist={shortlist} onFind={findDealers} onAssign={assign}/> : selectedMachine ? <MachineDispatchPanel machine={selectedMachine} serviceType={serviceType} setServiceType={setServiceType} radius={radius} setRadius={setRadius} busy={busy} shortlist={shortlist} onFind={findDealers} onAssign={assign}/> : selectedDealer ? <DealerPanel dealer={selectedDealer}/> : <EmptyPanel/>}</div>
@@ -273,13 +247,9 @@ function MachineDispatchPanel({ machine, serviceType, setServiceType, radius, se
 }
 
 function DealerPanel({ dealer }: { dealer: Dealer }) {
-  return <div><span className="status-pill status-blue"><Icon name="store" size={14}/> Đại lý/CTV</span><h2 className="mt-3 text-xl font-black">{dealer.name}</h2><p className="mt-1 text-sm text-slate-500">{dealer.dealerCode} · {dealer.phone}</p><div className="summary-grid mt-4"><Small label="Tỉnh" value={dealer.province || "—"}/><Small label="KTV" value={String(dealer.technicianCount || 0)}/><Small label="Đánh giá" value={`${dealer.rating || 5}/5`}/><Small label="Năng lực" value={dealer.services || "Chưa cập nhật"}/></div><Link href={`/admin/dealers/${dealer.id}`} className="btn-secondary mt-4 px-4 py-3 text-sm font-black"><Icon name="eye" size={17}/> Xem/sửa hồ sơ đại lý</Link></div>;
+  const kind = dealerKind(dealer);
+  return <div><span className="status-pill status-blue"><span className="h-2.5 w-2.5 rounded-full" style={{ background: dealerMarkerColor(dealer) }}/>{DEALER_META[kind].label}</span><h2 className="mt-3 text-xl font-black">{dealer.name}</h2><p className="mt-1 text-sm text-slate-500">{dealer.dealerCode} · {dealer.phone}</p><div className="summary-grid mt-4"><Small label="Tỉnh" value={dealer.province || "—"}/><Small label="KTV" value={String(dealer.technicianCount || 0)}/><Small label="Đánh giá" value={`${dealer.rating || 5}/5`}/><Small label="Năng lực" value={dealer.services || "Chưa cập nhật"}/></div><Link href={`/admin/dealers/${dealer.id}`} className="btn-secondary mt-4 px-4 py-3 text-sm font-black"><Icon name="eye" size={17}/> Xem/sửa hồ sơ đại lý</Link></div>;
 }
 
-function EmptyPanel() {
-  return <div className="empty-detail-state"><Icon name="map" size={32}/><strong>Chọn một lệnh, máy hoặc đại lý</strong><p>Lệnh tạo từ phiếu hỗ trợ xuất hiện tự động trong hàng chờ. Chọn lệnh để xem đủ yêu cầu và phân công.</p></div>;
-}
-
-function Small({ label, value }: { label: string; value: string }) {
-  return <div className="min-w-0 rounded-2xl border border-slate-200 bg-slate-50 p-3"><p className="text-[10px] font-black uppercase tracking-[.12em] text-slate-400">{label}</p><p className="mt-1 break-words text-sm font-bold leading-5 text-slate-800">{value}</p></div>;
-}
+function EmptyPanel() { return <div className="empty-detail-state"><Icon name="map" size={32}/><strong>Chọn một lệnh, máy hoặc đại lý</strong><p>Lệnh tạo từ phiếu hỗ trợ xuất hiện tự động trong hàng chờ. Chọn lệnh để xem đủ yêu cầu và phân công.</p></div>; }
+function Small({ label, value }: { label: string; value: string }) { return <div className="min-w-0 rounded-2xl border border-slate-200 bg-slate-50 p-3"><p className="text-[10px] font-black uppercase tracking-[.12em] text-slate-400">{label}</p><p className="mt-1 break-words text-sm font-bold leading-5 text-slate-800">{value}</p></div>; }
