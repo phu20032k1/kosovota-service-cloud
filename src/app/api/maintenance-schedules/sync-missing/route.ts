@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { syncMissingMaintenanceSchedules } from "@/lib/maintenance-automation";
 
 export async function POST(request: NextRequest) {
-  const auth = await hasRole(request, ["ADMIN", "CSKH"]);
+  const auth = await hasRole(request, ["SUPER_ADMIN", "ADMIN", "CSKH"]);
   if (!auth) {
     return NextResponse.json(
       { success: false, message: "Chỉ Admin/CSKH được đồng bộ lịch còn thiếu." },
@@ -13,7 +13,8 @@ export async function POST(request: NextRequest) {
   }
 
   const body = await request.json().catch(() => ({})) as Record<string, unknown>;
-  const result = await syncMissingMaintenanceSchedules(Number(body.limit) || 500);
+  const provinceScope = auth.user.role === "CSKH" ? auth.user.provinceScope : null;
+  const result = await syncMissingMaintenanceSchedules(Number(body.limit) || 500, provinceScope);
 
   await prisma.adminLog.create({
     data: {
