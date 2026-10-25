@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { hasRole } from "@/lib/auth";
 import { careLabelStatus } from "@/lib/cskh-report";
-import { expandProvinceScope } from "@/lib/province";
+import { provinceScopeAllows } from "@/lib/province-access";
 
 const MARKER_PREFIX = "[service-order:";
 type Params = { params: Promise<{ id: string }> };
@@ -24,8 +24,11 @@ export async function POST(request: NextRequest, { params }: Params) {
     });
     if (!order) return NextResponse.json({ success: false, message: "Không tìm thấy lệnh chăm sóc." }, { status: 404 });
 
-    const scope = auth.user.role === "CSKH" ? expandProvinceScope(auth.user.provinceScope) : [];
-    if (scope.length && (!order.machine.provinceCode || !scope.includes(order.machine.provinceCode))) {
+    if (auth.user.role === "CSKH" && !provinceScopeAllows(
+      auth.user.provinceScope,
+      order.machine.provinceCode,
+      order.machine.customer?.address || order.address,
+    )) {
       return NextResponse.json({ success: false, message: "Lệnh nằm ngoài phạm vi CSKH được phân công." }, { status: 403 });
     }
     if (!order.machine.customer?.id) return NextResponse.json({ success: false, message: "Máy chưa gắn khách hàng." }, { status: 409 });
