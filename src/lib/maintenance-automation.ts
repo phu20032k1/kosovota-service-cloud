@@ -5,6 +5,7 @@ import { getConfiguredMaintenanceTemplates } from "@/lib/maintenance-config";
 import { createOrderCode } from "@/lib/order-code";
 import { queueDealerServiceOrderEmail, queueServiceOrderCreatedNotifications } from "@/lib/notifications/events";
 import { expandProvinceScope, findProvince, provinceFromAddress } from "@/lib/province";
+import { effectiveProvinceCode, provinceScopeAllows } from "@/lib/province-access";
 
 function prismaCode(error: unknown) {
   return error && typeof error === "object" && "code" in error
@@ -16,20 +17,33 @@ function isReplacementTask(title: string) {
   return /thay|lõi|loi|màng|mang|vật liệu|vat lieu|bảo trì|bao tri/i.test(title);
 }
 
-export async function syncMissingMaintenanceSchedules(limitInput = 500) {
+export async function syncMissingMaintenanceSchedules(
+  limitInput = 500,
+  provinceScope?: string | null,
+) {
   const limit = Math.min(1_000, Math.max(1, Number(limitInput) || 500));
-  const totalInstalled = await prisma.machine.count({ where: { installDate: { not: null } } });
-  const machines = await prisma.machine.findMany({
+  const candidates = await prisma.machine.findMany({
     where: { installDate: { not: null } },
     select: {
       id: true,
       model: true,
       installDate: true,
+      provinceCode: true,
+      customer: { select: { address: true } },
       maintenanceSchedules: { select: { title: true, dueDate: true, status: true } },
     },
     orderBy: [{ installDate: "asc" }, { id: "asc" }],
-    take: limit,
+    take: 5_000,
   });
+
+  const eligibleMachines = provinceScope
+    ? candidates.filter((machine) => provinceScopeAllows(
+        provinceScope,
+        machine.provinceCode,
+        machine.customer?.address,
+      ))
+    : candidates;
+  const machines = eligibleMachines.slice(0, limit);
 
   const optedOut = await getOptedOutMachineIds(machines.map((machine) => machine.id));
   let createdSchedules = 0;
@@ -88,7 +102,7 @@ export async function syncMissingMaintenanceSchedules(limitInput = 500) {
     synced: syncedMachineIds.length,
     syncedMachineIds,
     createdSchedules,
-    remaining: Math.max(0, totalInstalled - machines.length),
+    remaining: Math.max(0, eligibleMachines.length - machines.length),
     failed,
   };
 }
@@ -184,24 +198,28 @@ function dealerOrderNotification(input: {
   };
 }
 
-export async function generateDueMaintenanceOrders(throughInput: Date = new Date(), limitInput = 1_000) {
+export async function generateDueMaintenanceOrders(
+  throughInput: Date = new Date(),
+  limitInput = 1_000,
+  provinceScope?: string | null,
+) {
   const through = new Date(throughInput);
   if (Number.isNaN(through.getTime())) throw new Error("Mốc thời gian không hợp lệ.");
   const limit = Math.min(2_000, Math.max(1, Number(limitInput) || 1_000));
 
-  const [schedules, approvedDealers] = await Promise.all([
+  const [candidateSchedules, approvedDealers] = await Promise.all([
     prisma.maintenanceSchedule.findMany({
       where: { status: "PENDING", dueDate: { lte: through }, serviceOrder: null },
       include: {
         machine: {
           include: {
             customer: true,
-            activations: { orderBy: { createdAt: "desc" }, take: 1 },
+            activations: { where: { step: 2 }, orderBy: { createdAt: "desc" }, take: 1 },
           },
         },
       },
       orderBy: { dueDate: "asc" },
-      take: limit,
+      take: Math.min(5_000, Math.max(limit, limit * 5)),
     }),
     prisma.dealer.findMany({
       where: { status: "APPROVED" },
@@ -217,6 +235,14 @@ export async function generateDueMaintenanceOrders(throughInput: Date = new Date
       orderBy: { dealerCode: "asc" },
     }),
   ]);
+
+  const schedules = (provinceScope
+    ? candidateSchedules.filter((schedule) => provinceScopeAllows(
+        provinceScope,
+        schedule.machine.provinceCode,
+        schedule.machine.customer?.address,
+      ))
+    : candidateSchedules).slice(0, limit);
 
   const optedOut = await getOptedOutMachineIds(schedules.map((schedule) => schedule.machineId));
   let created = 0;
@@ -258,7 +284,8 @@ export async function generateDueMaintenanceOrders(throughInput: Date = new Date
     });
 
     try {
-      const orderCode = await createOrderCode(schedule.machine.provinceCode || "01");
+      const orderProvince = effectiveProvinceCode(schedule.machine.provinceCode, customer.address) || "01";
+      const orderCode = await createOrderCode(orderProvince);
       const order = await prisma.$transaction(async (tx) => {
         const current = await tx.maintenanceSchedule.findUnique({
           where: { id: schedule.id },
