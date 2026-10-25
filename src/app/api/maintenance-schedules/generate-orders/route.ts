@@ -5,7 +5,7 @@ import { generateDueMaintenanceOrders } from "@/lib/maintenance-automation";
 import { endOfVietnamCalendarDay } from "@/lib/maintenance-time";
 
 export async function POST(request: NextRequest) {
-  const auth = await hasRole(request, ["ADMIN", "CSKH"]);
+  const auth = await hasRole(request, ["SUPER_ADMIN", "ADMIN", "CSKH"]);
   if (!auth) return NextResponse.json({ success: false, message: "Chưa được cấp quyền." }, { status: 401 });
 
   try {
@@ -16,10 +16,10 @@ export async function POST(request: NextRequest) {
     }
 
     // Lịch bảo trì là lịch theo ngày. Bao trọn ngày Việt Nam để một lịch được
-    // chỉnh thành "hôm nay" (ví dụ lưu lúc 12:00 +07) vẫn được sinh lệnh ngay
-    // cả khi nút được bấm vào buổi sáng.
+    // chỉnh thành "hôm nay" vẫn được sinh lệnh ngay cả khi nút được bấm buổi sáng.
     const through = endOfVietnamCalendarDay(requestedThrough);
-    const result = await generateDueMaintenanceOrders(through);
+    const provinceScope = auth.user.role === "CSKH" ? auth.user.provinceScope : null;
+    const result = await generateDueMaintenanceOrders(through, 1_000, provinceScope);
     await prisma.adminLog.create({
       data: {
         userId: auth.user.id,
