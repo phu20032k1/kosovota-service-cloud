@@ -17,14 +17,9 @@ export async function getActiveUser(request: NextRequest) {
   const user = await prisma.user.findUnique({ where: { id: session.sub } });
   if (!user?.active || user.role !== session.role) return null;
 
-  // CSKH vận hành toàn quốc: không áp dụng provinceScope để chặn dữ liệu.
-  // Giá trị scope cũ vẫn được giữ trong DB để có thể tái sử dụng nếu sau này
-  // hệ thống quay lại mô hình phân CSKH theo tỉnh.
-  if (user.role === "CSKH") {
-    return { session, user: { ...user, provinceScope: null } };
-  }
-
-  // Các vai trò khác vẫn chuẩn hóa alias tỉnh nếu có scope lịch sử.
+  // Chuẩn hóa alias tỉnh nhưng tuyệt đối không xóa scope của CSKH.
+  // wardScope/customerScope được Prisma trả cùng user và sẽ được các API nghiệp vụ
+  // kiểm tra bổ sung bằng cskhScopeAllows().
   const aliases = expandProvinceScope(user.provinceScope);
   const effectiveScope = aliases.length ? aliases.join(",") : user.provinceScope;
   return { session, user: { ...user, provinceScope: effectiveScope } };
