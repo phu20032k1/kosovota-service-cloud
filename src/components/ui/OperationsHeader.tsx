@@ -34,6 +34,7 @@ const ADMIN_NAV: NavItem[] = [
 
 const CSKH_NAV: NavItem[] = [
   { href: "/csos", label: "Công việc", icon: "calendar" },
+  { href: "/cskh/dashboard", label: "Báo cáo", icon: "activity" },
   { href: "/cskh", label: "Hiệu quả CSKH", icon: "activity" },
   { href: "/cskh/customers", label: "Khách hàng", icon: "users" },
   { href: "/cskh/tickets", label: "Yêu cầu", icon: "alert" },
