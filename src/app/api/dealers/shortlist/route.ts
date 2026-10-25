@@ -4,6 +4,7 @@ import { hasRole } from "@/lib/auth";
 import { cachePart, getRedis, redisGet, redisSet } from "@/lib/redis";
 import { getDealerCacheFingerprint } from "@/lib/dealer-cache";
 import { geocodeAddress } from "@/lib/maps/geocode";
+import { effectiveProvinceCode, provinceScopeAllows } from "@/lib/province-access";
 
 function distanceKm(lat1: number, lng1: number, lat2: number, lng2: number) {
   const radius = 6371;
@@ -38,17 +39,11 @@ function isTechnicalDealer(dealer: {
 }) {
   const registration = normalize(dealer.registrationType || "");
   const services = normalize(dealer.services || "");
-
-  // Hồ sơ CRM cũ thường chỉ ghi loại chung là "dealer" và không có số KTV.
-  // Chỉ loại khỏi điều phối khi hồ sơ được đánh dấu rõ là thương mại/bán hàng thuần túy.
   if (/commercial|thuong mai|sales|ban hang/.test(registration)) return false;
-
   if (/service|dich vu|collaborator|cong tac|freelancer|ctv|dealer|dai ly/.test(registration)) return true;
   if (/lap dat|bao tri|sua chua|ky thuat|thay loi/.test(services)) return true;
   if (/ctv/.test(normalize(dealer.dealerCode))) return true;
   if ((dealer.technicianCount || 0) > 0) return true;
-
-  // registrationType trống là dữ liệu legacy; hồ sơ đã APPROVED vẫn phải có thể được chọn điều phối.
   return !registration;
 }
 
@@ -57,7 +52,7 @@ function cacheKey(fingerprint: string, machineId: string, machineUpdatedAt: Date
 }
 
 export async function POST(request: NextRequest) {
-  const auth = await hasRole(request, ["ADMIN", "CSKH"]);
+  const auth = await hasRole(request, ["SUPER_ADMIN", "ADMIN", "CSKH"]);
   if (!auth) return NextResponse.json({ success: false, message: "Chưa được cấp quyền." }, { status: 401 });
 
   const body = await request.json();
@@ -84,8 +79,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, message: "Không tìm thấy máy cần điều phối." }, { status: 404 });
   }
 
-  const scopes = auth.user.provinceScope?.split(",").map((value: string) => value.trim()).filter(Boolean) || [];
-  if (auth.user.role === "CSKH" && scopes.length && (!machine.provinceCode || !scopes.includes(machine.provinceCode))) {
+  if (auth.user.role === "CSKH" && !provinceScopeAllows(
+    auth.user.provinceScope,
+    machine.provinceCode,
+    machine.customer?.address,
+  )) {
     return NextResponse.json({ success: false, message: "Máy nằm ngoài phạm vi được phân công." }, { status: 403 });
   }
 
@@ -108,9 +106,14 @@ export async function POST(request: NextRequest) {
         }, { status: 422 });
       }
 
+      const inferredProvince = effectiveProvinceCode(location.provinceCode, address);
       machine = await prisma.machine.update({
         where: { id: machine.id },
-        data: { lat: location.lat, lng: location.lng },
+        data: {
+          lat: location.lat,
+          lng: location.lng,
+          ...(inferredProvince ? { provinceCode: inferredProvince } : {}),
+        },
         select: {
           id: true,
           lat: true,
@@ -174,8 +177,6 @@ export async function POST(request: NextRequest) {
         distanceKm: Number(distanceKm(machine.lat!, machine.lng!, dealer.lat!, dealer.lng!).toFixed(2)),
       };
     })
-    // Lấy đại lý gần nhất trước để bộ lọc bán kính ở giao diện không bị mất
-    // ứng viên gần chỉ vì 30 hồ sơ ở xa có mô tả dịch vụ khớp từ khóa hơn.
     .sort((a, b) => a.distanceKm - b.distanceKm || b.serviceMatchScore - a.serviceMatchScore)
     .slice(0, limit)
     .map((dealer, index) => ({ ...dealer, rank: index + 1 }));
