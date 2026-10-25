@@ -16,6 +16,8 @@ model User {
   role                  String
   dealerCode            String?
   provinceScope         String?
+  wardScope             String?
+  customerScope         String?
   active                Boolean         @default(true)
   createdAt             DateTime        @default(now())
   updatedAt             DateTime        @default(now()) @updatedAt
@@ -330,14 +332,14 @@ model Warehouse {
   type              String          @default("CENTRAL")
   dealerId          String?         @unique
   province          String?
-  address           String?
-  active            Boolean         @default(true)
-  createdAt         DateTime        @default(now())
-  updatedAt         DateTime        @default(now()) @updatedAt
-  balances          StockBalance[]
-  outgoingMovements StockMovement[] @relation("MovementFromWarehouse")
-  incomingMovements StockMovement[] @relation("MovementToWarehouse")
-  dealer            Dealer?         @relation(fields: [dealerId], references: [id])
+  address            String?
+  active             Boolean         @default(true)
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @default(now()) @updatedAt
+  balances           StockBalance[]
+  outgoingMovements  StockMovement[] @relation("MovementFromWarehouse")
+  incomingMovements  StockMovement[] @relation("MovementToWarehouse")
+  dealer             Dealer?         @relation(fields: [dealerId], references: [id])
 
   @@index([type, active])
 }
@@ -421,32 +423,32 @@ model PaymentLine {
 }
 
 model SupportTicket {
-  id           String          @id @default(cuid())
-  ticketCode   String          @unique
-  type         String          @default("WARRANTY")
-  source       String          @default("STAFF")
-  subject      String
-  description  String?
-  status       String          @default("NEW")
-  priority     String          @default("NORMAL")
-  customerId   String?
-  machineId    String?
-  dealerId     String?
-  assigneeId   String?
-  serviceOrderId String?          @unique
-  contactName  String
-  contactPhone String
-  dueAt        DateTime?
-  resolvedAt   DateTime?
-  satisfaction Int?
-  createdAt    DateTime        @default(now())
-  updatedAt    DateTime        @default(now()) @updatedAt
-  assignee     User?           @relation("TicketAssignee", fields: [assigneeId], references: [id])
-  customer     Customer?       @relation(fields: [customerId], references: [id])
-  dealer       Dealer?         @relation(fields: [dealerId], references: [id])
-  machine      Machine?        @relation(fields: [machineId], references: [id])
-  serviceOrder ServiceOrder?   @relation("TicketServiceOrder", fields: [serviceOrderId], references: [id], onDelete: SetNull)
-  messages     TicketMessage[]
+  id             String          @id @default(cuid())
+  ticketCode     String          @unique
+  type           String          @default("WARRANTY")
+  source         String          @default("STAFF")
+  subject        String
+  description    String?
+  status         String          @default("NEW")
+  priority       String          @default("NORMAL")
+  customerId     String?
+  machineId      String?
+  dealerId       String?
+  assigneeId     String?
+  serviceOrderId String?         @unique
+  contactName    String
+  contactPhone   String
+  dueAt          DateTime?
+  resolvedAt     DateTime?
+  satisfaction   Int?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @default(now()) @updatedAt
+  assignee       User?           @relation("TicketAssignee", fields: [assigneeId], references: [id])
+  customer       Customer?       @relation(fields: [customerId], references: [id])
+  dealer         Dealer?         @relation(fields: [dealerId], references: [id])
+  machine        Machine?        @relation(fields: [machineId], references: [id])
+  serviceOrder   ServiceOrder?   @relation("TicketServiceOrder", fields: [serviceOrderId], references: [id], onDelete: SetNull)
+  messages       TicketMessage[]
 
   @@index([status, priority, createdAt])
   @@index([customerId])
@@ -483,7 +485,6 @@ model CustomerActivity {
   @@index([customerId, occurredAt])
   @@index([type, occurredAt])
 }
-
 
 model TrashItem {
   id            String   @id @default(cuid())
