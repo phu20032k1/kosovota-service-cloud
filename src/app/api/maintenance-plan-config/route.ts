@@ -9,7 +9,7 @@ import {
 const EDITABLE_MODELS = new Set(["RO_UNDER_30", "BCN_HOT_COLD", "BCN_COLUMN", "INDUSTRIAL"]);
 
 export async function GET(request: NextRequest) {
-  const auth = await hasRole(request, ["ADMIN", "CSKH"]);
+  const auth = await hasRole(request, ["SUPER_ADMIN", "ADMIN", "CSKH"]);
   if (!auth) return NextResponse.json({ success: false, message: "Chưa được cấp quyền." }, { status: 401 });
 
   const products = PRODUCTS.filter((product) => EDITABLE_MODELS.has(product.modelCode));
@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function PATCH(request: NextRequest) {
-  const auth = await hasRole(request, ["ADMIN", "CSKH"]);
+  const auth = await hasRole(request, ["SUPER_ADMIN", "ADMIN", "CSKH"]);
   if (!auth) return NextResponse.json({ success: false, message: "Chưa được cấp quyền." }, { status: 401 });
 
   try {
