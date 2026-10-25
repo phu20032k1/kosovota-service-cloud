@@ -28,6 +28,15 @@ function forbiddenUrl(request: NextRequest, role: string | null | undefined) {
   return url;
 }
 
+function cskhServiceOrderUrl(request: NextRequest, pathname: string) {
+  const prefix = "/admin/service-orders/";
+  const id = pathname.startsWith(prefix) ? pathname.slice(prefix.length).split("/")[0] : "";
+  const url = request.nextUrl.clone();
+  url.pathname = id ? `/cskh/service-orders/${encodeURIComponent(id)}` : "/csos";
+  url.search = "";
+  return url;
+}
+
 export async function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
 
@@ -37,6 +46,14 @@ export async function proxy(request: NextRequest) {
 
   const token = request.cookies.get(SESSION_COOKIE)?.value;
   const session = await verifySessionToken(token);
+
+  // Một số màn hình dùng chung (ví dụ Lịch thay lõi) có thể còn link sâu tới
+  // chi tiết lệnh dưới khu Admin. Với CSKH, chuyển sang trang chi tiết riêng
+  // trong workspace CSKH thay vì trả về trang "Không đúng khu vực làm việc".
+  if (session?.role === "CSKH" && (pathname === "/admin/service-orders" || pathname.startsWith("/admin/service-orders/"))) {
+    return NextResponse.redirect(cskhServiceOrderUrl(request, pathname));
+  }
+
   const allowedRoles = rolesForPath(pathname);
 
   if (allowedRoles) {
