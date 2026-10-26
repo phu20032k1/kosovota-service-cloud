@@ -1,7 +1,7 @@
 "use client";
 
 import { ChangeEvent, useEffect, useState } from "react";
-import { usePathname, useSearchParams } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { Icon } from "@/components/ui/Icon";
 
 type User = { role: string };
@@ -9,7 +9,6 @@ const ALLOWED = new Set(["ADMIN", "CSKH", "SALES_MANAGER", "DIRECTOR", "DEALER",
 
 export default function BugReportButton() {
   const pathname = usePathname();
-  const searchParams = useSearchParams();
   const [user, setUser] = useState<User | null>(null);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -37,8 +36,8 @@ export default function BugReportButton() {
   async function submit() {
     setBusy(true); setMessage("");
     try {
-      const query = searchParams.toString();
-      const response = await fetch("/api/bug-reports", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...form, screenshot, pageUrl: `${pathname}${query ? `?${query}` : ""}` }) });
+      const pageUrl = typeof window === "undefined" ? pathname : `${pathname}${window.location.search}`;
+      const response = await fetch("/api/bug-reports", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...form, screenshot, pageUrl }) });
       const result = await response.json(); if (!response.ok || !result.success) throw new Error(result.message || "Không gửi được báo lỗi");
       setMessage(result.message); setForm({ category: "Lỗi", action: "", expected: "", actual: "" }); setScreenshot("");
       window.setTimeout(() => { setOpen(false); setMessage(""); }, 1200);
