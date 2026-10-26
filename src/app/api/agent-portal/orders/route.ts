@@ -42,16 +42,24 @@ export async function GET(request: NextRequest) {
       take: 150,
     });
 
-    const completed = orders.filter((order) => order.status === "COMPLETED");
-    const revenue = ["DEALER", "CTV"].includes(auth.user.role) ? completed.reduce((sum, order) => sum + (order.serviceFee || 0), 0) : 0;
-    const paid = ["DEALER", "CTV"].includes(auth.user.role) ? completed.filter((order) => order.paymentStatus === "PAID").reduce((sum, order) => sum + (order.serviceFee || 0), 0) : 0;
+    const now = new Date();
+    const startMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const completedMonth = orders.filter((order) => order.status === "COMPLETED" && order.updatedAt >= startMonth);
+    const revenue = ["DEALER", "CTV"].includes(auth.user.role) ? completedMonth.reduce((sum, order) => sum + (order.serviceFee || 0), 0) : 0;
+    const paid = ["DEALER", "CTV"].includes(auth.user.role) ? completedMonth.filter((order) => order.paymentStatus === "PAID").reduce((sum, order) => sum + (order.serviceFee || 0), 0) : 0;
     const protectedOrders = orders.map((order) => {
       const area = areaLabel(order.address, order.machine.provinceCode);
       const distance = distanceKm(dealer.lat, dealer.lng, order.machine.lat, order.machine.lng);
       return { ...protectServiceOrderCustomerData(order, auth.user.role), area, distanceKm: distance };
     });
 
-    return NextResponse.json({ success: true, dealer, data: protectedOrders, summary: { revenue, paid, pending: revenue - paid }, scope: auth.user.role });
+    return NextResponse.json({
+      success: true,
+      dealer,
+      data: protectedOrders,
+      summary: { revenue, paid, pending: revenue - paid, completedMonth: completedMonth.length, month: now.getMonth() + 1, year: now.getFullYear() },
+      scope: auth.user.role,
+    });
   } catch (error) {
     console.error("agent orders failed", error);
     return NextResponse.json({ success: false, message: "Không tải được lệnh dịch vụ." }, { status: 500 });
