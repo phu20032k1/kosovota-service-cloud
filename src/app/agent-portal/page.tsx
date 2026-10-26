@@ -35,6 +35,10 @@ const EMPTY_REPORT: Report = { workDone: "", products: "", oldCorePhoto: "", new
 function money(value: number) { return new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND", maximumFractionDigits: 0 }).format(value); }
 function dateTime(value?: string | null) { return value ? new Date(value).toLocaleString("vi-VN", { dateStyle: "short", timeStyle: "short" }) : "Chưa hẹn"; }
 function isCoreService(value: string) { return /lõi|filter|thay lõi/i.test(value); }
+function localNowForInput() {
+  const now = new Date();
+  return new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+}
 
 export default function AgentPortalPage() {
   const [orders, setOrders] = useState<Order[]>([]);
@@ -47,6 +51,7 @@ export default function AgentPortalPage() {
   const [notice, setNotice] = useState<{ kind: "success" | "error"; text: string } | null>(null);
   const [acceptOrder, setAcceptOrder] = useState<Order | null>(null);
   const [appointmentAt, setAppointmentAt] = useState("");
+  const [appointmentMin, setAppointmentMin] = useState("");
   const [assignedTech, setAssignedTech] = useState("SELF");
   const [rejectOrder, setRejectOrder] = useState<Order | null>(null);
   const [rejectReason, setRejectReason] = useState("");
@@ -195,7 +200,7 @@ export default function AgentPortalPage() {
 
           <div className="mt-4 grid gap-2 sm:flex">
             {order.status === "ASSIGNED" && <>
-              <button type="button" onClick={() => { setAcceptOrder(order); setAppointmentAt(""); setAssignedTech("SELF"); }} className="btn-primary flex-1 p-3 font-black text-white">Nhận lệnh</button>
+              <button type="button" onClick={() => { setAcceptOrder(order); setAppointmentAt(""); setAppointmentMin(localNowForInput()); setAssignedTech("SELF"); }} className="btn-primary flex-1 p-3 font-black text-white">Nhận lệnh</button>
               <button type="button" onClick={() => { setRejectOrder(order); setRejectReason(""); }} className="rounded-xl bg-rose-600 px-4 py-3 font-black text-white">Không nhận được lệnh này?</button>
             </>}
             {order.status === "ACCEPTED" && !order.technician && <button type="button" disabled={busy} onClick={() => void request(`/api/service-orders/${order.id}`, undefined)} className="btn-primary flex-1 p-3 font-black text-white">Bắt đầu làm</button>}
@@ -208,7 +213,7 @@ export default function AgentPortalPage() {
 
     {acceptOrder && <Modal title="Nhận lệnh" onClose={() => setAcceptOrder(null)}><div className="space-y-4">
       <div className="rounded-xl bg-emerald-50 p-3 text-sm"><strong>{acceptOrder.serviceType}</strong><br/>{acceptOrder.area} {acceptOrder.distanceKm != null ? `· ${acceptOrder.distanceKm} km` : ""}</div>
-      <label className="block"><span className="field-label">Giờ hẹn đến nhà khách *</span><input type="datetime-local" value={appointmentAt} min={new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0,16)} onChange={(e) => setAppointmentAt(e.target.value)} required className="w-full"/></label>
+      <label className="block"><span className="field-label">Giờ hẹn đến nhà khách *</span><input type="datetime-local" value={appointmentAt} min={appointmentMin || undefined} onChange={(e) => setAppointmentAt(e.target.value)} required className="w-full"/></label>
       <label className="block"><span className="field-label">Người thực hiện *</span><select value={assignedTech} onChange={(e) => setAssignedTech(e.target.value)} className="w-full"><option value="SELF">Tôi tự làm</option>{technicians.map((tech) => <option key={tech.id} value={tech.id}>{tech.name} · {tech.phone}</option>)}</select></label>
       <button type="button" disabled={busy} onClick={() => void confirmAccept()} className="btn-primary w-full p-3 font-black text-white disabled:opacity-50">{busy ? "Đang nhận..." : "Nhận lệnh"}</button>
     </div></Modal>}

@@ -5,7 +5,9 @@ import "./ux-fixes.css";
 import KosovotaAiChat from "@/components/KosovotaAiChat";
 import GlobalDeleteGuard from "@/components/GlobalDeleteGuard";
 import ForcePasswordChangeGuard from "@/components/ForcePasswordChangeGuard";
+import ActiveSessionGuard from "@/components/ActiveSessionGuard";
 import BugReportButton from "@/components/BugReportButton";
+import CustomerRepairRequestButton from "@/components/CustomerRepairRequestButton";
 import WebAlertHost from "@/components/ui/WebAlertHost";
 
 export const viewport: Viewport = {
@@ -27,7 +29,9 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
       <body className="min-h-full">
         {children}
         <ForcePasswordChangeGuard />
+        <ActiveSessionGuard />
         <BugReportButton />
+        <CustomerRepairRequestButton />
         <GlobalDeleteGuard />
         <WebAlertHost />
         <KosovotaAiChat />
