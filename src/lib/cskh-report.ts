@@ -54,8 +54,8 @@ export function splitVietnamAddress(address?: string | null, provinceName?: stri
 }
 
 export function serviceResultLabel(input: { status?: string | null; reportServiceType?: string | null; products?: string | null; dealerCode?: string | null }) {
-  if (input.status === "COMPLETED") return "Đã hoàn thành";
   if (input.reportServiceType) return [input.reportServiceType, input.products].filter(Boolean).join(" · ");
+  if (input.status === "COMPLETED") return "Đã hoàn thành";
   if (["IN_PROGRESS", "ACCEPTED"].includes(input.status || "")) return "Đại lý đang thực hiện";
   if (input.status === "ASSIGNED") return input.dealerCode ? `Đã giao ${input.dealerCode}` : "Đã giao đại lý";
   if (input.status === "CANCELLED") return "Đã hủy";
