@@ -1,10 +1,12 @@
-export const INTERNAL_ROLES = ["SUPER_ADMIN", "ADMIN", "CSKH", "DEALER", "CTV", "KTV"] as const;
+export const INTERNAL_ROLES = ["SUPER_ADMIN", "ADMIN", "CSKH", "SALES_MANAGER", "DIRECTOR", "DEALER", "CTV", "KTV"] as const;
 export type InternalRole = (typeof INTERNAL_ROLES)[number];
 
 export const ROLE_HOME: Record<InternalRole, string> = {
   SUPER_ADMIN: "/super-admin",
   ADMIN: "/admin/executive",
   CSKH: "/cskh",
+  SALES_MANAGER: "/sales-manager",
+  DIRECTOR: "/director",
   DEALER: "/agent-portal",
   CTV: "/agent-portal",
   KTV: "/technician-portal",
@@ -14,6 +16,8 @@ export const ROLE_LABEL: Record<InternalRole, string> = {
   SUPER_ADMIN: "Super Admin",
   ADMIN: "Admin vận hành",
   CSKH: "Nhân viên CSKH",
+  SALES_MANAGER: "Trưởng phòng Kinh doanh",
+  DIRECTOR: "Giám đốc",
   DEALER: "Đại lý",
   CTV: "Cộng tác viên",
   KTV: "Kỹ thuật viên",
@@ -23,6 +27,8 @@ export const PROTECTED_ROUTE_RULES: Array<{ prefix: string; roles: InternalRole[
   { prefix: "/super-admin", roles: ["SUPER_ADMIN"] },
   { prefix: "/cskh", roles: ["CSKH"] },
   { prefix: "/csos", roles: ["CSKH"] },
+  { prefix: "/sales-manager", roles: ["SALES_MANAGER"] },
+  { prefix: "/director", roles: ["DIRECTOR"] },
   { prefix: "/admin/inventory", roles: ["SUPER_ADMIN", "ADMIN"] },
   { prefix: "/admin", roles: ["ADMIN"] },
   { prefix: "/agent-portal", roles: ["DEALER", "CTV"] },
