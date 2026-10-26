@@ -76,12 +76,19 @@ export async function POST(request: NextRequest, { params }: Params) {
     const oldCorePhoto = typeof body.oldCorePhoto === "string" ? body.oldCorePhoto.trim() : "";
     const newCorePhoto = typeof body.newCorePhoto === "string" ? body.newCorePhoto.trim() : "";
     const finalPhoto = typeof body.finalPhoto === "string" ? body.finalPhoto.trim() : "";
-    const signature = typeof body.signature === "string" ? body.signature.trim() : "";
+    const customerConfirmationName = typeof body.customerConfirmationName === "string" ? body.customerConfirmationName.trim() : "";
+    const signatureImage = typeof body.signatureImage === "string" ? body.signatureImage.trim() : "";
     const coreReplacement = body.coreReplacement === true || /thay\s*lõi|lõi|filter/i.test(order.serviceType);
     const tdsBefore = Number(body.tdsBefore);
     const tdsAfter = Number(body.tdsAfter);
-    if (!finalPhoto || !signature) {
-      return NextResponse.json({ success: false, message: "Cần ảnh máy sau khi hoàn thành và tên khách hàng xác nhận." }, { status: 400 });
+    if (!finalPhoto) {
+      return NextResponse.json({ success: false, message: "Cần ảnh máy sau khi hoàn thành." }, { status: 400 });
+    }
+    if (!customerConfirmationName) {
+      return NextResponse.json({ success: false, message: "Cần tên khách hàng xác nhận." }, { status: 400 });
+    }
+    if (!signatureImage) {
+      return NextResponse.json({ success: false, message: "Khách hàng cần ký trực tiếp hoặc chụp/chọn ảnh chữ ký trước khi gửi." }, { status: 400 });
     }
     if (coreReplacement && (!oldCorePhoto || !newCorePhoto)) {
       return NextResponse.json({ success: false, message: "Công việc thay lõi bắt buộc có ảnh lõi cũ và ảnh lõi mới." }, { status: 400 });
@@ -141,7 +148,11 @@ export async function POST(request: NextRequest, { params }: Params) {
       const products = typeof body.products === "string" && body.products.trim() ? body.products.trim() : materialSummary || null;
       const suppliedNote = typeof body.note === "string" ? body.note.trim() : "";
       const tdsLine = `TDS trước: ${tdsBefore} ppm | TDS sau: ${tdsAfter} ppm`;
-      const note = suppliedNote.includes("TDS trước:") ? suppliedNote : [suppliedNote, tdsLine].filter(Boolean).join("\n");
+      const customerLine = `Khách xác nhận: ${customerConfirmationName}`;
+      const noteParts = [suppliedNote];
+      if (!suppliedNote.includes("TDS trước:")) noteParts.push(tdsLine);
+      if (!suppliedNote.includes("Khách xác nhận:")) noteParts.push(customerLine);
+      const note = noteParts.filter(Boolean).join("\n");
       const report = await tx.serviceReport.create({
         data: {
           orderId: order.id,
@@ -152,7 +163,7 @@ export async function POST(request: NextRequest, { params }: Params) {
           oldCorePhoto: oldCorePhoto || null,
           newCorePhoto: newCorePhoto || null,
           finalPhoto,
-          signature,
+          signature: signatureImage,
           note,
         },
       });
@@ -170,7 +181,7 @@ export async function POST(request: NextRequest, { params }: Params) {
       return { report, movements: createdMovements };
     });
 
-    await writeAudit({ request, userId: auth.user.id, action: "COMPLETE_SERVICE_ORDER", target: order.orderCode, detail: { reportId: result.report.id, materials: result.movements, tdsBefore, tdsAfter, coreReplacement } });
+    await writeAudit({ request, userId: auth.user.id, action: "COMPLETE_SERVICE_ORDER", target: order.orderCode, detail: { reportId: result.report.id, materials: result.movements, tdsBefore, tdsAfter, coreReplacement, customerConfirmationName, electronicSignature: true } });
     if (order.machine.customer) {
       await queueServiceCompletedEmail({ customer: order.machine.customer, orderCode: order.orderCode, machineId: order.machineId, serviceType: order.serviceType, products: result.report.products });
     }

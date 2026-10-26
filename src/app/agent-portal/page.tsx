@@ -7,6 +7,7 @@ import { MetricCard } from "@/components/ui/MetricCard";
 import { Notice } from "@/components/ui/Notice";
 import { Icon } from "@/components/ui/Icon";
 import { StatusBadge } from "@/components/ui/StatusBadge";
+import { ServiceSignatureCapture } from "@/components/ServiceSignatureCapture";
 
 type Order = {
   id: string;
@@ -28,8 +29,8 @@ type Technician = { id: string; name: string; phone: string; active: boolean };
 type Dealer = { id: string; dealerCode: string; name: string; phone: string };
 type Summary = { revenue: number; paid: number; pending: number };
 type Tab = "waiting" | "doing" | "recent";
-type Report = { workDone: string; products: string; oldCorePhoto: string; newCorePhoto: string; finalPhoto: string; signature: string; tdsBefore: string; tdsAfter: string };
-const EMPTY_REPORT: Report = { workDone: "", products: "", oldCorePhoto: "", newCorePhoto: "", finalPhoto: "", signature: "", tdsBefore: "", tdsAfter: "" };
+type Report = { workDone: string; products: string; oldCorePhoto: string; newCorePhoto: string; finalPhoto: string; customerConfirmationName: string; signatureImage: string; tdsBefore: string; tdsAfter: string };
+const EMPTY_REPORT: Report = { workDone: "", products: "", oldCorePhoto: "", newCorePhoto: "", finalPhoto: "", customerConfirmationName: "", signatureImage: "", tdsBefore: "", tdsAfter: "" };
 
 function money(value: number) { return new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND", maximumFractionDigits: 0 }).format(value); }
 function dateTime(value?: string | null) { return value ? new Date(value).toLocaleString("vi-VN", { dateStyle: "short", timeStyle: "short" }) : "Chưa hẹn"; }
@@ -121,24 +122,26 @@ export default function AgentPortalPage() {
   }
 
   async function submitReport() {
-    if (!reportOrder) return;
+    if (!reportOrder || busy) return;
     const needsCore = isCoreService(reportOrder.serviceType);
     if (!report.workDone.trim()) return setReportError("Hãy ghi công việc đã làm.");
     if (!report.finalPhoto) return setReportError("Thiếu ảnh máy sau khi hoàn thành.");
     if (needsCore && (!report.oldCorePhoto || !report.newCorePhoto)) return setReportError("Thay lõi bắt buộc có ảnh lõi cũ và lõi mới.");
     if (report.tdsBefore === "" || report.tdsAfter === "") return setReportError("Hãy nhập TDS trước và sau khi làm.");
-    if (!report.signature.trim()) return setReportError("Hãy nhập tên khách hàng xác nhận.");
+    if (!report.customerConfirmationName.trim()) return setReportError("Hãy nhập tên khách hàng xác nhận.");
+    if (!report.signatureImage) return setReportError("Khách hàng cần ký trực tiếp hoặc chụp/chọn ảnh chữ ký trước khi gửi.");
     setBusy(true); setReportError("");
     try {
       const response = await fetch(`/api/service-orders/${reportOrder.id}/report`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           products: report.products,
-          note: `${report.workDone.trim()}\nTDS trước: ${report.tdsBefore} ppm | TDS sau: ${report.tdsAfter} ppm`,
+          note: report.workDone.trim(),
           oldCorePhoto: report.oldCorePhoto,
           newCorePhoto: report.newCorePhoto,
           finalPhoto: report.finalPhoto,
-          signature: report.signature,
+          customerConfirmationName: report.customerConfirmationName.trim(),
+          signatureImage: report.signatureImage,
           coreReplacement: needsCore,
           tdsBefore: Number(report.tdsBefore),
           tdsAfter: Number(report.tdsAfter),
@@ -170,9 +173,7 @@ export default function AgentPortalPage() {
       </section>
 
       <nav className="grid grid-cols-3 rounded-2xl bg-white p-1 shadow-sm">
-        {([[
-          "waiting", `Chờ nhận (${groups.waiting.length})`
-        ], ["doing", `Đang làm (${groups.doing.length})`], ["recent", "Gần đây"]] as [Tab, string][]).map(([key, label]) =>
+        {([["waiting", `Chờ nhận (${groups.waiting.length})`], ["doing", `Đang làm (${groups.doing.length})`], ["recent", "Gần đây"]] as [Tab, string][]).map(([key, label]) =>
           <button key={key} type="button" onClick={() => setTab(key)} className={`rounded-xl px-2 py-3 text-sm font-black ${tab === key ? "bg-emerald-600 text-white" : "text-slate-600"}`}>{label}</button>)}
       </nav>
 
@@ -214,15 +215,15 @@ export default function AgentPortalPage() {
 
     {rejectOrder && <Modal title="Từ chối lệnh" onClose={() => setRejectOrder(null)}><div className="space-y-4"><p className="text-sm text-slate-600">Ghi rõ lý do để CSKH có thể điều phối lại đúng nơi.</p><textarea value={rejectReason} onChange={(e) => setRejectReason(e.target.value)} rows={4} placeholder="Ví dụ: Hôm nay không đủ nhân sự / ngoài phạm vi phục vụ..." className="w-full"/><button type="button" disabled={busy} onClick={() => void confirmReject()} className="w-full rounded-xl bg-rose-600 p-3 font-black text-white">Từ chối lệnh</button></div></Modal>}
 
-    {reportOrder && <Modal title={`Báo cáo ${reportOrder.orderCode}`} onClose={() => setReportOrder(null)} wide><div className="space-y-4">
+    {reportOrder && <Modal title={`Báo cáo ${reportOrder.orderCode}`} onClose={() => { setReportOrder(null); setReport(EMPTY_REPORT); setReportError(""); }} wide><div className="space-y-4">
       <label className="block"><span className="field-label">Công việc đã làm *</span><textarea rows={3} value={report.workDone} onChange={(e) => setReport({ ...report, workDone: e.target.value })} className="w-full"/></label>
       <label className="block"><span className="field-label">Vật tư đã thay</span><input value={report.products} onChange={(e) => setReport({ ...report, products: e.target.value })} placeholder="Tên vật tư, số lượng" className="w-full"/></label>
       {isCoreService(reportOrder.serviceType) && <><Photo label="Ảnh lõi cũ *" value={report.oldCorePhoto} onFile={(f) => void upload(f, "oldCorePhoto")}/><Photo label="Ảnh lõi mới *" value={report.newCorePhoto} onFile={(f) => void upload(f, "newCorePhoto")}/></>}
       <Photo label="Ảnh máy sau khi làm xong *" value={report.finalPhoto} onFile={(f) => void upload(f, "finalPhoto")}/>
       <div className="grid grid-cols-2 gap-3"><label><span className="field-label">TDS trước *</span><input type="number" min="0" inputMode="decimal" value={report.tdsBefore} onChange={(e) => setReport({ ...report, tdsBefore: e.target.value })}/></label><label><span className="field-label">TDS sau *</span><input type="number" min="0" inputMode="decimal" value={report.tdsAfter} onChange={(e) => setReport({ ...report, tdsAfter: e.target.value })}/></label></div>
-      <label className="block"><span className="field-label">Tên khách xác nhận *</span><input value={report.signature} onChange={(e) => setReport({ ...report, signature: e.target.value })} className="w-full"/></label>
+      <ServiceSignatureCapture customerName={report.customerConfirmationName} signatureImage={report.signatureImage} onCustomerNameChange={(value)=>setReport((current)=>({...current,customerConfirmationName:value}))} onSignatureImageChange={(value)=>setReport((current)=>({...current,signatureImage:value}))} disabled={busy}/>
       {reportError && <div className="rounded-xl bg-rose-50 p-3 text-sm font-bold text-rose-700">{reportError}</div>}
-      <button type="button" disabled={busy} onClick={() => void submitReport()} className="btn-primary w-full p-3 font-black text-white">{busy ? "Đang gửi..." : "Gửi báo cáo hoàn thành"}</button>
+      <button type="button" disabled={busy} onClick={() => void submitReport()} className="btn-primary w-full p-3 font-black text-white disabled:opacity-50">{busy ? "Đang gửi..." : "Gửi báo cáo hoàn thành"}</button>
     </div></Modal>}
   </main>;
 }
@@ -231,5 +232,5 @@ function Modal({ title, children, onClose, wide = false }: { title: string; chil
   return <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-3"><div className={`max-h-[94vh] w-full overflow-y-auto rounded-3xl bg-white p-5 ${wide ? "max-w-2xl" : "max-w-md"}`}><div className="mb-5 flex items-center justify-between"><h3 className="text-xl font-black">{title}</h3><button type="button" onClick={onClose} className="icon-button"><Icon name="x" size={18}/></button></div>{children}</div></div>;
 }
 function Photo({ label, value, onFile }: { label: string; value: string; onFile: (file: File) => void }) {
-  return <label className="block"><span className="field-label">{label}</span><input type="file" accept="image/*" capture="environment" onChange={(e: ChangeEvent<HTMLInputElement>) => { const file = e.target.files?.[0]; if (file) onFile(file); }}/>{value && <a href={value} target="_blank" className="mt-1 block text-sm font-bold text-emerald-700">Xem ảnh đã chọn</a>}</label>;
+  return <label className="block"><span className="field-label">{label}</span><input type="file" accept="image/*" capture="environment" onChange={(e: ChangeEvent<HTMLInputElement>) => { const file = e.target.files?.[0]; if (file) onFile(file); }}/>{value && <a href={value} target="_blank" rel="noreferrer" className="mt-1 block text-sm font-bold text-emerald-700">Xem ảnh đã chọn</a>}</label>;
 }
