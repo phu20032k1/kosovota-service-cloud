@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getActiveUser } from "@/lib/auth";
+import { getActiveUser, getCustomerSession } from "@/lib/auth";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { storeUpload, UPLOAD_TYPES } from "@/lib/storage";
 
 const MAX_IMAGE = 8 * 1024 * 1024;
 const MAX_VIDEO = 40 * 1024 * 1024;
 const PUBLIC_PURPOSES = new Set(["dealer-registration"]);
-const INTERNAL_ROLES = new Set(["SUPER_ADMIN", "ADMIN", "CSKH", "DEALER", "CTV", "KTV"]);
+const CUSTOMER_PURPOSES = new Set(["customer-repair"]);
+const INTERNAL_ROLES = new Set(["SUPER_ADMIN", "ADMIN", "CSKH", "SALES_MANAGER", "DIRECTOR", "DEALER", "CTV", "KTV"]);
 
 export async function POST(request: NextRequest) {
   try {
@@ -26,7 +27,16 @@ export async function POST(request: NextRequest) {
     }
 
     const isPublicRegistration = PUBLIC_PURPOSES.has(purpose);
-    if (!isPublicRegistration) {
+    const isCustomerUpload = CUSTOMER_PURPOSES.has(purpose);
+    if (isCustomerUpload) {
+      const customer = await getCustomerSession(request);
+      if (!customer) {
+        return NextResponse.json({ success: false, message: "Cần xác thực khách hàng để tải ảnh." }, { status: 401 });
+      }
+      if (!file.type.startsWith("image/")) {
+        return NextResponse.json({ success: false, message: "Yêu cầu sửa chữa chỉ nhận tệp ảnh." }, { status: 415 });
+      }
+    } else if (!isPublicRegistration) {
       const auth = await getActiveUser(request);
       if (!auth || !INTERNAL_ROLES.has(auth.user.role)) {
         return NextResponse.json({ success: false, message: "Cần đăng nhập để tải tệp." }, { status: 401 });
