@@ -4,7 +4,7 @@ import { normalizePhone } from "@/lib/phone";
 import { hashPassword, verifyPassword } from "@/lib/password";
 import { createSessionToken } from "@/lib/session-token";
 import { SESSION_COOKIE } from "@/lib/auth";
-import { canRoleAccessPath, homeForRole, isInternalRole } from "@/lib/access-control";
+import { canRoleAccessPath, homeForRole, isInternalRole, type InternalRole } from "@/lib/access-control";
 import { checkDistributedRateLimit } from "@/lib/rate-limit";
 import { mustChangePassword } from "@/lib/password-change-state";
 
@@ -38,16 +38,17 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    const internalRole: InternalRole = isInternalRole(user.role) ? user.role : requestedRole;
     if (!user.password.startsWith("scrypt$")) await prisma.user.update({ where: { id: user.id }, data: { password: hashPassword(password) } });
-    const token = await createSessionToken({ sub: user.id, phone: user.phone, name: user.name, role: user.role, dealerCode: user.dealerCode, provinceScope: user.provinceScope });
+    const token = await createSessionToken({ sub: user.id, phone: user.phone, name: user.name, role: internalRole, dealerCode: user.dealerCode, provinceScope: user.provinceScope });
     const forcePasswordChange = await mustChangePassword(user.id);
     const redirect = forcePasswordChange
       ? "/change-password"
-      : requestedNext && canRoleAccessPath(user.role, requestedNext.split("?")[0]) ? requestedNext : homeForRole(user.role);
+      : requestedNext && canRoleAccessPath(internalRole, requestedNext.split("?")[0]) ? requestedNext : homeForRole(internalRole);
 
-    const response = NextResponse.json({ success: true, user: { name: user.name, phone: user.phone, role: user.role, dealerCode: user.dealerCode }, redirect, mustChangePassword: forcePasswordChange });
+    const response = NextResponse.json({ success: true, user: { name: user.name, phone: user.phone, role: internalRole, dealerCode: user.dealerCode }, redirect, mustChangePassword: forcePasswordChange });
     response.cookies.set(SESSION_COOKIE, token, { httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", path: "/", maxAge: 60 * 60 * 12 });
-    await prisma.adminLog.create({ data: { userId: user.id, action: "LOGIN", target: user.role } });
+    await prisma.adminLog.create({ data: { userId: user.id, action: "LOGIN", target: internalRole } });
     return response;
   } catch (error) {
     console.error("POST /api/auth/login failed", error);
