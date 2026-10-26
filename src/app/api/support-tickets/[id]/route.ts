@@ -62,8 +62,15 @@ export async function PUT(request: NextRequest, { params }: Params) {
     if (ensureServiceOrder && !current.machine) return NextResponse.json({ success: false, message: "Ticket chưa gắn máy nên chưa thể tạo lệnh Điều phối." }, { status: 400 });
     const orderCode = ensureServiceOrder && current.machine ? await createOrderCode(current.machine.provinceCode || "01") : null;
 
+    let automaticTicketStatus: string | undefined;
+    if (!status && requestedDealerId !== undefined) {
+      if (requestedDealerId && current.status === "NEW") automaticTicketStatus = "ASSIGNED";
+      if (!requestedDealerId && current.status === "ASSIGNED") automaticTicketStatus = "NEW";
+    }
+
     const updateData: Record<string, unknown> = {
       ...(status ? { status, resolvedAt: ["RESOLVED", "CLOSED"].includes(status) ? new Date() : null } : {}),
+      ...(automaticTicketStatus ? { status: automaticTicketStatus } : {}),
       ...(!dealerOperator && typeof body.priority === "string" ? { priority: body.priority } : {}),
       ...(!dealerOperator && auth.user.role !== "CSKH" && "assigneeId" in body ? { assigneeId: body.assigneeId || null } : {}),
       ...(!dealerOperator && auth.user.role === "CSKH" ? { assigneeId: auth.user.id } : {}),
@@ -81,15 +88,19 @@ export async function PUT(request: NextRequest, { params }: Params) {
       }
       const ticket = await tx.supportTicket.update({ where: { id }, data: updateData });
       if (linkedOrderId) {
-        const mappedStatus = status ? orderStatusFromTicket(status, Boolean(nextDealerId)) : undefined;
+        let mappedStatus = status ? orderStatusFromTicket(status, Boolean(nextDealerId)) : undefined;
+        if (!status && requestedDealerId !== undefined && current.serviceOrder) {
+          if (requestedDealerId && current.serviceOrder.status === "NEW") mappedStatus = "ASSIGNED";
+          if (!requestedDealerId && current.serviceOrder.status === "ASSIGNED") mappedStatus = "NEW";
+        }
         await tx.serviceOrder.update({ where: { id: linkedOrderId }, data: { ...(requestedDealerId !== undefined ? { dealerId: requestedDealerId } : {}), ...(mappedStatus ? { status: mappedStatus } : {}), ...(body.dueAt ? { dueDate: new Date(body.dueAt) } : {}) } });
       }
       if (typeof body.message === "string" && body.message.trim()) await tx.ticketMessage.create({ data: { ticketId: id, authorId: auth.user.id, authorName: auth.user.name, message: body.message.trim(), attachment: typeof body.attachment === "string" ? body.attachment || null : null, isInternal: Boolean(body.isInternal) && !dealerOperator } });
-      if (ticket.customerId && (status || ensureServiceOrder || (typeof body.message === "string" && body.message.trim()))) await tx.customerActivity.create({ data: { customerId: ticket.customerId, type: ensureServiceOrder ? "DISPATCH_CREATED" : status ? "TICKET_STATUS" : "TICKET_MESSAGE", summary: ensureServiceOrder ? `${ticket.ticketCode} đã chuyển sang Điều phối` : status ? `${ticket.ticketCode} chuyển trạng thái ${status}` : `Trao đổi tại ${ticket.ticketCode}`, detail: typeof body.message === "string" ? body.message.trim() || null : null, userId: auth.user.id } });
+      if (ticket.customerId && (status || automaticTicketStatus || ensureServiceOrder || (typeof body.message === "string" && body.message.trim()))) await tx.customerActivity.create({ data: { customerId: ticket.customerId, type: ensureServiceOrder ? "DISPATCH_CREATED" : (status || automaticTicketStatus) ? "TICKET_STATUS" : "TICKET_MESSAGE", summary: ensureServiceOrder ? `${ticket.ticketCode} đã chuyển sang Điều phối` : (status || automaticTicketStatus) ? `${ticket.ticketCode} chuyển trạng thái ${status || automaticTicketStatus}` : `Trao đổi tại ${ticket.ticketCode}`, detail: typeof body.message === "string" ? body.message.trim() || null : null, userId: auth.user.id } });
       return tx.supportTicket.findUnique({ where: { id }, include: { customer: true, machine: true, dealer: true, assignee: true, serviceOrder: { include: { dealer: true, technician: true, reports: true } }, messages: { orderBy: { createdAt: "asc" } } } });
     });
-    await writeAudit({ request, userId: auth.user.id, action: "UPDATE_SUPPORT_TICKET", target: current.ticketCode, detail: { status, assigneeId: auth.user.role === "CSKH" ? auth.user.id : body.assigneeId, dealerId: body.dealerId, ensuredDispatch: ensureServiceOrder } });
-    return NextResponse.json({ success: true, message: ensureServiceOrder ? "Đã tạo và liên kết lệnh Điều phối." : "Đã cập nhật yêu cầu và đồng bộ lệnh Điều phối.", data: updated });
+    await writeAudit({ request, userId: auth.user.id, action: "UPDATE_SUPPORT_TICKET", target: current.ticketCode, detail: { status: status || automaticTicketStatus, assigneeId: auth.user.role === "CSKH" ? auth.user.id : body.assigneeId, dealerId: body.dealerId, ensuredDispatch: ensureServiceOrder } });
+    return NextResponse.json({ success: true, message: ensureServiceOrder ? "Đã tạo và liên kết lệnh Điều phối." : requestedDealerId !== undefined ? (requestedDealerId ? "Đã giao đại lý và đồng bộ lệnh Điều phối." : "Đã thu hồi đại lý và đưa lệnh về chờ điều phối.") : "Đã cập nhật yêu cầu và đồng bộ lệnh Điều phối.", data: updated });
   } catch (error) {
     console.error("PUT /api/support-tickets/[id] failed", error);
     return NextResponse.json({ success: false, message: databaseErrorMessage(error, "Không cập nhật được yêu cầu hỗ trợ.") }, { status: 500 });
