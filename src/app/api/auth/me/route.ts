@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getActiveUser } from "@/lib/auth";
+import { mustChangePassword } from "@/lib/password-change-state";
 
 export async function GET(request: NextRequest) {
   const auth = await getActiveUser(request);
-  if (!auth) {
-    return NextResponse.json({ success: false, message: "Chưa đăng nhập." }, { status: 401 });
-  }
-
+  if (!auth) return NextResponse.json({ success: false, message: "Chưa đăng nhập." }, { status: 401 });
+  const forcePasswordChange = await mustChangePassword(auth.user.id);
   return NextResponse.json({
     success: true,
     user: {
@@ -16,6 +15,7 @@ export async function GET(request: NextRequest) {
       role: auth.user.role,
       dealerCode: auth.user.dealerCode,
       provinceScope: auth.user.provinceScope,
+      mustChangePassword: forcePasswordChange,
     },
   });
 }
