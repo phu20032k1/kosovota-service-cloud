@@ -31,14 +31,10 @@ function prismaCode(error: unknown) {
     : "";
 }
 
-async function serializableTransaction<T>(
-  operation: (tx: Prisma.TransactionClient) => Promise<T>,
-): Promise<T> {
+async function serializableTransaction<T>(operation: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
-      return await prisma.$transaction(operation, {
-        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
-      });
+      return await prisma.$transaction(operation, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     } catch (error) {
       if (prismaCode(error) === "P2034" && attempt < 2) continue;
       throw error;
@@ -81,82 +77,60 @@ export async function POST(request: NextRequest, { params }: Params) {
     const newCorePhoto = typeof body.newCorePhoto === "string" ? body.newCorePhoto.trim() : "";
     const finalPhoto = typeof body.finalPhoto === "string" ? body.finalPhoto.trim() : "";
     const signature = typeof body.signature === "string" ? body.signature.trim() : "";
-    if (!oldCorePhoto || !newCorePhoto || !finalPhoto || !signature) {
-      return NextResponse.json({ success: false, message: "Cần đủ ảnh lõi cũ, ảnh lõi mới, ảnh toàn cảnh sau hoàn thành và chữ ký khách hàng." }, { status: 400 });
+    const coreReplacement = body.coreReplacement === true || /thay\s*lõi|lõi|filter/i.test(order.serviceType);
+    const tdsBefore = Number(body.tdsBefore);
+    const tdsAfter = Number(body.tdsAfter);
+    if (!finalPhoto || !signature) {
+      return NextResponse.json({ success: false, message: "Cần ảnh máy sau khi hoàn thành và tên khách hàng xác nhận." }, { status: 400 });
+    }
+    if (coreReplacement && (!oldCorePhoto || !newCorePhoto)) {
+      return NextResponse.json({ success: false, message: "Công việc thay lõi bắt buộc có ảnh lõi cũ và ảnh lõi mới." }, { status: 400 });
+    }
+    if (!Number.isFinite(tdsBefore) || !Number.isFinite(tdsAfter) || tdsBefore < 0 || tdsAfter < 0) {
+      return NextResponse.json({ success: false, message: "TDS trước và sau phải là số hợp lệ." }, { status: 400 });
     }
     if (materials.length && !order.dealerId) {
       return NextResponse.json({ success: false, message: "Lệnh chưa được gắn đại lý nên chưa thể xuất vật tư." }, { status: 400 });
     }
 
     const movementCodes: string[] = [];
-    for (let index = 0; index < materials.length; index += 1) {
-      movementCodes.push(await createMovementCode());
-    }
+    for (let index = 0; index < materials.length; index += 1) movementCodes.push(await createMovementCode());
 
     const result = await serializableTransaction(async (tx) => {
       const currentOrder = await tx.serviceOrder.findUnique({
         where: { id },
-        select: {
-          status: true,
-          reports: { select: { id: true }, take: 1 },
-        },
+        select: { status: true, reports: { select: { id: true }, take: 1 } },
       });
       if (!currentOrder) throw new Error("Không tìm thấy lệnh dịch vụ.");
-      if (currentOrder.status === "COMPLETED" || currentOrder.reports.length) {
-        throw new Error("Lệnh này đã có báo cáo hoàn thành.");
-      }
-      if (!["ACCEPTED", "IN_PROGRESS"].includes(currentOrder.status)) {
-        throw new Error("Cần nhận và bắt đầu lệnh trước khi báo cáo.");
-      }
+      if (currentOrder.status === "COMPLETED" || currentOrder.reports.length) throw new Error("Lệnh này đã có báo cáo hoàn thành.");
+      if (!["ACCEPTED", "IN_PROGRESS"].includes(currentOrder.status)) throw new Error("Cần nhận và bắt đầu lệnh trước khi báo cáo.");
 
       let materialSummary = "";
       const createdMovements: { movementCode: string; itemName: string; quantity: number; unitCost: number }[] = [];
 
       if (materials.length) {
         const warehouse = await tx.warehouse.findUnique({ where: { dealerId: order.dealerId! } });
-        if (!warehouse || !warehouse.active) {
-          throw new Error("Đại lý chưa có kho vật tư đang hoạt động. Vui lòng liên hệ Admin tạo hoặc mở kho trước.");
-        }
+        if (!warehouse || !warehouse.active) throw new Error("Đại lý chưa có kho vật tư đang hoạt động. Vui lòng liên hệ Admin tạo hoặc mở kho trước.");
 
-        const items = await tx.inventoryItem.findMany({
-          where: { id: { in: materials.map((row) => row.itemId) }, active: true },
-        });
+        const items = await tx.inventoryItem.findMany({ where: { id: { in: materials.map((row) => row.itemId) }, active: true } });
         if (items.length !== materials.length) throw new Error("Có vật tư không tồn tại hoặc đã ngừng sử dụng.");
         const itemMap = new Map((items as InventoryItemRecord[]).map((item) => [item.id, item]));
 
         for (let index = 0; index < materials.length; index += 1) {
           const material = materials[index];
           const item = itemMap.get(material.itemId)!;
-          const balance = await tx.stockBalance.findUnique({
-            where: { warehouseId_itemId: { warehouseId: warehouse.id, itemId: item.id } },
-          });
+          const balance = await tx.stockBalance.findUnique({ where: { warehouseId_itemId: { warehouseId: warehouse.id, itemId: item.id } } });
           const available = Math.max(0, (balance?.quantity || 0) - (balance?.reserved || 0));
-          if (!balance || available < material.quantity) {
-            throw new Error(`Tồn khả dụng của “${item.name}” không đủ. Hiện còn ${available} ${item.unit}.`);
-          }
-          await tx.stockBalance.update({
-            where: { id: balance.id },
-            data: { quantity: { decrement: material.quantity } },
-          });
+          if (!balance || available < material.quantity) throw new Error(`Tồn khả dụng của “${item.name}” không đủ. Hiện còn ${available} ${item.unit}.`);
+          await tx.stockBalance.update({ where: { id: balance.id }, data: { quantity: { decrement: material.quantity } } });
           await tx.stockMovement.create({
             data: {
-              movementCode: movementCodes[index],
-              type: "SERVICE_USE",
-              itemId: item.id,
-              fromWarehouseId: warehouse.id,
-              serviceOrderId: order.id,
-              quantity: material.quantity,
-              unitCost: item.costPrice,
-              note: `Xuất tự động khi hoàn thành lệnh ${order.orderCode}`,
-              createdById: auth.user.id,
+              movementCode: movementCodes[index], type: "SERVICE_USE", itemId: item.id, fromWarehouseId: warehouse.id,
+              serviceOrderId: order.id, quantity: material.quantity, unitCost: item.costPrice,
+              note: `Xuất tự động khi hoàn thành lệnh ${order.orderCode}`, createdById: auth.user.id,
             },
           });
-          createdMovements.push({
-            movementCode: movementCodes[index],
-            itemName: item.name,
-            quantity: material.quantity,
-            unitCost: item.costPrice,
-          });
+          createdMovements.push({ movementCode: movementCodes[index], itemName: item.name, quantity: material.quantity, unitCost: item.costPrice });
         }
         materialSummary = materials.map((row) => {
           const item = itemMap.get(row.itemId)!;
@@ -164,9 +138,10 @@ export async function POST(request: NextRequest, { params }: Params) {
         }).join(", ");
       }
 
-      const products = typeof body.products === "string" && body.products.trim()
-        ? body.products.trim()
-        : materialSummary || null;
+      const products = typeof body.products === "string" && body.products.trim() ? body.products.trim() : materialSummary || null;
+      const suppliedNote = typeof body.note === "string" ? body.note.trim() : "";
+      const tdsLine = `TDS trước: ${tdsBefore} ppm | TDS sau: ${tdsAfter} ppm`;
+      const note = suppliedNote.includes("TDS trước:") ? suppliedNote : [suppliedNote, tdsLine].filter(Boolean).join("\n");
       const report = await tx.serviceReport.create({
         data: {
           orderId: order.id,
@@ -174,63 +149,34 @@ export async function POST(request: NextRequest, { params }: Params) {
           dealerCode: order.dealer?.dealerCode || auth.user.dealerCode || null,
           serviceType: typeof body.serviceType === "string" ? body.serviceType : order.serviceType,
           products,
-          oldCorePhoto,
-          newCorePhoto,
+          oldCorePhoto: oldCorePhoto || null,
+          newCorePhoto: newCorePhoto || null,
           finalPhoto,
           signature,
-          note: typeof body.note === "string" ? body.note || null : null,
+          note,
         },
       });
       await tx.serviceOrder.update({ where: { id }, data: { status: "COMPLETED" } });
-      if (order.maintenanceScheduleId) {
-        await tx.maintenanceSchedule.update({
-          where: { id: order.maintenanceScheduleId },
-          data: { status: "COMPLETED" },
-        });
-      }
+      if (order.maintenanceScheduleId) await tx.maintenanceSchedule.update({ where: { id: order.maintenanceScheduleId }, data: { status: "COMPLETED" } });
 
       const linkedTicket = await tx.supportTicket.findUnique({ where: { serviceOrderId: order.id } });
       if (linkedTicket) {
         const resolvedAt = new Date();
-        await tx.supportTicket.update({
-          where: { id: linkedTicket.id },
-          data: { status: "RESOLVED", resolvedAt },
-        });
+        await tx.supportTicket.update({ where: { id: linkedTicket.id }, data: { status: "RESOLVED", resolvedAt } });
         await tx.ticketMessage.create({
-          data: {
-            ticketId: linkedTicket.id,
-            authorId: auth.user.id,
-            authorName: auth.user.name,
-            message: `Đã sửa xong. Báo cáo hoàn thành lệnh ${order.orderCode} đã được ghi nhận.`,
-            isInternal: false,
-          },
+          data: { ticketId: linkedTicket.id, authorId: auth.user.id, authorName: auth.user.name, message: `Đã sửa xong. Báo cáo hoàn thành lệnh ${order.orderCode} đã được ghi nhận.`, isInternal: false },
         });
       }
-
       return { report, movements: createdMovements };
     });
 
-    await writeAudit({
-      request,
-      userId: auth.user.id,
-      action: "COMPLETE_SERVICE_ORDER",
-      target: order.orderCode,
-      detail: { reportId: result.report.id, materials: result.movements },
-    });
+    await writeAudit({ request, userId: auth.user.id, action: "COMPLETE_SERVICE_ORDER", target: order.orderCode, detail: { reportId: result.report.id, materials: result.movements, tdsBefore, tdsAfter, coreReplacement } });
     if (order.machine.customer) {
-      await queueServiceCompletedEmail({
-        customer: order.machine.customer,
-        orderCode: order.orderCode,
-        machineId: order.machineId,
-        serviceType: order.serviceType,
-        products: result.report.products,
-      });
+      await queueServiceCompletedEmail({ customer: order.machine.customer, orderCode: order.orderCode, machineId: order.machineId, serviceType: order.serviceType, products: result.report.products });
     }
     return NextResponse.json({
       success: true,
-      message: materials.length
-        ? `Đã hoàn thành lệnh, cập nhật yêu cầu thành “Đã sửa” và xuất ${materials.length} loại vật tư khỏi kho.`
-        : "Đã gửi báo cáo, hoàn thành lệnh và cập nhật yêu cầu thành “Đã sửa”.",
+      message: materials.length ? `Đã hoàn thành lệnh, cập nhật yêu cầu thành “Đã sửa” và xuất ${materials.length} loại vật tư khỏi kho.` : "Đã gửi báo cáo, hoàn thành lệnh và cập nhật yêu cầu thành “Đã sửa”.",
       data: result,
     });
   } catch (error) {
@@ -238,9 +184,6 @@ export async function POST(request: NextRequest, { params }: Params) {
     console.error("POST report failed", error);
     const isConflict = /đã có báo cáo|giao dịch đồng thời/i.test(message);
     const isBusinessError = /không đủ|chưa có kho|không tồn tại|ngừng sử dụng|cần nhận|đang hoạt động/i.test(message);
-    return NextResponse.json(
-      { success: false, message },
-      { status: isConflict ? 409 : isBusinessError ? 400 : 500 },
-    );
+    return NextResponse.json({ success: false, message }, { status: isConflict ? 409 : isBusinessError ? 400 : 500 });
   }
 }
