@@ -17,6 +17,8 @@ const ADMIN_NAV: NavItem[] = [
   { href: "/admin/customers", label: "Khách hàng", icon: "users" },
   { href: "/admin/dealers", label: "Đại lý", icon: "store" },
   { href: "/admin/users", label: "Tài khoản", icon: "users" },
+  { href: "/admin/leadership-users", label: "Kinh doanh & Giám đốc", icon: "shield" },
+  { href: "/admin/bug-reports", label: "Báo lỗi nhân viên", icon: "alert" },
   { href: "/admin/tickets", label: "Yêu cầu", icon: "alert" },
   { href: "/admin/inventory", label: "Kho", icon: "package" },
   { href: "/admin/payments", label: "Đối soát", icon: "wallet" },
