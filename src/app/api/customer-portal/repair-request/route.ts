@@ -14,7 +14,7 @@ function normalizePhones(value?: string | null) {
     .filter(Boolean);
 }
 
-function isStoredImageUrl(value: unknown) {
+function isStoredImageUrl(value: unknown): value is string {
   if (typeof value !== "string") return false;
   const url = value.trim();
   if (!url) return false;
@@ -30,11 +30,11 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const body = await request.json();
+    const body = await request.json() as Record<string, unknown>;
     const machineId = typeof body.machineId === "string" ? body.machineId.trim() : "";
     const description = typeof body.description === "string" ? body.description.trim() : "";
-    const rawImages = Array.isArray(body.imageUrls) ? body.imageUrls : [];
-    const imageUrls = Array.from(new Set(rawImages.filter(isStoredImageUrl).map((item) => String(item).trim()))).slice(0, MAX_IMAGES);
+    const rawImages: unknown[] = Array.isArray(body.imageUrls) ? body.imageUrls : [];
+    const imageUrls = Array.from(new Set(rawImages.filter(isStoredImageUrl).map((item) => item.trim()))).slice(0, MAX_IMAGES);
 
     if (!machineId) {
       return NextResponse.json({ success: false, message: "Chưa chọn máy cần sửa chữa." }, { status: 400 });
