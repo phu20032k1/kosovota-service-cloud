@@ -3,7 +3,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { hasRole } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
-const REPORT_ROLES = ["ADMIN", "CSKH", "SALES_MANAGER", "DIRECTOR", "DEALER", "CTV", "KTV"];
+const REPORT_ROLES = ["SUPER_ADMIN", "ADMIN", "CSKH", "SALES_MANAGER", "DIRECTOR", "DEALER", "CTV", "KTV"];
+const BUG_ADMIN_ROLES = ["SUPER_ADMIN", "ADMIN"];
 function parseDetail(value: string | null) { try { return value ? JSON.parse(value) : {}; } catch { return {}; } }
 
 export async function POST(request: NextRequest) {
@@ -29,8 +30,8 @@ export async function POST(request: NextRequest) {
 }
 
 export async function GET(request: NextRequest) {
-  const auth = await hasRole(request, ["ADMIN"]);
-  if (!auth) return NextResponse.json({ success: false, message: "Chỉ Admin được xem báo lỗi." }, { status: 403 });
+  const auth = await hasRole(request, BUG_ADMIN_ROLES);
+  if (!auth) return NextResponse.json({ success: false, message: "Chỉ Quản trị được xem báo lỗi." }, { status: 403 });
   const [reports, statuses] = await Promise.all([
     prisma.adminLog.findMany({ where: { action: "BUG_REPORT" }, orderBy: { createdAt: "desc" }, take: 300 }),
     prisma.adminLog.findMany({ where: { action: "BUG_REPORT_STATUS" }, orderBy: { createdAt: "asc" }, take: 1000 }),
@@ -40,8 +41,8 @@ export async function GET(request: NextRequest) {
 }
 
 export async function PATCH(request: NextRequest) {
-  const auth = await hasRole(request, ["ADMIN"]);
-  if (!auth) return NextResponse.json({ success: false, message: "Chỉ Admin được cập nhật báo lỗi." }, { status: 403 });
+  const auth = await hasRole(request, BUG_ADMIN_ROLES);
+  if (!auth) return NextResponse.json({ success: false, message: "Chỉ Quản trị được cập nhật báo lỗi." }, { status: 403 });
   try {
     const body = await request.json();
     const id = typeof body.id === "string" ? body.id.trim() : "";
