@@ -8,15 +8,43 @@ export default function ForcePasswordChangeGuard() {
   const router = useRouter();
 
   useEffect(() => {
-    if (pathname === "/change-password" || pathname === "/login" || pathname.startsWith("/customer-portal")) return;
+    if (pathname === "/login" || pathname.startsWith("/customer-portal")) return;
     let cancelled = false;
-    fetch("/api/auth/me", { cache: "no-store" })
-      .then(async (response) => ({ response, result: await response.json() }))
-      .then(({ response, result }) => {
-        if (!cancelled && response.ok && result.success && result.user?.mustChangePassword) router.replace("/change-password");
-      })
-      .catch(() => undefined);
-    return () => { cancelled = true; };
+
+    const checkSession = async () => {
+      try {
+        const response = await fetch("/api/auth/me", { cache: "no-store" });
+        const result = await response.json().catch(() => ({}));
+        if (cancelled) return;
+        if (!response.ok || !result.success) {
+          router.replace("/login");
+          router.refresh();
+          return;
+        }
+        if (pathname !== "/change-password" && result.user?.mustChangePassword) {
+          router.replace("/change-password");
+          return;
+        }
+        if (pathname === "/change-password" && !result.user?.mustChangePassword) {
+          router.replace("/");
+        }
+      } catch {
+        // Lỗi mạng tạm thời không tự đăng xuất người dùng.
+      }
+    };
+
+    void checkSession();
+    const timer = window.setInterval(() => void checkSession(), 10_000);
+    const onVisible = () => { if (document.visibilityState === "visible") void checkSession(); };
+    window.addEventListener("focus", checkSession);
+    document.addEventListener("visibilitychange", onVisible);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      window.removeEventListener("focus", checkSession);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [pathname, router]);
 
   return null;
