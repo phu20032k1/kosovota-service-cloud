@@ -17,7 +17,7 @@ const ROLE_OPTIONS: RoleOption[] = [
   { value: "ADMIN", title: "Quản trị hệ thống", description: "Dữ liệu, tài khoản, cấu hình và vận hành.", icon: "shield", helper: "Quản trị hệ thống có quyền cấu hình và quản lý tài khoản vận hành." },
   { value: "CSKH", title: "Chăm sóc khách hàng", description: "Chăm sóc, điều phối và theo dõi yêu cầu.", icon: "phone", helper: "CSKH làm việc trong phạm vi dữ liệu được giao." },
   { value: "SALES_MANAGER", title: "Trưởng phòng Kinh doanh", description: "Cơ hội bán lõi, đại lý và hiệu suất kinh doanh.", icon: "activity", helper: "Quản lý cơ hội bán lõi, hồ sơ đối tác và hiệu suất đại lý." },
-  { value: "DIRECTOR", title: "Giám đốc", description: "Báo cáo điều hành chỉ xem và xuất dữ liệu.", icon: "chart-bar", helper: "Giám đốc chỉ xem báo cáo, bản đồ và xuất dữ liệu; không sửa dữ liệu vận hành." },
+  { value: "DIRECTOR", title: "Giám đốc", description: "Báo cáo điều hành chỉ xem và xuất dữ liệu.", icon: "file", helper: "Giám đốc chỉ xem báo cáo, bản đồ và xuất dữ liệu; không sửa dữ liệu vận hành." },
   { value: "DEALER", title: "Đại lý", description: "Nhận lệnh, giao KTV, hồ sơ và công dịch vụ.", icon: "store", helper: "Đại lý chỉ thấy lệnh và dữ liệu thuộc đơn vị của mình." },
   { value: "CTV", title: "CTV kỹ thuật", description: "Nhận lệnh và tự thực hiện dịch vụ.", icon: "users", helper: "CTV nhận lệnh, kích hoạt máy và báo cáo dịch vụ theo quyền được giao." },
   { value: "KTV", title: "Kỹ thuật viên", description: "Làm lệnh đại lý giao và gửi báo cáo.", icon: "wrench", helper: "KTV chỉ thấy các lệnh được giao trực tiếp cho mình." },
