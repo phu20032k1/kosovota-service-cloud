@@ -26,26 +26,28 @@ export async function POST(request: NextRequest) {
     const name = clean(body.name);
     const phone = normalizePhone(body.phone);
     const email = clean(body.email).toLowerCase();
-    if (!name || !isValidVietnamPhone(phone) || !/^\S+@\S+\.\S+$/.test(email)) {
-      return NextResponse.json({ success: false, message: "Vui lòng nhập họ tên, số điện thoại Việt Nam và email hợp lệ." }, { status: 400 });
+    if (!name || !isValidVietnamPhone(phone) || (email && !/^\S+@\S+\.\S+$/.test(email))) {
+      return NextResponse.json({ success: false, message: "Vui lòng nhập họ tên, số điện thoại Việt Nam và email hợp lệ nếu có." }, { status: 400 });
     }
     const existing = await prisma.user.findUnique({ where: { phone } });
     if (existing) return NextResponse.json({ success: false, message: "Số điện thoại đã thuộc một tài khoản khác." }, { status: 409 });
 
     const initialPassword = `Ksv@${randomBytes(4).toString("hex")}`;
     const member = await prisma.user.create({
-      data: { name, phone, email, password: hashPassword(initialPassword), role: "KTV", dealerCode: auth.user.dealerCode, active: true },
+      data: { name, phone, email: email || null, password: hashPassword(initialPassword), role: "KTV", dealerCode: auth.user.dealerCode, active: true },
       select: { id: true, name: true, phone: true, email: true, active: true, createdAt: true },
     });
     const accountMessage = `KOSOVOTA: Tài khoản KTV của bạn đã được tạo. SĐT: ${phone}. Mật khẩu ban đầu: ${initialPassword}. Hãy đổi mật khẩu sau khi đăng nhập.`;
-    await prisma.notification.createMany({
-      data: [
-        { phone, channel: "SMS", kind: "KTV_ACCOUNT", content: accountMessage },
-        { email, channel: "EMAIL", kind: "KTV_ACCOUNT", subject: "KOSOVOTA - Tài khoản kỹ thuật viên", content: accountMessage },
-      ],
-    });
-    await prisma.adminLog.create({ data: { userId: auth.user.id, action: "CREATE_KTV", target: member.id, detail: auth.user.dealerCode } });
-    return NextResponse.json({ success: true, message: "Đã tạo KTV. Thông tin đăng nhập đã được đưa vào hàng đợi Gmail và SMS.", data: member, initialPassword }, { status: 201 });
+    const notifications = [
+      { phone, channel: "SMS", kind: "KTV_ACCOUNT", content: accountMessage },
+      ...(email ? [{ email, channel: "EMAIL", kind: "KTV_ACCOUNT", subject: "KOSOVOTA - Tài khoản kỹ thuật viên", content: accountMessage }] : []),
+    ];
+    await prisma.$transaction([
+      prisma.notification.createMany({ data: notifications }),
+      prisma.adminLog.create({ data: { userId: auth.user.id, action: "CREATE_KTV", target: member.id, detail: auth.user.dealerCode } }),
+      prisma.adminLog.create({ data: { userId: member.id, action: "FORCE_PASSWORD_CHANGE", target: member.id, detail: "INITIAL_PASSWORD" } }),
+    ]);
+    return NextResponse.json({ success: true, message: "Đã tạo KTV. Hãy gửi mật khẩu tạm cho KTV.", data: member, initialPassword }, { status: 201 });
   } catch (error) {
     console.error("POST /api/dealer/team failed", error);
     return NextResponse.json({ success: false, message: "Không tạo được tài khoản KTV." }, { status: 500 });
@@ -63,19 +65,16 @@ export async function PATCH(request: NextRequest) {
 
     if (body.action === "RESET_PASSWORD") {
       const password = `Ksv@${randomBytes(4).toString("hex")}`;
-      await prisma.user.update({ where: { id }, data: { password: hashPassword(password) } });
-      const resetMessage = `KOSOVOTA: Mật khẩu KTV mới của bạn là ${password}. Hãy đổi mật khẩu sau khi đăng nhập.`;
-      await prisma.notification.createMany({
-        data: [
-          { phone: member.phone, channel: "SMS", kind: "PASSWORD_RESET", content: resetMessage },
-          ...(member.email ? [{ email: member.email, channel: "EMAIL", kind: "PASSWORD_RESET", subject: "KOSOVOTA - Đặt lại mật khẩu kỹ thuật viên", content: resetMessage }] : []),
-        ],
-      });
-      return NextResponse.json({ success: true, message: member.email ? "Đã đặt lại mật khẩu và đưa Gmail/SMS vào hàng đợi." : "Đã đặt lại mật khẩu và đưa SMS vào hàng đợi.", initialPassword: password });
+      await prisma.$transaction([
+        prisma.user.update({ where: { id }, data: { password: hashPassword(password) } }),
+        prisma.adminLog.create({ data: { userId: id, action: "FORCE_PASSWORD_CHANGE", target: id, detail: "PASSWORD_RESET" } }),
+      ]);
+      return NextResponse.json({ success: true, message: "Đã đặt lại mật khẩu. KTV phải đổi mật khẩu ở lần đăng nhập tiếp theo.", initialPassword: password });
     }
 
     if (typeof body.active !== "boolean") return NextResponse.json({ success: false, message: "Trạng thái không hợp lệ." }, { status: 400 });
     const updated = await prisma.user.update({ where: { id }, data: { active: body.active }, select: { id: true, name: true, phone: true, active: true } });
+    await prisma.adminLog.create({ data: { userId: auth.user.id, action: body.active ? "UNLOCK_KTV" : "LOCK_KTV", target: id } });
     return NextResponse.json({ success: true, message: body.active ? "Đã mở lại tài khoản KTV." : "Đã khóa tài khoản KTV.", data: updated });
   } catch (error) {
     console.error("PATCH /api/dealer/team failed", error);
