@@ -63,6 +63,20 @@ export async function POST(request: NextRequest) {
     const baseUrl = process.env.NEXT_PUBLIC_APP_URL || new URL(request.url).origin;
     const include = { dealer: true, machine: { include: { customer: true } } } as const;
     const sourceOrder = orderId ? await prisma.serviceOrder.findUnique({ where: { id: orderId }, include }) : null;
+
+    if (orderId && !sourceOrder) {
+      return NextResponse.json({ success: false, message: "Không tìm thấy lệnh dịch vụ." }, { status: 404 });
+    }
+    if (sourceOrder && sourceOrder.status === "COMPLETED") {
+      return NextResponse.json({ success: false, message: "Lệnh đã hoàn thành nên không thể đổi hoặc giao lại đại lý." }, { status: 409 });
+    }
+    if (sourceOrder && sourceOrder.status === "CANCELLED") {
+      return NextResponse.json({ success: false, message: "Lệnh đã hủy nên không thể điều phối đại lý." }, { status: 409 });
+    }
+    if (sourceOrder?.dueDate && sourceOrder.dueDate.getTime() > Date.now()) {
+      return NextResponse.json({ success: false, message: "Lệnh chưa tới thời điểm cần điều phối đại lý." }, { status: 409 });
+    }
+
     const machine = sourceOrder?.machine || (machineId ? await prisma.machine.findUnique({ where: { id: machineId }, include: { customer: true } }) : null);
     if (!machine) return NextResponse.json({ success: false, message: "Không tìm thấy máy cần điều phối." }, { status: 404 });
     if (auth.user.role === "CSKH" && !cskhScopeAllows(
@@ -79,6 +93,14 @@ export async function POST(request: NextRequest) {
     }
 
     const order = await prisma.$transaction(async (tx) => {
+      if (sourceOrder) {
+        const current = await tx.serviceOrder.findUnique({ where: { id: sourceOrder.id }, select: { status: true, dueDate: true } });
+        if (!current) throw new Error("ORDER_NOT_FOUND");
+        if (current.status === "COMPLETED") throw new Error("ORDER_COMPLETED");
+        if (current.status === "CANCELLED") throw new Error("ORDER_CANCELLED");
+        if (current.dueDate && current.dueDate.getTime() > Date.now()) throw new Error("ORDER_NOT_DUE");
+      }
+
       const updated = sourceOrder
         ? await tx.serviceOrder.update({ where: { id: sourceOrder.id }, data: { dealerId: dealer.id, status: "ASSIGNED", rejectReason: null, rejectedAt: null }, include })
         : await tx.serviceOrder.create({ data: { orderCode: newOrderCode!, machineId: machine.id, dealerId: dealer.id, customerName: machine.customer!.name, customerPhone: normalizePhone(machine.customer!.phone), address: machine.customer!.address, serviceType, status: "ASSIGNED" }, include });
@@ -103,6 +125,11 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ success: true, message: deliveryMessage, data: order, notificationDelivery: delivery });
   } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (message === "ORDER_NOT_FOUND") return NextResponse.json({ success: false, message: "Không tìm thấy lệnh dịch vụ." }, { status: 404 });
+    if (message === "ORDER_COMPLETED") return NextResponse.json({ success: false, message: "Lệnh đã hoàn thành nên không thể đổi hoặc giao lại đại lý." }, { status: 409 });
+    if (message === "ORDER_CANCELLED") return NextResponse.json({ success: false, message: "Lệnh đã hủy nên không thể điều phối đại lý." }, { status: 409 });
+    if (message === "ORDER_NOT_DUE") return NextResponse.json({ success: false, message: "Lệnh chưa tới thời điểm cần điều phối đại lý." }, { status: 409 });
     console.error("assign dealer failed", error);
     return NextResponse.json({ success: false, message: "Không giao được lệnh." }, { status: 500 });
   }
