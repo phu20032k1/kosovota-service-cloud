@@ -9,6 +9,20 @@ async function customerPhone(request: NextRequest) {
   return session?.purpose === "CUSTOMER_LOGIN" ? session.phone : null;
 }
 
+function normalizePhone(value?: string | null) {
+  return String(value || "").replace(/\D/g, "");
+}
+
+function sharedPhoneMatches(value: string | null | undefined, phone: string) {
+  const normalized = normalizePhone(phone);
+  if (!normalized) return false;
+  return String(value || "")
+    .split(/[\s,;|]+/)
+    .map(normalizePhone)
+    .filter(Boolean)
+    .includes(normalized);
+}
+
 export async function GET(request: NextRequest) {
   try {
     const phone = await customerPhone(request);
@@ -17,7 +31,7 @@ export async function GET(request: NextRequest) {
     }
 
     const customer = await prisma.customer.findUnique({ where: { phone } });
-    const machines = await prisma.machine.findMany({
+    const candidates = await prisma.machine.findMany({
       where: {
         OR: [
           { customer: { phone } },
@@ -29,9 +43,20 @@ export async function GET(request: NextRequest) {
         maintenanceSchedules: { orderBy: { dueDate: "asc" } },
         serviceReports: { orderBy: { createdAt: "desc" } },
         sosTickets: { orderBy: { createdAt: "desc" }, take: 5 },
+        supportTickets: {
+          where: { source: "CUSTOMER_PORTAL" },
+          orderBy: { createdAt: "desc" },
+          take: 10,
+          include: { messages: { orderBy: { createdAt: "asc" } }, serviceOrder: true },
+        },
       },
       orderBy: { installDate: "desc" },
     });
+    const normalizedSessionPhone = normalizePhone(phone);
+    const machines = candidates.filter((machine) => (
+      normalizePhone(machine.customer?.phone) === normalizedSessionPhone
+      || sharedPhoneMatches(machine.sharedPhones, normalizedSessionPhone)
+    ));
 
     const profile = customer || {
       id: phone,
