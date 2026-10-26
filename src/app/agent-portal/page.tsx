@@ -19,97 +19,96 @@ type Order = {
   dueDate?: string | null;
   serviceFee?: number | null;
   paymentStatus?: string;
+  area?: string;
+  distanceKm?: number | null;
   machine?: { id: string; buildingPhoto?: string | null; machinePhoto?: string | null };
   technician?: { id: string; name: string; phone: string } | null;
 };
 type Technician = { id: string; name: string; phone: string; active: boolean };
 type Dealer = { id: string; dealerCode: string; name: string; phone: string };
 type Summary = { revenue: number; paid: number; pending: number };
-type InventoryOption = { itemId: string; sku: string; name: string; unit: string; available: number };
-type MaterialRow = { itemId: string; quantity: number };
+type Tab = "waiting" | "doing" | "recent";
+type Report = { workDone: string; products: string; oldCorePhoto: string; newCorePhoto: string; finalPhoto: string; signature: string; tdsBefore: string; tdsAfter: string };
+const EMPTY_REPORT: Report = { workDone: "", products: "", oldCorePhoto: "", newCorePhoto: "", finalPhoto: "", signature: "", tdsBefore: "", tdsAfter: "" };
 
-function formatDate(value?: string | null) {
-  return value ? new Date(value).toLocaleDateString("vi-VN") : "Chưa xác định";
-}
-function money(value: number) {
-  return new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" }).format(value);
-}
+function money(value: number) { return new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND", maximumFractionDigits: 0 }).format(value); }
+function dateTime(value?: string | null) { return value ? new Date(value).toLocaleString("vi-VN", { dateStyle: "short", timeStyle: "short" }) : "Chưa hẹn"; }
+function isCoreService(value: string) { return /lõi|filter|thay lõi/i.test(value); }
 
 export default function AgentPortalPage() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [dealer, setDealer] = useState<Dealer | null>(null);
   const [summary, setSummary] = useState<Summary>({ revenue: 0, paid: 0, pending: 0 });
-  const [loading, setLoading] = useState(true);
-  const [notice, setNotice] = useState<{ kind: "success" | "error"; text: string } | null>(null);
-  const [reportOrder, setReportOrder] = useState<Order | null>(null);
-  const [rejectOrder, setRejectOrder] = useState<Order | null>(null);
-  const [rejectReason, setRejectReason] = useState("Bận");
-  const [report, setReport] = useState({ products: "", note: "", oldCorePhoto: "", newCorePhoto: "", finalPhoto: "", signature: "" });
-  const [uploading, setUploading] = useState(false);
-  const [submittingReport, setSubmittingReport] = useState(false);
-  const [reportError, setReportError] = useState("");
-  const [inventoryItems, setInventoryItems] = useState<InventoryOption[]>([]);
-  const [materials, setMaterials] = useState<MaterialRow[]>([]);
   const [technicians, setTechnicians] = useState<Technician[]>([]);
+  const [tab, setTab] = useState<Tab>("waiting");
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<{ kind: "success" | "error"; text: string } | null>(null);
+  const [acceptOrder, setAcceptOrder] = useState<Order | null>(null);
+  const [appointmentAt, setAppointmentAt] = useState("");
+  const [assignedTech, setAssignedTech] = useState("SELF");
+  const [rejectOrder, setRejectOrder] = useState<Order | null>(null);
+  const [rejectReason, setRejectReason] = useState("");
+  const [reportOrder, setReportOrder] = useState<Order | null>(null);
+  const [report, setReport] = useState<Report>(EMPTY_REPORT);
+  const [reportError, setReportError] = useState("");
 
-  const loadOrders = useCallback(async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await fetch("/api/agent-portal/orders", { cache: "no-store" });
-      const result = await response.json();
-      if (!response.ok || !result.success) throw new Error(result.message || "Không tải được dữ liệu");
+      const [ordersResponse, teamResponse] = await Promise.all([
+        fetch("/api/agent-portal/orders", { cache: "no-store" }),
+        fetch("/api/dealer/team", { cache: "no-store" }),
+      ]);
+      const result = await ordersResponse.json();
+      const team = await teamResponse.json();
+      if (!ordersResponse.ok || !result.success) throw new Error(result.message || "Không tải được lệnh");
       setDealer(result.dealer);
       setOrders(result.data || []);
       setSummary(result.summary || { revenue: 0, paid: 0, pending: 0 });
-      const [inventoryResponse, teamResponse] = await Promise.all([
-        fetch("/api/inventory", { cache: "no-store" }),
-        fetch("/api/dealer/team", { cache: "no-store" }),
-      ]);
-      const inventoryResult = await inventoryResponse.json();
-      const teamResult = await teamResponse.json();
-      if (teamResponse.ok && teamResult.success) setTechnicians((teamResult.data || []).filter((item: Technician) => item.active));
-      if (inventoryResponse.ok && inventoryResult.success) {
-        const options: InventoryOption[] = (inventoryResult.data?.warehouses || []).flatMap((warehouse: { balances?: { itemId: string; quantity: number; reserved: number; item: { sku: string; name: string; unit: string } }[] }) =>
-          (warehouse.balances || []).map((balance) => ({
-            itemId: balance.itemId,
-            sku: balance.item.sku,
-            name: balance.item.name,
-            unit: balance.item.unit,
-            available: Math.max(0, balance.quantity - balance.reserved),
-          })).filter((item: InventoryOption) => item.available > 0),
-        );
-        setInventoryItems(options);
-      }
+      if (teamResponse.ok && team.success) setTechnicians((team.data || []).filter((item: Technician) => item.active));
     } catch (error) {
       setNotice({ kind: "error", text: error instanceof Error ? error.message : "Không tải được dữ liệu" });
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   }, []);
 
-  useEffect(() => { void loadOrders(); }, [loadOrders]);
+  useEffect(() => { void load(); }, [load]);
 
-  async function updateOrder(orderId: string, payload: Record<string, unknown>) {
-    const response = await fetch(`/api/service-orders/${orderId}`, {
-      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
-    });
-    const result = await response.json();
-    if (!response.ok || !result.success) throw new Error(result.message || "Không cập nhật được lệnh");
-    await loadOrders();
+  const groups = useMemo(() => ({
+    waiting: orders.filter((item) => item.status === "ASSIGNED"),
+    doing: orders.filter((item) => ["ACCEPTED", "IN_PROGRESS"].includes(item.status)),
+    recent: orders.filter((item) => ["COMPLETED", "CANCELLED"].includes(item.status)).slice(0, 30),
+  }), [orders]);
+
+  async function request(url: string, body?: Record<string, unknown>) {
+    setBusy(true); setNotice(null);
+    try {
+      const response = await fetch(url, { method: body ? "POST" : "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || { status: "IN_PROGRESS" }) });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.message || "Không cập nhật được lệnh");
+      setNotice({ kind: "success", text: result.message || "Đã cập nhật." });
+      await load();
+      return true;
+    } catch (error) {
+      setNotice({ kind: "error", text: error instanceof Error ? error.message : "Không cập nhật được lệnh" });
+      return false;
+    } finally { setBusy(false); }
   }
 
-  async function assignTechnician(orderId: string, technicianId: string) {
-    const response = await fetch(`/api/service-orders/${orderId}/assign-technician`, {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ technicianId: technicianId || null }),
-    });
-    const result = await response.json();
-    if (!response.ok || !result.success) { setNotice({ kind: "error", text: result.message || "Không giao được KTV" }); return; }
-    setNotice({ kind: "success", text: result.message });
-    await loadOrders();
+  async function confirmAccept() {
+    if (!acceptOrder || !appointmentAt) { setNotice({ kind: "error", text: "Hãy chọn giờ hẹn đến nhà khách." }); return; }
+    const ok = await request(`/api/agent-portal/orders/${acceptOrder.id}/accept`, { appointmentAt, technicianId: assignedTech === "SELF" ? null : assignedTech });
+    if (ok) { setAcceptOrder(null); setAppointmentAt(""); setAssignedTech("SELF"); setTab("doing"); }
   }
 
-  async function uploadFile(file: File, field: "oldCorePhoto" | "newCorePhoto" | "finalPhoto") {
-    setUploading(true);
+  async function confirmReject() {
+    if (!rejectOrder || rejectReason.trim().length < 3) { setNotice({ kind: "error", text: "Hãy ghi rõ lý do không nhận được lệnh." }); return; }
+    const ok = await request(`/api/agent-portal/orders/${rejectOrder.id}/reject`, { reason: rejectReason.trim() });
+    if (ok) { setRejectOrder(null); setRejectReason(""); }
+  }
+
+  async function upload(file: File, field: "oldCorePhoto" | "newCorePhoto" | "finalPhoto") {
+    setBusy(true);
     try {
       const data = new FormData(); data.append("file", file);
       const response = await fetch("/api/upload", { method: "POST", body: data });
@@ -117,155 +116,120 @@ export default function AgentPortalPage() {
       if (!response.ok || !result.success) throw new Error(result.message || "Tải ảnh thất bại");
       setReport((current) => ({ ...current, [field]: result.url }));
       setReportError("");
-    } catch (error) {
-      setNotice({ kind: "error", text: error instanceof Error ? error.message : "Tải ảnh thất bại" });
-    } finally { setUploading(false); }
+    } catch (error) { setReportError(error instanceof Error ? error.message : "Tải ảnh thất bại"); }
+    finally { setBusy(false); }
   }
 
   async function submitReport() {
-    if (!reportOrder || submittingReport) return;
-    setReportError("");
-    if (!report.oldCorePhoto || !report.newCorePhoto || !report.finalPhoto || !report.signature.trim()) {
-      setReportError("Cần đủ ảnh lõi cũ, ảnh lõi mới, ảnh toàn cảnh sau hoàn thành và chữ ký khách hàng trước khi gửi.");
-      return;
-    }
-    setSubmittingReport(true);
-    setNotice(null);
+    if (!reportOrder) return;
+    const needsCore = isCoreService(reportOrder.serviceType);
+    if (!report.workDone.trim()) return setReportError("Hãy ghi công việc đã làm.");
+    if (!report.finalPhoto) return setReportError("Thiếu ảnh máy sau khi hoàn thành.");
+    if (needsCore && (!report.oldCorePhoto || !report.newCorePhoto)) return setReportError("Thay lõi bắt buộc có ảnh lõi cũ và lõi mới.");
+    if (report.tdsBefore === "" || report.tdsAfter === "") return setReportError("Hãy nhập TDS trước và sau khi làm.");
+    if (!report.signature.trim()) return setReportError("Hãy nhập tên khách hàng xác nhận.");
+    setBusy(true); setReportError("");
     try {
       const response = await fetch(`/api/service-orders/${reportOrder.id}/report`, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...report, materials }),
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          products: report.products,
+          note: `${report.workDone.trim()}\nTDS trước: ${report.tdsBefore} ppm | TDS sau: ${report.tdsAfter} ppm`,
+          oldCorePhoto: report.oldCorePhoto,
+          newCorePhoto: report.newCorePhoto,
+          finalPhoto: report.finalPhoto,
+          signature: report.signature,
+          coreReplacement: needsCore,
+          tdsBefore: Number(report.tdsBefore),
+          tdsAfter: Number(report.tdsAfter),
+        }),
       });
       const result = await response.json();
       if (!response.ok || !result.success) throw new Error(result.message || "Không gửi được báo cáo");
-      setReportOrder(null);
-      setReport({ products: "", note: "", oldCorePhoto: "", newCorePhoto: "", finalPhoto: "", signature: "" });
-      setMaterials([]);
-      setNotice({ kind: "success", text: result.message || "Báo cáo đã được ghi nhận và lệnh đã hoàn thành." });
-      await loadOrders();
-    } catch (error) {
-      setReportError(error instanceof Error ? error.message : "Không gửi được báo cáo");
-    } finally {
-      setSubmittingReport(false);
-    }
+      setReportOrder(null); setReport(EMPTY_REPORT); setNotice({ kind: "success", text: result.message }); setTab("recent"); await load();
+    } catch (error) { setReportError(error instanceof Error ? error.message : "Không gửi được báo cáo"); }
+    finally { setBusy(false); }
   }
 
-  const stats = useMemo(() => ({
-    assigned: orders.filter((item) => item.status === "ASSIGNED").length,
-    processing: orders.filter((item) => ["ACCEPTED", "IN_PROGRESS"].includes(item.status)).length,
-    completed: orders.filter((item) => item.status === "COMPLETED").length,
-  }), [orders]);
+  const visible = groups[tab];
+  return <main className="min-h-screen bg-slate-100">
+    <PortalHeader title="Đại lý dịch vụ" subtitle={dealer ? `${dealer.dealerCode} · ${dealer.name}` : "Đang tải hồ sơ"} homeHref="/agent-portal" homeLabel="Lệnh của tôi" onLogout={() => fetch("/api/auth/logout", { method: "POST" }).then(() => location.assign("/login"))}>
+      <Link href="/scan" className="btn-secondary"><Icon name="qr" size={16}/>Kích hoạt máy</Link>
+      <Link href="/agent-portal/team" className="btn-secondary"><Icon name="users" size={16}/>Kỹ thuật viên</Link>
+      <Link href="/agent-portal/profile" className="btn-secondary"><Icon name="store" size={16}/>Hồ sơ</Link>
+      <Link href="/agent-portal/payments" className="btn-secondary"><Icon name="wallet" size={16}/>Công dịch vụ</Link>
+    </PortalHeader>
 
-  return (
-    <main className="min-h-screen bg-slate-100">
-      <PortalHeader title="Cổng thông tin đại lý" subtitle={dealer ? `${dealer.dealerCode} · ${dealer.name}` : "Tài khoản chưa liên kết hồ sơ đại lý"} homeHref="/agent-portal" homeLabel="Lệnh dịch vụ" onLogout={() => fetch("/api/auth/logout", { method: "POST" }).then(() => location.assign("/login"))}>
-        <Link href="/scan" className="btn-primary px-4 py-2 font-bold text-white"><Icon name="qr" size={16}/>Quét QR / Kích hoạt máy</Link>
-        <Link href="/agent-portal/team" className="btn-secondary"><Icon name="users" size={16}/>Đội KTV</Link>
-        <Link href="/agent-portal/inventory" className="btn-secondary"><Icon name="package" size={16}/>Kho vật tư</Link>
-        <Link href="/agent-portal/payments" className="btn-secondary"><Icon name="wallet" size={16}/>Đối soát</Link>
-      </PortalHeader>
+    <div className="mx-auto max-w-5xl space-y-4 p-3 sm:p-6">
+      {notice && <Notice kind={notice.kind}>{notice.text}</Notice>}
+      <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <MetricCard label="Chờ nhận" value={groups.waiting.length} icon="bell" tone="amber" />
+        <MetricCard label="Đang làm" value={groups.doing.length} icon="wrench" tone="blue" />
+        <MetricCard label="Hoàn thành" value={groups.recent.filter((item) => item.status === "COMPLETED").length} icon="check" tone="emerald" />
+        <MetricCard label="Tiền công" value={money(summary.revenue)} icon="wallet" tone="violet" />
+      </section>
 
-      <div className="mx-auto max-w-7xl space-y-6 p-4 sm:p-6">
-        {notice && <Notice kind={notice.kind}>{notice.text}</Notice>}
-        <section className="surface-card border-2 border-emerald-100 bg-emerald-50/60 p-5">
-          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-            <div>
-              <p className="text-xs font-black uppercase tracking-[0.18em] text-emerald-700">Nhập dữ liệu máy mới</p>
-              <h2 className="mt-1 text-xl font-black text-slate-950">Quét QR để kích hoạt máy mới</h2>
-              <p className="mt-1 text-sm leading-6 text-slate-600">Dùng khi đại lý nhập thông tin khách hàng, địa chỉ, GPS, ảnh lắp đặt và hoàn tất kích hoạt máy.</p>
-            </div>
-            <Link href="/scan" className="btn-primary shrink-0 px-5 py-3 font-black text-white"><Icon name="qr" size={18}/>Quét QR / Nhập mã máy</Link>
+      <nav className="grid grid-cols-3 rounded-2xl bg-white p-1 shadow-sm">
+        {([[
+          "waiting", `Chờ nhận (${groups.waiting.length})`
+        ], ["doing", `Đang làm (${groups.doing.length})`], ["recent", "Gần đây"]] as [Tab, string][]).map(([key, label]) =>
+          <button key={key} type="button" onClick={() => setTab(key)} className={`rounded-xl px-2 py-3 text-sm font-black ${tab === key ? "bg-emerald-600 text-white" : "text-slate-600"}`}>{label}</button>)}
+      </nav>
+
+      {loading ? <div className="surface-card p-10 text-center text-slate-500">Đang tải lệnh...</div> : <section className="space-y-3">
+        {visible.map((order) => <article key={order.id} className="surface-card p-4 sm:p-5">
+          <div className="flex items-start justify-between gap-3"><div><p className="text-xs font-black uppercase tracking-wider text-slate-400">{order.orderCode}</p><h2 className="mt-1 text-lg font-black">{order.serviceType}</h2></div><StatusBadge value={order.status}/></div>
+
+          {tab === "waiting" ? <div className="mt-4 grid gap-2 rounded-2xl bg-amber-50 p-4 text-sm">
+            <p><strong>Khu vực:</strong> {order.area || "Chưa xác định"}</p>
+            <p><strong>Khoảng cách:</strong> {order.distanceKm == null ? "Chưa có GPS để tính" : `${order.distanceKm} km`}</p>
+            <p className="text-slate-500">Tên, số điện thoại và địa chỉ chi tiết sẽ hiện sau khi nhận lệnh.</p>
+          </div> : <div className="mt-4 space-y-2 rounded-2xl bg-slate-50 p-4 text-sm">
+            <p className="font-black text-slate-900">{order.customerName}</p>
+            {order.customerPhone && <a href={`tel:${order.customerPhone}`} className="block font-bold text-emerald-700">{order.customerPhone}</a>}
+            {order.address && <p>{order.address}</p>}
+            <p><strong>Giờ hẹn:</strong> {dateTime(order.dueDate)}</p>
+            {order.technician && <p><strong>KTV:</strong> {order.technician.name} · {order.technician.phone}</p>}
+          </div>}
+
+          <div className="mt-4 grid gap-2 sm:flex">
+            {order.status === "ASSIGNED" && <>
+              <button type="button" onClick={() => { setAcceptOrder(order); setAppointmentAt(""); setAssignedTech("SELF"); }} className="btn-primary flex-1 p-3 font-black text-white">Nhận lệnh</button>
+              <button type="button" onClick={() => { setRejectOrder(order); setRejectReason(""); }} className="rounded-xl bg-rose-600 px-4 py-3 font-black text-white">Không nhận được lệnh này?</button>
+            </>}
+            {order.status === "ACCEPTED" && !order.technician && <button type="button" disabled={busy} onClick={() => void request(`/api/service-orders/${order.id}`, undefined)} className="btn-primary flex-1 p-3 font-black text-white">Bắt đầu làm</button>}
+            {order.status === "IN_PROGRESS" && !order.technician && <button type="button" onClick={() => { setReportOrder(order); setReport(EMPTY_REPORT); setReportError(""); }} className="w-full rounded-xl bg-slate-900 p-3 font-black text-white">Báo cáo hoàn thành</button>}
           </div>
-        </section>
-        <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <MetricCard label="Lệnh mới" value={stats.assigned} icon="bell" tone="amber" />
-          <MetricCard label="Đang xử lý" value={stats.processing} icon="wrench" tone="blue" />
-          <MetricCard label="Hoàn thành" value={stats.completed} icon="check" tone="emerald" />
-          <MetricCard label="Doanh thu dự kiến" value={money(summary.revenue)} icon="wallet" tone="violet" />
-        </section>
-        <section className="grid gap-4 md:grid-cols-2"><article className="surface-card p-5"><p className="font-bold text-slate-500">Đã thanh toán</p><p className="mt-1 text-2xl font-black text-emerald-700">{money(summary.paid)}</p></article><article className="surface-card p-5"><p className="font-bold text-slate-500">Chờ duyệt thanh toán</p><p className="mt-1 text-2xl font-black text-amber-700">{money(summary.pending)}</p></article></section>
+        </article>)}
+        {!visible.length && <div className="surface-card p-12 text-center text-slate-500"><Icon name="check" size={34} className="mx-auto mb-2"/><p className="font-bold">Không có lệnh trong mục này.</p></div>}
+      </section>}
+    </div>
 
-        <section className="table-shell">
-          <div className="border-b p-4 sm:p-5">
-            <h2 className="text-xl font-black">Lệnh dịch vụ được giao</h2>
-          </div>
+    {acceptOrder && <Modal title="Nhận lệnh" onClose={() => setAcceptOrder(null)}><div className="space-y-4">
+      <div className="rounded-xl bg-emerald-50 p-3 text-sm"><strong>{acceptOrder.serviceType}</strong><br/>{acceptOrder.area} {acceptOrder.distanceKm != null ? `· ${acceptOrder.distanceKm} km` : ""}</div>
+      <label className="block"><span className="field-label">Giờ hẹn đến nhà khách *</span><input type="datetime-local" value={appointmentAt} min={new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0,16)} onChange={(e) => setAppointmentAt(e.target.value)} required className="w-full"/></label>
+      <label className="block"><span className="field-label">Người thực hiện *</span><select value={assignedTech} onChange={(e) => setAssignedTech(e.target.value)} className="w-full"><option value="SELF">Tôi tự làm</option>{technicians.map((tech) => <option key={tech.id} value={tech.id}>{tech.name} · {tech.phone}</option>)}</select></label>
+      <button type="button" disabled={busy} onClick={() => void confirmAccept()} className="btn-primary w-full p-3 font-black text-white disabled:opacity-50">{busy ? "Đang nhận..." : "Nhận lệnh"}</button>
+    </div></Modal>}
 
-          <div className="hidden overflow-x-auto md:block"><table className="min-w-full text-sm"><thead className="text-left"><tr>{["Mã lệnh", "Khách hàng", "Địa chỉ", "Thiết bị", "Dịch vụ", "KTV phụ trách", "Hạn xử lý", "Trạng thái", "Thao tác"].map((item) => <th key={item} className="p-3">{item}</th>)}</tr></thead><tbody>
-            {orders.map((order) => <tr key={order.id} className="border-b align-top"><td className="p-3 font-black">{order.orderCode}</td><td className="p-3"><strong>{order.customerName}</strong><br/><a href={`tel:${order.customerPhone}`} className="text-emerald-700">{order.customerPhone}</a></td><td className="max-w-xs p-3">{order.address || "Chưa cập nhật"}</td><td className="p-3"><Link href={`/qr/${order.machine?.id || ""}`} className="font-bold text-blue-700">{order.machine?.id}</Link><div className="mt-2 flex gap-2">{order.machine?.buildingPhoto && <a href={order.machine.buildingPhoto} target="_blank" className="text-xs underline">Mặt tiền</a>}{order.machine?.machinePhoto && <a href={order.machine.machinePhoto} target="_blank" className="text-xs underline">Vị trí máy</a>}</div></td><td className="p-3">{order.serviceType}</td><td className="min-w-48 p-3"><select value={order.technician?.id || ""} onChange={(event) => void assignTechnician(order.id, event.target.value)} disabled={["COMPLETED","CANCELLED"].includes(order.status)} className="rounded-lg border p-2 text-xs"><option value="">Chưa giao KTV</option>{technicians.map((technician)=><option key={technician.id} value={technician.id}>{technician.name} · {technician.phone}</option>)}</select></td><td className="p-3">{formatDate(order.dueDate)}</td><td className="p-3"><StatusBadge value={order.status}/></td><td className="p-3"><div className="flex min-w-40 flex-col gap-2">
-              {order.status === "ASSIGNED" && <><button type="button" onClick={() => updateOrder(order.id, { status: "ACCEPTED" }).catch((e: Error) => setNotice({ kind: "error", text: e.message }))} className="rounded-lg bg-emerald-600 px-3 py-2 font-bold text-white">Đồng ý</button><button type="button" onClick={() => setRejectOrder(order)} className="rounded-lg bg-rose-600 px-3 py-2 font-bold text-white">Từ chối</button></>}
-              {order.status === "ACCEPTED" && <button type="button" onClick={() => updateOrder(order.id, { status: "IN_PROGRESS" }).catch((e: Error) => setNotice({ kind: "error", text: e.message }))} className="rounded-lg bg-blue-600 px-3 py-2 font-bold text-white">Bắt đầu xử lý</button>}
-              {order.status === "IN_PROGRESS" && <button type="button" onClick={() => { setReportError(""); setReportOrder(order); }} className="rounded-lg bg-slate-900 px-3 py-2 font-bold text-white">Gửi báo cáo</button>}
-            </div></td></tr>)}
-            {!loading && orders.length === 0 && <tr><td colSpan={9} className="p-10 text-center text-slate-500">Chưa có lệnh dịch vụ.</td></tr>}
-          </tbody></table></div>
+    {rejectOrder && <Modal title="Từ chối lệnh" onClose={() => setRejectOrder(null)}><div className="space-y-4"><p className="text-sm text-slate-600">Ghi rõ lý do để CSKH có thể điều phối lại đúng nơi.</p><textarea value={rejectReason} onChange={(e) => setRejectReason(e.target.value)} rows={4} placeholder="Ví dụ: Hôm nay không đủ nhân sự / ngoài phạm vi phục vụ..." className="w-full"/><button type="button" disabled={busy} onClick={() => void confirmReject()} className="w-full rounded-xl bg-rose-600 p-3 font-black text-white">Từ chối lệnh</button></div></Modal>}
 
-          <div className="divide-y divide-slate-100 md:hidden">
-            {orders.map((order) => (
-              <article key={order.id} className="p-4">
-                <div className="flex min-w-0 items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="break-all text-base font-black text-slate-950">{order.orderCode}</p>
-                    <p className="mt-1 break-words text-sm font-bold text-slate-700">{order.customerName}</p>
-                    <a href={`tel:${order.customerPhone}`} className="mt-1 block text-sm font-bold text-emerald-700">{order.customerPhone}</a>
-                  </div>
-                  <StatusBadge value={order.status}/>
-                </div>
-
-                <div className="mt-3 space-y-2 rounded-2xl bg-slate-50 p-3 text-sm leading-6 text-slate-600">
-                  <p><strong className="text-slate-800">Máy:</strong> <Link href={`/qr/${order.machine?.id || ""}`} className="break-all font-bold text-blue-700">{order.machine?.id || "—"}</Link></p>
-                  <p><strong className="text-slate-800">Dịch vụ:</strong> {order.serviceType}</p>
-                  <p><strong className="text-slate-800">Hạn:</strong> {formatDate(order.dueDate)}</p>
-                  <p className="break-words"><strong className="text-slate-800">Địa chỉ:</strong> {order.address || "Chưa cập nhật"}</p>
-                </div>
-
-                <label className="mt-3 block">
-                  <span className="field-label">KTV phụ trách</span>
-                  <select value={order.technician?.id || ""} onChange={(event) => void assignTechnician(order.id, event.target.value)} disabled={["COMPLETED","CANCELLED"].includes(order.status)} className="w-full rounded-xl border p-3 text-sm">
-                    <option value="">Chưa giao KTV</option>
-                    {technicians.map((technician)=><option key={technician.id} value={technician.id}>{technician.name} · {technician.phone}</option>)}
-                  </select>
-                </label>
-
-                {(order.machine?.buildingPhoto || order.machine?.machinePhoto) && <div className="mt-3 flex flex-wrap gap-2 text-xs">
-                  {order.machine?.buildingPhoto && <a href={order.machine.buildingPhoto} target="_blank" className="btn-secondary px-3 py-2">Ảnh mặt tiền</a>}
-                  {order.machine?.machinePhoto && <a href={order.machine.machinePhoto} target="_blank" className="btn-secondary px-3 py-2">Ảnh vị trí máy</a>}
-                </div>}
-
-                <div className="mobile-stack-actions mt-3 flex gap-2">
-                  {order.status === "ASSIGNED" && <><button type="button" onClick={() => updateOrder(order.id, { status: "ACCEPTED" }).catch((e: Error) => setNotice({ kind: "error", text: e.message }))} className="btn-primary px-3 py-3 font-black text-white">Đồng ý nhận lệnh</button><button type="button" onClick={() => setRejectOrder(order)} className="warning-button px-3 py-3">Từ chối</button></>}
-                  {order.status === "ACCEPTED" && <button type="button" onClick={() => updateOrder(order.id, { status: "IN_PROGRESS" }).catch((e: Error) => setNotice({ kind: "error", text: e.message }))} className="btn-primary px-3 py-3 font-black text-white">Bắt đầu xử lý</button>}
-                  {order.status === "IN_PROGRESS" && <button type="button" onClick={() => { setReportError(""); setReportOrder(order); }} className="w-full rounded-xl bg-slate-900 px-3 py-3 font-black text-white">Gửi báo cáo</button>}
-                </div>
-              </article>
-            ))}
-            {!loading && orders.length === 0 && <p className="p-8 text-center text-sm text-slate-500">Chưa có lệnh dịch vụ.</p>}
-          </div>
-        </section>
-      </div>
-
-      {rejectOrder && <Modal title={`Từ chối ${rejectOrder.orderCode}`} onClose={() => setRejectOrder(null)}><select value={rejectReason} onChange={(e) => setRejectReason(e.target.value)} className="w-full rounded-xl border p-3"><option>Bận</option><option>Xa quá</option><option>Không đúng chuyên môn</option><option>Thiếu vật tư</option><option>Khác</option></select><button type="button" onClick={() => updateOrder(rejectOrder.id, { status: "NEW", dealerId: null, rejectReason }).then(() => setRejectOrder(null)).catch((e: Error) => setNotice({ kind: "error", text: e.message }))} className="mt-4 w-full rounded-xl bg-rose-600 p-3 font-bold text-white">Xác nhận từ chối</button></Modal>}
-      {reportOrder && <Modal title={`Báo cáo ${reportOrder.orderCode}`} onClose={() => { setReportOrder(null); setMaterials([]); setReportError(""); }}><div className="space-y-4">
-        <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm font-bold text-amber-900">Bắt buộc đủ ảnh lõi cũ, ảnh lõi mới, ảnh toàn cảnh sau hoàn thành và chữ ký/xác nhận khách hàng. Thiếu mục nào hệ thống sẽ báo ngay khi bấm gửi.</div>
-        <Field label="Vật tư xuất từ kho đại lý">
-          <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
-            {materials.map((row, index) => {
-              const selected = inventoryItems.find((item) => item.itemId === row.itemId);
-              return <div key={`${row.itemId}-${index}`} className="grid gap-2 sm:grid-cols-[1fr_110px_44px]">
-                <select value={row.itemId} onChange={(event) => setMaterials((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, itemId: event.target.value } : item))} className="rounded-lg border bg-white p-2.5">
-                  <option value="">Chọn vật tư</option>{inventoryItems.map((item) => <option key={item.itemId} value={item.itemId}>{item.sku} · {item.name} · còn {item.available} {item.unit}</option>)}
-                </select>
-                <input type="number" min={1} max={selected?.available || undefined} value={row.quantity} onChange={(event) => setMaterials((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, quantity: Math.max(1, Number(event.target.value) || 1) } : item))} className="rounded-lg border bg-white p-2.5" aria-label="Số lượng vật tư"/>
-                <button type="button" onClick={() => setMaterials((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="icon-button" title="Bỏ vật tư"><Icon name="x" size={17}/></button>
-              </div>;
-            })}
-            <button type="button" disabled={!inventoryItems.length} onClick={() => setMaterials((current) => [...current, { itemId: inventoryItems.find((item) => !current.some((row) => row.itemId === item.itemId))?.itemId || inventoryItems[0]?.itemId || "", quantity: 1 }])} className="btn-secondary w-full justify-center disabled:opacity-50"><Icon name="plus" size={16}/>{inventoryItems.length ? "Thêm vật tư đã sử dụng" : "Kho chưa có vật tư khả dụng"}</button>
-            <p className="text-xs text-slate-500">Khi gửi báo cáo, hệ thống kiểm tra tồn rồi tự tạo phiếu xuất gắn với lệnh này.</p>
-          </div>
-        </Field>
-        <Field label="Mô tả sản phẩm/vật tư khác"><input value={report.products} onChange={(e) => setReport((c) => ({ ...c, products: e.target.value }))} placeholder="Chỉ nhập khi có vật tư chưa nằm trong kho" className="w-full rounded-xl border p-3" /></Field><UploadField label="Ảnh lõi cũ *" value={report.oldCorePhoto} onChange={(file) => uploadFile(file, "oldCorePhoto")} /><UploadField label="Ảnh lõi mới *" value={report.newCorePhoto} onChange={(file) => uploadFile(file, "newCorePhoto")} /><UploadField label="Ảnh toàn cảnh sau hoàn thành *" value={report.finalPhoto} onChange={(file) => uploadFile(file, "finalPhoto")} /><Field label="Xác nhận chữ ký khách hàng *"><input required value={report.signature} onChange={(e) => { setReport((c) => ({ ...c, signature: e.target.value })); setReportError(""); }} placeholder="Nhập họ tên khách hàng đã xác nhận" className="w-full rounded-xl border p-3" /></Field><Field label="Ghi chú"><textarea value={report.note} onChange={(e) => setReport((c) => ({ ...c, note: e.target.value }))} className="w-full rounded-xl border p-3" /></Field>{reportError && <div role="alert" aria-live="assertive" className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm font-bold text-rose-700">{reportError}</div>}<button type="button" disabled={uploading || submittingReport} onClick={submitReport} className="w-full rounded-xl bg-emerald-600 p-3 font-black text-white disabled:opacity-50">{uploading ? "Đang tải ảnh..." : submittingReport ? "Đang gửi báo cáo..." : "Gửi báo cáo hoàn thành"}</button></div></Modal>}
-    </main>
-  );
+    {reportOrder && <Modal title={`Báo cáo ${reportOrder.orderCode}`} onClose={() => setReportOrder(null)} wide><div className="space-y-4">
+      <label className="block"><span className="field-label">Công việc đã làm *</span><textarea rows={3} value={report.workDone} onChange={(e) => setReport({ ...report, workDone: e.target.value })} className="w-full"/></label>
+      <label className="block"><span className="field-label">Vật tư đã thay</span><input value={report.products} onChange={(e) => setReport({ ...report, products: e.target.value })} placeholder="Tên vật tư, số lượng" className="w-full"/></label>
+      {isCoreService(reportOrder.serviceType) && <><Photo label="Ảnh lõi cũ *" value={report.oldCorePhoto} onFile={(f) => void upload(f, "oldCorePhoto")}/><Photo label="Ảnh lõi mới *" value={report.newCorePhoto} onFile={(f) => void upload(f, "newCorePhoto")}/></>}
+      <Photo label="Ảnh máy sau khi làm xong *" value={report.finalPhoto} onFile={(f) => void upload(f, "finalPhoto")}/>
+      <div className="grid grid-cols-2 gap-3"><label><span className="field-label">TDS trước *</span><input type="number" min="0" inputMode="decimal" value={report.tdsBefore} onChange={(e) => setReport({ ...report, tdsBefore: e.target.value })}/></label><label><span className="field-label">TDS sau *</span><input type="number" min="0" inputMode="decimal" value={report.tdsAfter} onChange={(e) => setReport({ ...report, tdsAfter: e.target.value })}/></label></div>
+      <label className="block"><span className="field-label">Tên khách xác nhận *</span><input value={report.signature} onChange={(e) => setReport({ ...report, signature: e.target.value })} className="w-full"/></label>
+      {reportError && <div className="rounded-xl bg-rose-50 p-3 text-sm font-bold text-rose-700">{reportError}</div>}
+      <button type="button" disabled={busy} onClick={() => void submitReport()} className="btn-primary w-full p-3 font-black text-white">{busy ? "Đang gửi..." : "Gửi báo cáo hoàn thành"}</button>
+    </div></Modal>}
+  </main>;
 }
 
-function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) { return <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4"><div className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-2xl bg-white p-6"><div className="mb-5 flex justify-between gap-4"><h3 className="text-xl font-black">{title}</h3><button type="button" onClick={onClose} className="icon-button"><Icon name="x" size={18}/></button></div>{children}</div></div>; }
-function Field({ label, children }: { label: string; children: React.ReactNode }) { return <label className="block"><span className="mb-1 block text-sm font-bold">{label}</span>{children}</label>; }
-function UploadField({ label, value, onChange }: { label: string; value: string; onChange: (file: File) => void }) { return <Field label={label}><input type="file" accept="image/*" capture="environment" onChange={(event: ChangeEvent<HTMLInputElement>) => { const file = event.target.files?.[0]; if (file) onChange(file); }} className="w-full rounded-xl border p-3" />{value && <a href={value} target="_blank" className="mt-1 block text-sm font-bold text-emerald-700">Xem ảnh đã tải</a>}</Field>; }
+function Modal({ title, children, onClose, wide = false }: { title: string; children: React.ReactNode; onClose: () => void; wide?: boolean }) {
+  return <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-3"><div className={`max-h-[94vh] w-full overflow-y-auto rounded-3xl bg-white p-5 ${wide ? "max-w-2xl" : "max-w-md"}`}><div className="mb-5 flex items-center justify-between"><h3 className="text-xl font-black">{title}</h3><button type="button" onClick={onClose} className="icon-button"><Icon name="x" size={18}/></button></div>{children}</div></div>;
+}
+function Photo({ label, value, onFile }: { label: string; value: string; onFile: (file: File) => void }) {
+  return <label className="block"><span className="field-label">{label}</span><input type="file" accept="image/*" capture="environment" onChange={(e: ChangeEvent<HTMLInputElement>) => { const file = e.target.files?.[0]; if (file) onFile(file); }}/>{value && <a href={value} target="_blank" className="mt-1 block text-sm font-bold text-emerald-700">Xem ảnh đã chọn</a>}</label>;
+}
